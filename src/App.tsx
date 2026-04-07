@@ -2,17 +2,24 @@ import { FormEvent, useEffect, useMemo, useState, useCallback } from "react";
 import { useAuthStore } from "./stores/authStore";
 import { useMessagesStore } from "./stores/messagesStore";
 import { useSocketStore } from "./stores/socketStore";
+import { useProfilesStore } from "./stores/profilesStore";
 import * as api from "./lib/api";
 import type { Conversation } from "./lib/api";
+import { UserProfilePopover } from "./components/UserProfilePopover";
+import { ProfileSettings } from "./components/ProfileSettings";
 
 function App() {
   const [appVersion, setAppVersion] = useState("-");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
+
+  const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
+  const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
 
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -22,11 +29,18 @@ function App() {
   const { user, clearSession, token, loading, error, login, signup } = useAuthStore();
   const { connected, connect, disconnect, socket } = useSocketStore();
   const { byConversation, upsertMessage } = useMessagesStore();
+  const profiles = useProfilesStore();
 
   const selectedConversation = useMemo(
     () => conversations.find((c) => c.id === selectedConvId) ?? null,
     [conversations, selectedConvId]
   );
+
+  const dmPartner = useMemo(() => {
+    if (!selectedConversation || !user) return null;
+    if (selectedConversation.type !== "dm") return null;
+    return selectedConversation.members.find((m) => m.user.id !== user.id)?.user ?? null;
+  }, [selectedConversation, user]);
 
   const messages = useMemo(
     () => (selectedConvId ? byConversation[selectedConvId] ?? [] : []),
@@ -39,6 +53,21 @@ function App() {
     const other = selectedConversation.members.find((m) => m.user.id !== user.id);
     return other?.user.username ?? selectedConversation.name ?? "Chat";
   }, [selectedConversation, user]);
+
+  const openProfilePopover = useCallback(
+    async (userId: string, anchorEl?: HTMLElement | null) => {
+      if (!token) return;
+      setProfilePopoverUserId(userId);
+      setProfilePopoverAnchor(anchorEl ? anchorEl.getBoundingClientRect() : null);
+      await profiles.fetchProfile(userId, token);
+    },
+    [profiles, token]
+  );
+
+  const closeProfilePopover = useCallback(() => {
+    setProfilePopoverUserId(null);
+    setProfilePopoverAnchor(null);
+  }, []);
 
   /* ───── Electron version ───── */
   useEffect(() => {
@@ -70,6 +99,11 @@ function App() {
     loadConversations();
   }, [loadConversations]);
 
+  useEffect(() => {
+    if (!token || !user) return;
+    profiles.fetchMe(token, user.id);
+  }, [token, user?.id]);
+
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -77,6 +111,7 @@ function App() {
       for (const m of msgs) {
         upsertMessage(selectedConvId, {
           id: m.id,
+          senderId: m.sender.id,
           sender: m.sender.username,
           cipherText: m.ciphertext,
           nonce: m.nonce,
@@ -138,6 +173,7 @@ function App() {
       );
       setConversations((prev) => [conv, ...prev]);
       setSelectedConvId(conv.id);
+      setMainView("chat");
       setSearch("");
       setSearchResults([]);
     } catch {
@@ -353,12 +389,25 @@ function App() {
           </div>
 
           <button
+            className="mt-3 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text hover:border-white/20"
+            onClick={() => {
+              setMainView("profile-settings");
+              setSelectedConvId(null);
+              closeProfilePopover();
+            }}
+          >
+            Profile Settings
+          </button>
+
+          <button
             className="mt-4 w-full rounded-lg bg-orbit-danger px-3 py-2 text-sm font-semibold text-white"
             onClick={() => {
               clearSession();
               setSelectedConvId(null);
               setSearch("");
               setConversations([]);
+              setMainView("chat");
+              closeProfilePopover();
             }}
           >
             Sign Out
@@ -366,7 +415,17 @@ function App() {
         </aside>
 
         {/* ───── Main content area ───── */}
-        {!selectedConversation ? (
+        {mainView === "profile-settings" && token && user ? (
+          <main className="bg-[radial-gradient(circle_at_20%_0%,rgba(45,212,191,0.12),transparent_40%),linear-gradient(160deg,#0d1117_10%,#101a2f_100%)]">
+            <ProfileSettings
+              token={token}
+              myUserId={user.id}
+              onClose={() => {
+                setMainView("chat");
+              }}
+            />
+          </main>
+        ) : !selectedConversation ? (
           <main className="flex items-center justify-center bg-[radial-gradient(circle_at_20%_10%,rgba(45,212,191,0.18),transparent_35%),linear-gradient(160deg,#0b1321_5%,#12192a_45%,#0c111b_100%)] p-8">
             <div className="max-w-xl rounded-3xl border border-white/10 bg-slate-950/60 p-8 text-center shadow-2xl backdrop-blur-lg">
               <h2 className="text-3xl font-bold">Welcome back, {user.username}</h2>
@@ -385,7 +444,15 @@ function App() {
           <main className="flex flex-col bg-[radial-gradient(circle_at_20%_0%,rgba(45,212,191,0.12),transparent_40%),linear-gradient(160deg,#0d1117_10%,#101a2f_100%)]">
             <header className="flex items-center justify-between border-b border-slate-800 p-4">
               <div>
-                <h2 className="text-base font-semibold">@{dmPartnerName}</h2>
+                <button
+                  className="text-left text-base font-semibold text-orbit-text hover:underline"
+                  onClick={(e) => {
+                    if (!dmPartner?.id) return;
+                    openProfilePopover(dmPartner.id, e.currentTarget);
+                  }}
+                >
+                  @{dmPartnerName}
+                </button>
                 <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
               </div>
               <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Enabled</span>
@@ -399,7 +466,12 @@ function App() {
                 const mine = msg.sender === user.username;
                 return (
                   <article key={msg.id} className={`max-w-[80%] rounded-2xl p-3 text-sm ${mine ? "ml-auto bg-orbit-accent/20" : "bg-orbit-panel/90"}`}>
-                    <p className="font-semibold text-orbit-accent">{msg.sender}</p>
+                    <button
+                      className="font-semibold text-orbit-accent hover:underline"
+                      onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                    >
+                      {msg.sender}
+                    </button>
                     <p className="mt-1 break-all text-orbit-text">{msg.cipherText}</p>
                   </article>
                 );
@@ -430,6 +502,20 @@ function App() {
             </footer>
           </main>
         )}
+
+        <UserProfilePopover
+          open={Boolean(profilePopoverUserId)}
+          anchorRect={profilePopoverAnchor}
+          profile={profilePopoverUserId ? profiles.byId[profilePopoverUserId] ?? null : null}
+          loading={profilePopoverUserId ? profiles.loadingById[profilePopoverUserId] ?? false : false}
+          error={profilePopoverUserId ? profiles.errorById[profilePopoverUserId] ?? null : null}
+          onClose={closeProfilePopover}
+          canEdit={Boolean(user && profilePopoverUserId && user.id === profilePopoverUserId)}
+          onEditClick={() => {
+            setMainView("profile-settings");
+            setSelectedConvId(null);
+          }}
+        />
       </div>
     </div>
   );

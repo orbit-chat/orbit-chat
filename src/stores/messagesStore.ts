@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 export type ChatMessage = {
   id: string;
+  senderId: string;
   sender: string;
   cipherText: string;
   nonce?: string;
