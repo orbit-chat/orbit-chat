@@ -133,7 +133,7 @@ export function UserProfilePopover({
   };
 
   return (
-    <div ref={cardRef} style={style} className="overflow-hidden rounded-2xl border border-white/10 bg-orbit-panel shadow-2xl">
+    <div ref={cardRef} style={style} className="orbit-card-solid overflow-hidden rounded-2xl shadow-2xl">
       {/* Banner */}
       <div
         className="relative h-24 bg-gradient-to-r from-orbit-accent/30 to-orbit-danger/25"
@@ -166,7 +166,7 @@ export function UserProfilePopover({
 
           {canEdit && (
             <button
-              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-orbit-text hover:border-white/20"
+              className="orbit-btn px-3 py-2 text-xs"
               onClick={handleEdit}
             >
               Edit profile

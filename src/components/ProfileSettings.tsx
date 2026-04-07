@@ -90,18 +90,18 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
           <h2 className="text-xl font-bold text-orbit-text">Profile Settings</h2>
           <p className="mt-1 text-sm text-orbit-muted">Update your profile card, status, and links.</p>
         </div>
-        <button className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:border-white/20" onClick={onClose}>
+        <button className="orbit-btn" onClick={onClose}>
           Back
         </button>
       </div>
 
       {error && <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{error}</div>}
 
-      <div className="mt-6 overflow-hidden rounded-3xl border border-white/10 bg-orbit-panel">
+      <div className="orbit-card-solid mt-6 overflow-hidden rounded-3xl">
         <div className="relative h-36 bg-gradient-to-r from-orbit-accent/30 to-orbit-danger/25" style={bannerStyle}>
           <div className="absolute inset-0 bg-black/35" />
           <div className="absolute right-4 top-4">
-            <label className="cursor-pointer rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs font-semibold text-orbit-text hover:border-white/20">
+            <label className="cursor-pointer rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs font-semibold text-orbit-text transition hover:border-white/20">
               Change banner
               <input
                 className="hidden"
@@ -153,9 +153,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
           <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Display name</span>
+                <span className="orbit-label">Display name</span>
                 <input
-                  className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-input"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="Optional"
@@ -163,9 +163,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Pronouns</span>
+                <span className="orbit-label">Pronouns</span>
                 <input
-                  className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-input"
                   value={pronouns}
                   onChange={(e) => setPronouns(e.target.value)}
                   placeholder="e.g. she/her"
@@ -174,9 +174,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
             </div>
 
             <label className="block">
-              <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Bio</span>
+              <span className="orbit-label">Bio</span>
               <textarea
-                className="min-h-[92px] w-full resize-y rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                className="orbit-textarea"
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
                 placeholder="A short description about you…"
@@ -185,9 +185,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
 
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Presence</span>
+                <span className="orbit-label">Presence</span>
                 <select
-                  className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-select"
                   value={presence}
                   onChange={(e) => setPresence(e.target.value as api.Presence)}
                 >
@@ -199,9 +199,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Timezone</span>
+                <span className="orbit-label">Timezone</span>
                 <input
-                  className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-input"
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
                   placeholder="e.g. America/New_York"
@@ -211,9 +211,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
 
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Status text</span>
+                <span className="orbit-label">Status text</span>
                 <input
-                  className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-input"
                   value={statusText}
                   onChange={(e) => setStatusText(e.target.value)}
                   placeholder="What’s up?"
@@ -221,9 +221,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Status emoji</span>
+                <span className="orbit-label">Status emoji</span>
                 <input
-                  className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-input"
                   value={statusEmoji}
                   onChange={(e) => setStatusEmoji(e.target.value)}
                   placeholder="e.g. 🙂"
@@ -236,7 +236,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Links</p>
                 <button
                   type="button"
-                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold hover:border-white/20"
+                  className="orbit-btn px-3 py-2 text-xs"
                   onClick={() => setLinks((prev) => [...prev, { label: "", url: "" }])}
                 >
                   Add link
@@ -248,7 +248,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                 {links.map((l, idx) => (
                   <div key={idx} className="grid gap-3 md:grid-cols-[1fr_1.6fr_auto]">
                     <input
-                      className="w-full rounded-xl border border-white/10 bg-orbit-panel px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                      className="orbit-input bg-orbit-panel"
                       value={l.label}
                       onChange={(e) =>
                         setLinks((prev) => prev.map((row, i) => (i === idx ? { ...row, label: e.target.value } : row)))
@@ -256,7 +256,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                       placeholder="Label"
                     />
                     <input
-                      className="w-full rounded-xl border border-white/10 bg-orbit-panel px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                      className="orbit-input bg-orbit-panel"
                       value={l.url}
                       onChange={(e) =>
                         setLinks((prev) => prev.map((row, i) => (i === idx ? { ...row, url: e.target.value } : row)))
@@ -265,7 +265,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                     />
                     <button
                       type="button"
-                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm hover:border-white/20"
+                      className="orbit-btn px-3 py-3 text-sm"
                       onClick={() => setLinks((prev) => prev.filter((_, i) => i !== idx))}
                       aria-label="Remove link"
                     >
@@ -277,12 +277,12 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
             </div>
 
             <div className="flex items-center justify-end gap-3">
-              <button type="button" className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm hover:border-white/20" onClick={onClose}>
+              <button type="button" className="orbit-btn px-4 py-3" onClick={onClose}>
                 Cancel
               </button>
               <button
                 disabled={loading}
-                className="rounded-xl bg-orbit-accent px-5 py-3 text-sm font-bold text-slate-950 transition hover:brightness-110 disabled:opacity-50"
+                className="orbit-btn-primary px-5 py-3"
               >
                 {loading ? "Saving…" : "Save changes"}
               </button>

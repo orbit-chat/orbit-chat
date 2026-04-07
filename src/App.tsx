@@ -205,9 +205,8 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (!user) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-[#090c13] p-6 text-orbit-text">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(45,212,191,0.18),transparent_30%),radial-gradient(circle_at_85%_80%,rgba(251,113,133,0.2),transparent_32%),linear-gradient(120deg,#05070d_0%,#101725_45%,#0a1220_100%)]" />
-        <section className="relative z-10 w-full max-w-5xl rounded-3xl border border-white/10 bg-slate-950/75 p-8 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+        <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
             <div className="space-y-6">
               <span className="inline-flex items-center gap-2 rounded-full border border-orbit-accent/40 px-3 py-1 text-xs uppercase tracking-[0.18em] text-orbit-accent">
@@ -227,8 +226,8 @@ function App() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-6">
-              <div className="mb-6 flex rounded-xl bg-slate-800/70 p-1">
+            <div className="rounded-2xl border border-white/10 bg-orbit-panel p-6">
+              <div className="mb-6 flex rounded-xl border border-white/10 bg-orbit-panelAlt p-1">
                 <button
                   className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
                     authMode === "login" ? "bg-orbit-accent text-slate-950" : "text-slate-300"
@@ -255,9 +254,9 @@ function App() {
 
               <form className="space-y-4" onSubmit={handleAuthSubmit}>
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Email</span>
+                  <span className="orbit-label">Email</span>
                   <input
-                    className="w-full rounded-xl border border-white/10 bg-slate-800/70 px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                    className="orbit-input"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="you@example.com"
@@ -267,9 +266,9 @@ function App() {
                 </label>
                 {authMode === "signup" && (
                   <label className="block">
-                    <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Username</span>
+                    <span className="orbit-label">Username</span>
                     <input
-                      className="w-full rounded-xl border border-white/10 bg-slate-800/70 px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                      className="orbit-input"
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
                       placeholder="your-name"
@@ -278,9 +277,9 @@ function App() {
                   </label>
                 )}
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Password</span>
+                  <span className="orbit-label">Password</span>
                   <input
-                    className="w-full rounded-xl border border-white/10 bg-slate-800/70 px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                    className="orbit-input"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder="********"
@@ -290,7 +289,7 @@ function App() {
                 </label>
                 <button
                   disabled={loading}
-                  className="w-full rounded-xl bg-orbit-accent px-4 py-3 text-sm font-bold text-slate-950 transition hover:brightness-110 disabled:opacity-50"
+                  className="orbit-btn-primary w-full"
                 >
                   {loading ? "Please wait..." : authMode === "login" ? "Login" : "Create Account"}
                 </button>
@@ -306,28 +305,28 @@ function App() {
   /*  MAIN CHAT SCREEN                                    */
   /* ════════════════════════════════════════════════════ */
   return (
-    <div className="h-screen overflow-hidden bg-[#070a11] text-orbit-text">
+    <div className="h-screen overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt text-orbit-text">
       <div className="grid h-full grid-cols-[82px_320px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="border-r border-slate-800/70 bg-black/35 p-3">
+        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-3">
           <div className="mb-4 flex items-center justify-center rounded-xl bg-orbit-accent/15 p-2">
             <img src="logo.png" alt="Orbit Chat logo" className="h-10 w-10 rounded-xl object-cover" />
           </div>
           <div className="space-y-3 text-center text-xs text-orbit-muted">
-            <div className="rounded-lg bg-orbit-panel/90 p-2">DM</div>
-            <div className="rounded-lg bg-orbit-panel/90 p-2">Friends</div>
-            <div className="rounded-lg bg-orbit-panel/90 p-2">Archive</div>
+            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">DM</div>
+            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Friends</div>
+            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Archive</div>
           </div>
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="border-r border-slate-800/70 bg-orbit-panel p-4">
+        <aside className="border-r border-white/10 bg-orbit-panel p-4">
           <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
           <p className="mt-1 text-sm text-orbit-muted">Search users and start secure chats</p>
 
           <label className="mt-4 block">
             <input
-              className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-2 text-sm outline-none transition focus:border-orbit-accent"
+              className="orbit-input py-2"
               placeholder="Search username..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -337,11 +336,11 @@ function App() {
           {/* Search results */}
           {searchResults.length > 0 && (
             <div className="mt-2 space-y-1">
-              <p className="text-xs text-slate-500">Search results</p>
+              <p className="text-xs text-orbit-muted">Search results</p>
               {searchResults.map((u) => (
                 <button
                   key={u.id}
-                  className="w-full rounded-xl border border-white/5 bg-orbit-panelAlt p-2 text-left text-sm hover:border-white/20"
+                  className="orbit-btn w-full justify-start bg-orbit-panelAlt text-left"
                   onClick={() => startDM(u)}
                 >
                   @{u.username}
@@ -377,19 +376,19 @@ function App() {
               );
             })}
             {conversations.length === 0 && (
-              <p className="text-xs text-slate-500">No conversations yet. Search for a user above to start one.</p>
+              <p className="text-xs text-orbit-muted">No conversations yet. Search for a user above to start one.</p>
             )}
           </div>
 
-          <div className="mt-4 rounded-xl bg-orbit-panelAlt p-4 text-sm">
-            <p>Build {appVersion}</p>
+          <div className="orbit-card-solid mt-4 rounded-xl bg-orbit-panelAlt p-4 text-sm">
+            <p className="font-semibold">Build {appVersion}</p>
             <p className={connected ? "text-emerald-400" : "text-rose-400"}>
               Socket: {connected ? "Connected" : "Disconnected"}
             </p>
           </div>
 
           <button
-            className="mt-3 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text hover:border-white/20"
+            className="orbit-btn mt-3 w-full"
             onClick={() => {
               setMainView("profile-settings");
               setSelectedConvId(null);
@@ -400,7 +399,7 @@ function App() {
           </button>
 
           <button
-            className="mt-4 w-full rounded-lg bg-orbit-danger px-3 py-2 text-sm font-semibold text-white"
+            className="orbit-btn-danger mt-3 w-full"
             onClick={() => {
               clearSession();
               setSelectedConvId(null);
@@ -416,7 +415,7 @@ function App() {
 
         {/* ───── Main content area ───── */}
         {mainView === "profile-settings" && token && user ? (
-          <main className="bg-[radial-gradient(circle_at_20%_0%,rgba(45,212,191,0.12),transparent_40%),linear-gradient(160deg,#0d1117_10%,#101a2f_100%)]">
+          <main className="bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
             <ProfileSettings
               token={token}
               myUserId={user.id}
@@ -426,8 +425,8 @@ function App() {
             />
           </main>
         ) : !selectedConversation ? (
-          <main className="flex items-center justify-center bg-[radial-gradient(circle_at_20%_10%,rgba(45,212,191,0.18),transparent_35%),linear-gradient(160deg,#0b1321_5%,#12192a_45%,#0c111b_100%)] p-8">
-            <div className="max-w-xl rounded-3xl border border-white/10 bg-slate-950/60 p-8 text-center shadow-2xl backdrop-blur-lg">
+          <main className="flex items-center justify-center bg-gradient-to-b from-orbit-bg to-orbit-panelAlt p-8">
+            <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
               <h2 className="text-3xl font-bold">Welcome back, {user.username}</h2>
               <p className="mt-3 text-sm text-slate-300">
                 Pick someone from the sidebar to start a private conversation. Message history and encrypted payload previews will appear here.
@@ -441,8 +440,8 @@ function App() {
             </div>
           </main>
         ) : (
-          <main className="flex flex-col bg-[radial-gradient(circle_at_20%_0%,rgba(45,212,191,0.12),transparent_40%),linear-gradient(160deg,#0d1117_10%,#101a2f_100%)]">
-            <header className="flex items-center justify-between border-b border-slate-800 p-4">
+          <main className="flex flex-col bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+            <header className="flex items-center justify-between border-b border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
               <div>
                 <button
                   className="text-left text-base font-semibold text-orbit-text hover:underline"
@@ -465,7 +464,14 @@ function App() {
               {messages.map((msg) => {
                 const mine = msg.sender === user.username;
                 return (
-                  <article key={msg.id} className={`max-w-[80%] rounded-2xl p-3 text-sm ${mine ? "ml-auto bg-orbit-accent/20" : "bg-orbit-panel/90"}`}>
+                  <article
+                    key={msg.id}
+                    className={`max-w-[80%] rounded-2xl border p-3 text-sm ${
+                      mine
+                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15"
+                        : "border-white/10 bg-orbit-panel/90"
+                    }`}
+                  >
                     <button
                       className="font-semibold text-orbit-accent hover:underline"
                       onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
@@ -478,10 +484,10 @@ function App() {
               })}
             </section>
 
-            <footer className="border-t border-slate-800 p-4">
+            <footer className="border-t border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
               <div className="flex gap-3">
                 <input
-                  className="flex-1 rounded-xl border border-white/10 bg-orbit-panelAlt px-4 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-input flex-1 px-4"
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -493,7 +499,7 @@ function App() {
                   placeholder="Type message..."
                 />
                 <button
-                  className="rounded-xl bg-orbit-accent px-5 py-3 text-sm font-bold text-slate-950 transition hover:brightness-110"
+                  className="orbit-btn-primary px-5"
                   onClick={handleSendMessage}
                 >
                   Send

@@ -1,6 +1,6 @@
 {
   "name": "orbit-chat-frontend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Orbit Chat desktop frontend",
   "main": "dist-electron/main.js",
