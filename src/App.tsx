@@ -3,10 +3,63 @@ import { useAuthStore } from "./stores/authStore";
 import { useMessagesStore } from "./stores/messagesStore";
 import { useSocketStore } from "./stores/socketStore";
 import { useProfilesStore } from "./stores/profilesStore";
+import { useE2EEStore } from "./stores/e2eeStore";
 import * as api from "./lib/api";
 import type { Conversation } from "./lib/api";
+import { decryptMessage, encryptMessage, generateSecretKey, sealToPublicKey } from "./lib/crypto";
 import { UserProfilePopover } from "./components/UserProfilePopover";
 import { ProfileSettings } from "./components/ProfileSettings";
+
+function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
+  if (!keys.length) return null;
+  return keys
+    .slice()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]!
+    .publicKey;
+}
+
+function looksLikeBase64(value: string) {
+  // sodium.to_base64 output is typically URL-safe-ish but can include +/=
+  // This is just a heuristic for legacy plaintext messages.
+  if (value.length < 12) return false;
+  return /^[A-Za-z0-9+/=_-]+$/.test(value);
+}
+
+function DecryptedMessageText(props: {
+  conversationId: string;
+  cipherText: string;
+  nonce?: string;
+}) {
+  const { conversationId, cipherText, nonce } = props;
+  const e2ee = useE2EEStore();
+  const [plain, setPlain] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const secretKey = e2ee.getConversationSecretKey(conversationId);
+      if (!secretKey || !nonce) {
+        setPlain(null);
+        return;
+      }
+
+      try {
+        const text = await decryptMessage(cipherText, nonce, secretKey);
+        if (!cancelled) setPlain(text);
+      } catch {
+        // Legacy compatibility: older messages used plaintext in the ciphertext field.
+        if (!cancelled) setPlain(looksLikeBase64(cipherText) ? null : cipherText);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, cipherText, nonce, e2ee]);
+
+  return <p className="mt-1 break-words text-orbit-text">{plain ?? "Encrypted message (unable to decrypt on this device)."}</p>;
+}
 
 function App() {
   const [appVersion, setAppVersion] = useState("-");
@@ -30,6 +83,7 @@ function App() {
   const { connected, connect, disconnect, socket } = useSocketStore();
   const { byConversation, upsertMessage } = useMessagesStore();
   const profiles = useProfilesStore();
+  const e2ee = useE2EEStore();
 
   const selectedConversation = useMemo(
     () => conversations.find((c) => c.id === selectedConvId) ?? null,
@@ -124,6 +178,13 @@ function App() {
     socket?.emit("join_conversation", { conversationId: selectedConvId });
   }, [selectedConvId, token, socket]);
 
+  /* ───── Ensure conversation secret key for DMs ───── */
+  useEffect(() => {
+    if (!token || !user || !selectedConversation) return;
+    if (selectedConversation.type !== "dm") return;
+    e2ee.ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
+  }, [token, user?.id, selectedConversation, e2ee]);
+
   /* ───── Search users ───── */
   useEffect(() => {
     const query = search.trim();
@@ -162,13 +223,29 @@ function App() {
       setSelectedConvId(existing.id);
       setSearch("");
       setSearchResults([]);
+      if (user) {
+        await e2ee.ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
+      }
       return;
     }
 
     // Create a new DM conversation
     try {
+      if (!user) return;
+
+      const { publicKey: myPublicKey } = await e2ee.ensureDeviceKeypair(user.id, token);
+      const otherKeys = await api.getUserKeys(targetUser.id, token);
+      const otherPublicKey = latestPublicKey(otherKeys);
+      if (!otherPublicKey) return;
+
+      const secretKey = await generateSecretKey();
+      const encryptedKeys: Record<string, string> = {
+        [user.id]: await sealToPublicKey(secretKey, myPublicKey),
+        [targetUser.id]: await sealToPublicKey(secretKey, otherPublicKey),
+      };
+
       const conv = await api.createConversation(
-        { type: "dm", memberIds: [targetUser.id] },
+        { type: "dm", memberIds: [targetUser.id], encryptedKeys },
         token
       );
       setConversations((prev) => [conv, ...prev]);
@@ -176,6 +253,8 @@ function App() {
       setMainView("chat");
       setSearch("");
       setSearchResults([]);
+
+      await e2ee.ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
     } catch {
       // handle error
     }
@@ -185,19 +264,33 @@ function App() {
   const handleSendMessage = () => {
     const draft = messageDraft.trim();
     if (!draft || !selectedConvId || !user || !socket) return;
+    if (!token) return;
 
-    // In a full E2EE flow, the client would encrypt the message here.
-    // For now we send the plaintext as ciphertext (server stores it opaquely).
-    const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))));
+    if (!selectedConversation || selectedConversation.type !== "dm") return;
 
-    socket.emit("send_message", {
-      conversationId: selectedConvId,
-      ciphertext: draft,
-      nonce,
-      keyVersion: 1,
-    });
+    (async () => {
+      try {
+        const secretKey = await e2ee.ensureConversationSecretKey({
+          conversation: selectedConversation,
+          token,
+          myUserId: user.id,
+        });
+        if (!secretKey) return;
 
-    setMessageDraft("");
+        const { cipherText, nonce } = await encryptMessage(draft, secretKey);
+
+        socket.emit("send_message", {
+          conversationId: selectedConvId,
+          ciphertext: cipherText,
+          nonce,
+          keyVersion: 1,
+        });
+
+        setMessageDraft("");
+      } catch {
+        // ignore
+      }
+    })();
   };
 
   /* ════════════════════════════════════════════════════ */
@@ -454,7 +547,13 @@ function App() {
                 </button>
                 <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
               </div>
-              <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Enabled</span>
+              {e2ee.getConversationSecretKey(selectedConversation.id) ? (
+                <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
+              ) : e2ee.loadingByConversationId[selectedConversation.id] ? (
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-orbit-muted">Setting up encryption…</span>
+              ) : (
+                <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
+              )}
             </header>
 
             <section className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -478,7 +577,7 @@ function App() {
                     >
                       {msg.sender}
                     </button>
-                    <p className="mt-1 break-all text-orbit-text">{msg.cipherText}</p>
+                    <DecryptedMessageText conversationId={selectedConversation.id} cipherText={msg.cipherText} nonce={msg.nonce} />
                   </article>
                 );
               })}

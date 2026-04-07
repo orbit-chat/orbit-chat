@@ -37,6 +37,15 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       const res = await api.login({ email, password, deviceName: "Orbit Desktop" });
+      // Ensure this device has a keypair for E2EE.
+      // If missing, generate a new keypair and register its public key.
+      const privateKeyStorageKey = `orbit:privateKey:${res.user.id}`;
+      const existingPrivateKey = localStorage.getItem(privateKeyStorageKey);
+      if (!existingPrivateKey) {
+        const keypair = await generateKeypair();
+        await api.addMyPublicKey(keypair.publicKey, res.accessToken);
+        localStorage.setItem(privateKeyStorageKey, keypair.privateKey);
+      }
       set({
         token: res.accessToken,
         refreshToken: res.refreshToken,

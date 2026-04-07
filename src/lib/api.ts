@@ -147,6 +147,42 @@ export function getUserKeys(id: string, token: string) {
   return request<{ id: string; publicKey: string; createdAt: string }[]>(`/users/${id}/keys`, { token });
 }
 
+export function addMyPublicKey(publicKey: string, token: string) {
+  return request<{ id: string; publicKey: string; createdAt: string }[]>(`/users/me/keys`, {
+    method: "POST",
+    body: { publicKey },
+    token,
+  });
+}
+
+/* ───── Conversation Keys ───── */
+
+export type ConversationKey = {
+  id: string;
+  conversationId: string;
+  userId: string;
+  encryptedGroupKey: string;
+  keyVersion: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export function getMyConversationKeys(conversationId: string, token: string) {
+  return request<ConversationKey[]>(`/keys/${conversationId}`, { token });
+}
+
+export function storeConversationKey(
+  data: {
+    conversationId: string;
+    userId: string;
+    encryptedGroupKey: string;
+    keyVersion?: number;
+  },
+  token: string
+) {
+  return request<ConversationKey>(`/keys`, { method: "POST", body: data, token });
+}
+
 /* ───── Conversations ───── */
 
 export type Conversation = {
@@ -163,7 +199,7 @@ export function getConversations(token: string) {
 }
 
 export function createConversation(
-  data: { type: "dm" | "group"; name?: string; memberIds: string[] },
+  data: { type: "dm" | "group"; name?: string; memberIds: string[]; encryptedKeys?: Record<string, string> },
   token: string
 ) {
   return request<Conversation>("/conversations", { method: "POST", body: data, token });
