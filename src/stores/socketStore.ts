@@ -41,6 +41,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     }) => {
       useMessagesStore.getState().upsertMessage(data.conversationId, {
         id: data.id,
+        senderId: data.senderId,
         sender: data.sender,
         cipherText: data.ciphertext,
         createdAt: data.createdAt,

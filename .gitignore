@@ -2,6 +2,10 @@ node_modules/
 dist/
 dist-electron/
 release/
+main/src/*.dmg
+main/src/*.zip
+main/src/*.blockmap
+main/src/*.yml
 .npm-cache/
 *.tsbuildinfo
 .env

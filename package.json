@@ -1,6 +1,6 @@
 {
   "name": "orbit-chat-frontend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Orbit Chat desktop frontend",
   "main": "dist-electron/main.js",
@@ -9,40 +9,46 @@
     "build": "tsc -b && vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
-    "dist:mac": "npm run build && electron-builder --mac dmg zip && mkdir -p main/src && cp -f release/Orbit\\ Chat-$npm_package_version-*.dmg main/src/ && cp -f release/Orbit\\ Chat-$npm_package_version-*-mac.zip main/src/",
-    "typecheck": "tsc --noEmit"
+    "dist:mac": "npm run build && electron-builder --mac dmg zip",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build"
   },
-  "dependencies": {
-    "@hookform/resolvers": "^3.10.0",
-    "@tanstack/react-query": "^5.67.3",
-    "libsodium-wrappers": "^0.7.15",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-hook-form": "^7.54.2",
-    "socket.io-client": "^4.8.1",
-    "zod": "^3.24.1",
-    "zustand": "^5.0.2"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/libsodium-wrappers": "^0.7.14",
     "@types/node": "^22.12.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "@hookform/resolvers": "^3.10.0",
+    "@tanstack/react-query": "^5.67.3",
     "autoprefixer": "^10.4.20",
     "electron": "^34.0.1",
     "electron-builder": "^25.1.8",
+    "libsodium-wrappers": "^0.7.15",
     "postcss": "^8.5.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.54.2",
+    "socket.io-client": "^4.8.1",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vite-plugin-electron": "^0.29.0",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "zod": "^3.24.1",
+    "zustand": "^5.0.2"
   },
   "build": {
     "appId": "com.orbit.chat",
     "productName": "Orbit Chat",
     "icon": "logo.png",
+    "asar": true,
+    "compression": "maximum",
+    "npmRebuild": false,
+    "electronLanguages": [
+      "en-US"
+    ],
     "directories": {
       "output": "release"
     },

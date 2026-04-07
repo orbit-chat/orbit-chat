@@ -2,17 +2,77 @@ import { FormEvent, useEffect, useMemo, useState, useCallback } from "react";
 import { useAuthStore } from "./stores/authStore";
 import { useMessagesStore } from "./stores/messagesStore";
 import { useSocketStore } from "./stores/socketStore";
+import { useProfilesStore } from "./stores/profilesStore";
+import { useE2EEStore } from "./stores/e2eeStore";
 import * as api from "./lib/api";
 import type { Conversation } from "./lib/api";
+import { decryptMessage, encryptMessage, generateSecretKey, sealToPublicKey } from "./lib/crypto";
+import { UserProfilePopover } from "./components/UserProfilePopover";
+import { ProfileSettings } from "./components/ProfileSettings";
+
+function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
+  if (!keys.length) return null;
+  return keys
+    .slice()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]!
+    .publicKey;
+}
+
+function looksLikeBase64(value: string) {
+  // sodium.to_base64 output is typically URL-safe-ish but can include +/=
+  // This is just a heuristic for legacy plaintext messages.
+  if (value.length < 12) return false;
+  return /^[A-Za-z0-9+/=_-]+$/.test(value);
+}
+
+function DecryptedMessageText(props: {
+  conversationId: string;
+  cipherText: string;
+  nonce?: string;
+}) {
+  const { conversationId, cipherText, nonce } = props;
+  const e2ee = useE2EEStore();
+  const [plain, setPlain] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const secretKey = e2ee.getConversationSecretKey(conversationId);
+      if (!secretKey || !nonce) {
+        setPlain(null);
+        return;
+      }
+
+      try {
+        const text = await decryptMessage(cipherText, nonce, secretKey);
+        if (!cancelled) setPlain(text);
+      } catch {
+        // Legacy compatibility: older messages used plaintext in the ciphertext field.
+        if (!cancelled) setPlain(looksLikeBase64(cipherText) ? null : cipherText);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, cipherText, nonce, e2ee]);
+
+  return <p className="mt-1 break-words text-orbit-text">{plain ?? "Encrypted message (unable to decrypt on this device)."}</p>;
+}
 
 function App() {
   const [appVersion, setAppVersion] = useState("-");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
+
+  const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
+  const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
 
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -22,11 +82,19 @@ function App() {
   const { user, clearSession, token, loading, error, login, signup } = useAuthStore();
   const { connected, connect, disconnect, socket } = useSocketStore();
   const { byConversation, upsertMessage } = useMessagesStore();
+  const profiles = useProfilesStore();
+  const e2ee = useE2EEStore();
 
   const selectedConversation = useMemo(
     () => conversations.find((c) => c.id === selectedConvId) ?? null,
     [conversations, selectedConvId]
   );
+
+  const dmPartner = useMemo(() => {
+    if (!selectedConversation || !user) return null;
+    if (selectedConversation.type !== "dm") return null;
+    return selectedConversation.members.find((m) => m.user.id !== user.id)?.user ?? null;
+  }, [selectedConversation, user]);
 
   const messages = useMemo(
     () => (selectedConvId ? byConversation[selectedConvId] ?? [] : []),
@@ -39,6 +107,21 @@ function App() {
     const other = selectedConversation.members.find((m) => m.user.id !== user.id);
     return other?.user.username ?? selectedConversation.name ?? "Chat";
   }, [selectedConversation, user]);
+
+  const openProfilePopover = useCallback(
+    async (userId: string, anchorEl?: HTMLElement | null) => {
+      if (!token) return;
+      setProfilePopoverUserId(userId);
+      setProfilePopoverAnchor(anchorEl ? anchorEl.getBoundingClientRect() : null);
+      await profiles.fetchProfile(userId, token);
+    },
+    [profiles, token]
+  );
+
+  const closeProfilePopover = useCallback(() => {
+    setProfilePopoverUserId(null);
+    setProfilePopoverAnchor(null);
+  }, []);
 
   /* ───── Electron version ───── */
   useEffect(() => {
@@ -70,6 +153,11 @@ function App() {
     loadConversations();
   }, [loadConversations]);
 
+  useEffect(() => {
+    if (!token || !user) return;
+    profiles.fetchMe(token, user.id);
+  }, [token, user?.id]);
+
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -77,6 +165,7 @@ function App() {
       for (const m of msgs) {
         upsertMessage(selectedConvId, {
           id: m.id,
+          senderId: m.sender.id,
           sender: m.sender.username,
           cipherText: m.ciphertext,
           nonce: m.nonce,
@@ -88,6 +177,13 @@ function App() {
     // Join the room via socket
     socket?.emit("join_conversation", { conversationId: selectedConvId });
   }, [selectedConvId, token, socket]);
+
+  /* ───── Ensure conversation secret key for DMs ───── */
+  useEffect(() => {
+    if (!token || !user || !selectedConversation) return;
+    if (selectedConversation.type !== "dm") return;
+    e2ee.ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
+  }, [token, user?.id, selectedConversation, e2ee]);
 
   /* ───── Search users ───── */
   useEffect(() => {
@@ -127,19 +223,38 @@ function App() {
       setSelectedConvId(existing.id);
       setSearch("");
       setSearchResults([]);
+      if (user) {
+        await e2ee.ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
+      }
       return;
     }
 
     // Create a new DM conversation
     try {
+      if (!user) return;
+
+      const { publicKey: myPublicKey } = await e2ee.ensureDeviceKeypair(user.id, token);
+      const otherKeys = await api.getUserKeys(targetUser.id, token);
+      const otherPublicKey = latestPublicKey(otherKeys);
+      if (!otherPublicKey) return;
+
+      const secretKey = await generateSecretKey();
+      const encryptedKeys: Record<string, string> = {
+        [user.id]: await sealToPublicKey(secretKey, myPublicKey),
+        [targetUser.id]: await sealToPublicKey(secretKey, otherPublicKey),
+      };
+
       const conv = await api.createConversation(
-        { type: "dm", memberIds: [targetUser.id] },
+        { type: "dm", memberIds: [targetUser.id], encryptedKeys },
         token
       );
       setConversations((prev) => [conv, ...prev]);
       setSelectedConvId(conv.id);
+      setMainView("chat");
       setSearch("");
       setSearchResults([]);
+
+      await e2ee.ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
     } catch {
       // handle error
     }
@@ -149,19 +264,33 @@ function App() {
   const handleSendMessage = () => {
     const draft = messageDraft.trim();
     if (!draft || !selectedConvId || !user || !socket) return;
+    if (!token) return;
 
-    // In a full E2EE flow, the client would encrypt the message here.
-    // For now we send the plaintext as ciphertext (server stores it opaquely).
-    const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))));
+    if (!selectedConversation || selectedConversation.type !== "dm") return;
 
-    socket.emit("send_message", {
-      conversationId: selectedConvId,
-      ciphertext: draft,
-      nonce,
-      keyVersion: 1,
-    });
+    (async () => {
+      try {
+        const secretKey = await e2ee.ensureConversationSecretKey({
+          conversation: selectedConversation,
+          token,
+          myUserId: user.id,
+        });
+        if (!secretKey) return;
 
-    setMessageDraft("");
+        const { cipherText, nonce } = await encryptMessage(draft, secretKey);
+
+        socket.emit("send_message", {
+          conversationId: selectedConvId,
+          ciphertext: cipherText,
+          nonce,
+          keyVersion: 1,
+        });
+
+        setMessageDraft("");
+      } catch {
+        // ignore
+      }
+    })();
   };
 
   /* ════════════════════════════════════════════════════ */
@@ -169,9 +298,8 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (!user) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-[#090c13] p-6 text-orbit-text">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(45,212,191,0.18),transparent_30%),radial-gradient(circle_at_85%_80%,rgba(251,113,133,0.2),transparent_32%),linear-gradient(120deg,#05070d_0%,#101725_45%,#0a1220_100%)]" />
-        <section className="relative z-10 w-full max-w-5xl rounded-3xl border border-white/10 bg-slate-950/75 p-8 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+        <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
             <div className="space-y-6">
               <span className="inline-flex items-center gap-2 rounded-full border border-orbit-accent/40 px-3 py-1 text-xs uppercase tracking-[0.18em] text-orbit-accent">
@@ -191,8 +319,8 @@ function App() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-6">
-              <div className="mb-6 flex rounded-xl bg-slate-800/70 p-1">
+            <div className="rounded-2xl border border-white/10 bg-orbit-panel p-6">
+              <div className="mb-6 flex rounded-xl border border-white/10 bg-orbit-panelAlt p-1">
                 <button
                   className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
                     authMode === "login" ? "bg-orbit-accent text-slate-950" : "text-slate-300"
@@ -219,9 +347,9 @@ function App() {
 
               <form className="space-y-4" onSubmit={handleAuthSubmit}>
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Email</span>
+                  <span className="orbit-label">Email</span>
                   <input
-                    className="w-full rounded-xl border border-white/10 bg-slate-800/70 px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                    className="orbit-input"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="you@example.com"
@@ -231,9 +359,9 @@ function App() {
                 </label>
                 {authMode === "signup" && (
                   <label className="block">
-                    <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Username</span>
+                    <span className="orbit-label">Username</span>
                     <input
-                      className="w-full rounded-xl border border-white/10 bg-slate-800/70 px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                      className="orbit-input"
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
                       placeholder="your-name"
@@ -242,9 +370,9 @@ function App() {
                   </label>
                 )}
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Password</span>
+                  <span className="orbit-label">Password</span>
                   <input
-                    className="w-full rounded-xl border border-white/10 bg-slate-800/70 px-3 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                    className="orbit-input"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder="********"
@@ -254,7 +382,7 @@ function App() {
                 </label>
                 <button
                   disabled={loading}
-                  className="w-full rounded-xl bg-orbit-accent px-4 py-3 text-sm font-bold text-slate-950 transition hover:brightness-110 disabled:opacity-50"
+                  className="orbit-btn-primary w-full"
                 >
                   {loading ? "Please wait..." : authMode === "login" ? "Login" : "Create Account"}
                 </button>
@@ -270,28 +398,28 @@ function App() {
   /*  MAIN CHAT SCREEN                                    */
   /* ════════════════════════════════════════════════════ */
   return (
-    <div className="h-screen overflow-hidden bg-[#070a11] text-orbit-text">
+    <div className="h-screen overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt text-orbit-text">
       <div className="grid h-full grid-cols-[82px_320px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="border-r border-slate-800/70 bg-black/35 p-3">
+        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-3">
           <div className="mb-4 flex items-center justify-center rounded-xl bg-orbit-accent/15 p-2">
             <img src="logo.png" alt="Orbit Chat logo" className="h-10 w-10 rounded-xl object-cover" />
           </div>
           <div className="space-y-3 text-center text-xs text-orbit-muted">
-            <div className="rounded-lg bg-orbit-panel/90 p-2">DM</div>
-            <div className="rounded-lg bg-orbit-panel/90 p-2">Friends</div>
-            <div className="rounded-lg bg-orbit-panel/90 p-2">Archive</div>
+            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">DM</div>
+            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Friends</div>
+            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Archive</div>
           </div>
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="border-r border-slate-800/70 bg-orbit-panel p-4">
+        <aside className="border-r border-white/10 bg-orbit-panel p-4">
           <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
           <p className="mt-1 text-sm text-orbit-muted">Search users and start secure chats</p>
 
           <label className="mt-4 block">
             <input
-              className="w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-2 text-sm outline-none transition focus:border-orbit-accent"
+              className="orbit-input py-2"
               placeholder="Search username..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -301,11 +429,11 @@ function App() {
           {/* Search results */}
           {searchResults.length > 0 && (
             <div className="mt-2 space-y-1">
-              <p className="text-xs text-slate-500">Search results</p>
+              <p className="text-xs text-orbit-muted">Search results</p>
               {searchResults.map((u) => (
                 <button
                   key={u.id}
-                  className="w-full rounded-xl border border-white/5 bg-orbit-panelAlt p-2 text-left text-sm hover:border-white/20"
+                  className="orbit-btn w-full justify-start bg-orbit-panelAlt text-left"
                   onClick={() => startDM(u)}
                 >
                   @{u.username}
@@ -341,24 +469,37 @@ function App() {
               );
             })}
             {conversations.length === 0 && (
-              <p className="text-xs text-slate-500">No conversations yet. Search for a user above to start one.</p>
+              <p className="text-xs text-orbit-muted">No conversations yet. Search for a user above to start one.</p>
             )}
           </div>
 
-          <div className="mt-4 rounded-xl bg-orbit-panelAlt p-4 text-sm">
-            <p>Build {appVersion}</p>
+          <div className="orbit-card-solid mt-4 rounded-xl bg-orbit-panelAlt p-4 text-sm">
+            <p className="font-semibold">Build {appVersion}</p>
             <p className={connected ? "text-emerald-400" : "text-rose-400"}>
               Socket: {connected ? "Connected" : "Disconnected"}
             </p>
           </div>
 
           <button
-            className="mt-4 w-full rounded-lg bg-orbit-danger px-3 py-2 text-sm font-semibold text-white"
+            className="orbit-btn mt-3 w-full"
+            onClick={() => {
+              setMainView("profile-settings");
+              setSelectedConvId(null);
+              closeProfilePopover();
+            }}
+          >
+            Profile Settings
+          </button>
+
+          <button
+            className="orbit-btn-danger mt-3 w-full"
             onClick={() => {
               clearSession();
               setSelectedConvId(null);
               setSearch("");
               setConversations([]);
+              setMainView("chat");
+              closeProfilePopover();
             }}
           >
             Sign Out
@@ -366,9 +507,19 @@ function App() {
         </aside>
 
         {/* ───── Main content area ───── */}
-        {!selectedConversation ? (
-          <main className="flex items-center justify-center bg-[radial-gradient(circle_at_20%_10%,rgba(45,212,191,0.18),transparent_35%),linear-gradient(160deg,#0b1321_5%,#12192a_45%,#0c111b_100%)] p-8">
-            <div className="max-w-xl rounded-3xl border border-white/10 bg-slate-950/60 p-8 text-center shadow-2xl backdrop-blur-lg">
+        {mainView === "profile-settings" && token && user ? (
+          <main className="bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+            <ProfileSettings
+              token={token}
+              myUserId={user.id}
+              onClose={() => {
+                setMainView("chat");
+              }}
+            />
+          </main>
+        ) : !selectedConversation ? (
+          <main className="flex items-center justify-center bg-gradient-to-b from-orbit-bg to-orbit-panelAlt p-8">
+            <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
               <h2 className="text-3xl font-bold">Welcome back, {user.username}</h2>
               <p className="mt-3 text-sm text-slate-300">
                 Pick someone from the sidebar to start a private conversation. Message history and encrypted payload previews will appear here.
@@ -382,13 +533,27 @@ function App() {
             </div>
           </main>
         ) : (
-          <main className="flex flex-col bg-[radial-gradient(circle_at_20%_0%,rgba(45,212,191,0.12),transparent_40%),linear-gradient(160deg,#0d1117_10%,#101a2f_100%)]">
-            <header className="flex items-center justify-between border-b border-slate-800 p-4">
+          <main className="flex flex-col bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+            <header className="flex items-center justify-between border-b border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
               <div>
-                <h2 className="text-base font-semibold">@{dmPartnerName}</h2>
+                <button
+                  className="text-left text-base font-semibold text-orbit-text hover:underline"
+                  onClick={(e) => {
+                    if (!dmPartner?.id) return;
+                    openProfilePopover(dmPartner.id, e.currentTarget);
+                  }}
+                >
+                  @{dmPartnerName}
+                </button>
                 <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
               </div>
-              <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Enabled</span>
+              {e2ee.getConversationSecretKey(selectedConversation.id) ? (
+                <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
+              ) : e2ee.loadingByConversationId[selectedConversation.id] ? (
+                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-orbit-muted">Setting up encryption…</span>
+              ) : (
+                <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
+              )}
             </header>
 
             <section className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -398,18 +563,30 @@ function App() {
               {messages.map((msg) => {
                 const mine = msg.sender === user.username;
                 return (
-                  <article key={msg.id} className={`max-w-[80%] rounded-2xl p-3 text-sm ${mine ? "ml-auto bg-orbit-accent/20" : "bg-orbit-panel/90"}`}>
-                    <p className="font-semibold text-orbit-accent">{msg.sender}</p>
-                    <p className="mt-1 break-all text-orbit-text">{msg.cipherText}</p>
+                  <article
+                    key={msg.id}
+                    className={`max-w-[80%] rounded-2xl border p-3 text-sm ${
+                      mine
+                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15"
+                        : "border-white/10 bg-orbit-panel/90"
+                    }`}
+                  >
+                    <button
+                      className="font-semibold text-orbit-accent hover:underline"
+                      onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                    >
+                      {msg.sender}
+                    </button>
+                    <DecryptedMessageText conversationId={selectedConversation.id} cipherText={msg.cipherText} nonce={msg.nonce} />
                   </article>
                 );
               })}
             </section>
 
-            <footer className="border-t border-slate-800 p-4">
+            <footer className="border-t border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
               <div className="flex gap-3">
                 <input
-                  className="flex-1 rounded-xl border border-white/10 bg-orbit-panelAlt px-4 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="orbit-input flex-1 px-4"
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -421,7 +598,7 @@ function App() {
                   placeholder="Type message..."
                 />
                 <button
-                  className="rounded-xl bg-orbit-accent px-5 py-3 text-sm font-bold text-slate-950 transition hover:brightness-110"
+                  className="orbit-btn-primary px-5"
                   onClick={handleSendMessage}
                 >
                   Send
@@ -430,6 +607,20 @@ function App() {
             </footer>
           </main>
         )}
+
+        <UserProfilePopover
+          open={Boolean(profilePopoverUserId)}
+          anchorRect={profilePopoverAnchor}
+          profile={profilePopoverUserId ? profiles.byId[profilePopoverUserId] ?? null : null}
+          loading={profilePopoverUserId ? profiles.loadingById[profilePopoverUserId] ?? false : false}
+          error={profilePopoverUserId ? profiles.errorById[profilePopoverUserId] ?? null : null}
+          onClose={closeProfilePopover}
+          canEdit={Boolean(user && profilePopoverUserId && user.id === profilePopoverUserId)}
+          onEditClick={() => {
+            setMainView("profile-settings");
+            setSelectedConvId(null);
+          }}
+        />
       </div>
     </div>
   );

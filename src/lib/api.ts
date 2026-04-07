@@ -55,7 +55,49 @@ export function refreshToken(rt: string) {
 
 /* ───── Users ───── */
 
-export type UserProfile = { id: string; username: string; email?: string; createdAt?: string };
+export type Presence = "online" | "idle" | "dnd" | "offline";
+
+export type ProfileLink = {
+  label: string;
+  url: string;
+};
+
+export type UserRole = {
+  id: string;
+  name: string;
+};
+
+export type UserProfile = {
+  id: string;
+  username: string;
+  email?: string;
+  createdAt?: string;
+
+  // Extended profile fields (server may or may not provide these yet)
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  bannerUrl?: string | null;
+  bio?: string | null;
+  pronouns?: string | null;
+  timezone?: string | null;
+  presence?: Presence | null;
+  statusText?: string | null;
+  statusEmoji?: string | null;
+  lastActiveAt?: string | null;
+  links?: ProfileLink[] | null;
+  roles?: UserRole[] | null;
+};
+
+export type UpdateMyProfileInput = {
+  displayName?: string | null;
+  bio?: string | null;
+  pronouns?: string | null;
+  timezone?: string | null;
+  presence?: Presence | null;
+  statusText?: string | null;
+  statusEmoji?: string | null;
+  links?: ProfileLink[] | null;
+};
 
 export function searchUsers(query: string, token: string) {
   return request<UserProfile[]>(`/users/search?q=${encodeURIComponent(query)}`, { token });
@@ -65,8 +107,80 @@ export function getUser(id: string, token: string) {
   return request<UserProfile>(`/users/${id}`, { token });
 }
 
+export function getMe(token: string) {
+  return request<UserProfile>(`/users/me`, { token });
+}
+
+export function updateMyProfile(data: UpdateMyProfileInput, token: string) {
+  return request<UserProfile>(`/users/me/profile`, { method: "PUT", body: data, token });
+}
+
+async function uploadFile(path: string, file: File, token: string) {
+  const form = new FormData();
+  form.append("file", file);
+
+  const res = await fetch(`${API_BASE}${path}` as string, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+
+  return res.json() as Promise<UserProfile>;
+}
+
+export function uploadMyAvatar(file: File, token: string) {
+  return uploadFile(`/users/me/avatar`, file, token);
+}
+
+export function uploadMyBanner(file: File, token: string) {
+  return uploadFile(`/users/me/banner`, file, token);
+}
+
 export function getUserKeys(id: string, token: string) {
   return request<{ id: string; publicKey: string; createdAt: string }[]>(`/users/${id}/keys`, { token });
+}
+
+export function addMyPublicKey(publicKey: string, token: string) {
+  return request<{ id: string; publicKey: string; createdAt: string }[]>(`/users/me/keys`, {
+    method: "POST",
+    body: { publicKey },
+    token,
+  });
+}
+
+/* ───── Conversation Keys ───── */
+
+export type ConversationKey = {
+  id: string;
+  conversationId: string;
+  userId: string;
+  encryptedGroupKey: string;
+  keyVersion: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export function getMyConversationKeys(conversationId: string, token: string) {
+  return request<ConversationKey[]>(`/keys/${conversationId}`, { token });
+}
+
+export function storeConversationKey(
+  data: {
+    conversationId: string;
+    userId: string;
+    encryptedGroupKey: string;
+    keyVersion?: number;
+  },
+  token: string
+) {
+  return request<ConversationKey>(`/keys`, { method: "POST", body: data, token });
 }
 
 /* ───── Conversations ───── */
@@ -85,7 +199,7 @@ export function getConversations(token: string) {
 }
 
 export function createConversation(
-  data: { type: "dm" | "group"; name?: string; memberIds: string[] },
+  data: { type: "dm" | "group"; name?: string; memberIds: string[]; encryptedKeys?: Record<string, string> },
   token: string
 ) {
   return request<Conversation>("/conversations", { method: "POST", body: data, token });
