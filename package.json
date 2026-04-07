@@ -42,12 +42,14 @@
   "build": {
     "appId": "com.orbit.chat",
     "productName": "Orbit Chat",
+    "icon": "logo.png",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "logo.png",
       "package.json"
     ],
     "win": {

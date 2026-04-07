@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+const appIcon = path.join(app.getAppPath(), "logo.png");
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -11,6 +12,7 @@ function createWindow() {
     minHeight: 620,
     backgroundColor: "#0d1117",
     title: "Orbit Chat",
+    icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

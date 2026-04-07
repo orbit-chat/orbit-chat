@@ -99,7 +99,8 @@ function App() {
         <section className="relative z-10 w-full max-w-5xl rounded-3xl border border-white/10 bg-slate-950/75 p-8 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
             <div className="space-y-6">
-              <span className="inline-flex rounded-full border border-orbit-accent/40 px-3 py-1 text-xs uppercase tracking-[0.18em] text-orbit-accent">
+              <span className="inline-flex items-center gap-2 rounded-full border border-orbit-accent/40 px-3 py-1 text-xs uppercase tracking-[0.18em] text-orbit-accent">
+                <img src="logo.png" alt="Orbit Chat logo" className="h-5 w-5 rounded-full object-cover" />
                 Orbit Chat
               </span>
               <h1 className="text-4xl font-bold leading-tight md:text-5xl">
@@ -172,7 +173,9 @@ function App() {
     <div className="h-screen overflow-hidden bg-[#070a11] text-orbit-text">
       <div className="grid h-full grid-cols-[82px_320px_1fr]">
         <aside className="border-r border-slate-800/70 bg-black/35 p-3">
-          <div className="mb-4 rounded-xl bg-orbit-accent/15 p-3 text-center text-sm font-semibold text-orbit-accent">OC</div>
+          <div className="mb-4 flex items-center justify-center rounded-xl bg-orbit-accent/15 p-2">
+            <img src="logo.png" alt="Orbit Chat logo" className="h-10 w-10 rounded-xl object-cover" />
+          </div>
           <div className="space-y-3 text-center text-xs text-orbit-muted">
             <div className="rounded-lg bg-orbit-panel/90 p-2">DM</div>
             <div className="rounded-lg bg-orbit-panel/90 p-2">Friends</div>
