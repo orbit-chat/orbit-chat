@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useAuthStore } from "./stores/authStore";
 import { useMessagesStore } from "./stores/messagesStore";
 import { useSocketStore } from "./stores/socketStore";
@@ -26,6 +26,7 @@ function App() {
   const [search, setSearch] = useState("");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const { user, setSession, clearSession, token } = useAuthStore();
   const { connected, connect, disconnect } = useSocketStore();
   const { byConversation, upsertMessage } = useMessagesStore();
@@ -91,6 +92,12 @@ function App() {
 
     setMessageDraft("");
   };
+
+  useEffect(() => {
+    // Keep the latest message in view so new messages don't appear "off screen".
+    // Use instant scrolling to avoid distracting animations while typing.
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [activeConversationId, messages.length]);
 
   if (!user) {
     return (
@@ -171,7 +178,7 @@ function App() {
 
   return (
     <div className="h-screen overflow-hidden bg-[#070a11] text-orbit-text">
-      <div className="grid h-full grid-cols-[82px_320px_1fr]">
+      <div className="grid h-full min-h-0 grid-cols-[82px_320px_1fr]">
         <aside className="border-r border-slate-800/70 bg-black/35 p-3">
           <div className="mb-4 flex items-center justify-center rounded-xl bg-orbit-accent/15 p-2">
             <img src="logo.png" alt="Orbit Chat logo" className="h-10 w-10 rounded-xl object-cover" />
@@ -183,7 +190,7 @@ function App() {
           </div>
         </aside>
 
-        <aside className="border-r border-slate-800/70 bg-orbit-panel p-4">
+        <aside className="flex min-h-0 flex-col border-r border-slate-800/70 bg-orbit-panel p-4">
           <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
           <p className="mt-1 text-sm text-orbit-muted">Search users and start secure chats</p>
 
@@ -196,7 +203,7 @@ function App() {
             />
           </label>
 
-          <div className="mt-4 space-y-2 overflow-y-auto pr-1">
+          <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {filteredUsers.map((candidate) => {
               const isSelected = candidate.id === selectedUserId;
               return (
@@ -262,34 +269,65 @@ function App() {
             </div>
           </main>
         ) : (
-          <main className="flex flex-col bg-[radial-gradient(circle_at_20%_0%,rgba(45,212,191,0.12),transparent_40%),linear-gradient(160deg,#0d1117_10%,#101a2f_100%)]">
-            <header className="flex items-center justify-between border-b border-slate-800 p-4">
-              <div>
-                <h2 className="text-base font-semibold">@{selectedUser.username}</h2>
-                <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
+          <main className="flex min-h-0 flex-col bg-[radial-gradient(circle_at_20%_0%,rgba(45,212,191,0.12),transparent_40%),linear-gradient(160deg,#0d1117_10%,#101a2f_100%)]">
+            <header className="flex items-center justify-between border-b border-slate-800/80 bg-black/20 p-4 backdrop-blur">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-orbit-panelAlt text-sm font-bold text-orbit-accent">
+                  {selectedUser.username.slice(0, 1).toUpperCase()}
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold leading-tight">@{selectedUser.username}</h2>
+                  <p className="text-xs text-orbit-muted">Direct message • Encrypted</p>
+                </div>
               </div>
-              <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Enabled</span>
+              <span className="rounded-full border border-orbit-accent/40 bg-orbit-accent/10 px-3 py-1 text-xs text-orbit-accent">
+                E2E Enabled
+              </span>
             </header>
 
-            <section className="flex-1 space-y-3 overflow-y-auto p-4">
+            <section className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
               {messages.length === 0 && (
                 <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
               )}
               {messages.map((msg) => {
                 const mine = msg.sender === user.username;
                 return (
-                  <article key={msg.id} className={`max-w-[80%] rounded-2xl p-3 text-sm ${mine ? "ml-auto bg-orbit-accent/20" : "bg-orbit-panel/90"}`}>
-                    <p className="font-semibold text-orbit-accent">{msg.sender}</p>
-                    <p className="mt-1 break-all text-orbit-text">{msg.cipherText}</p>
+                  <article
+                    key={msg.id}
+                    className={`mb-3 flex max-w-full items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}
+                  >
+                    {!mine && (
+                      <div className="grid h-8 w-8 flex-none place-items-center rounded-2xl bg-orbit-panelAlt text-[11px] font-bold text-orbit-muted">
+                        {msg.sender.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+
+                    <div
+                      className={`max-w-[78%] rounded-3xl px-4 py-3 text-sm shadow-sm ring-1 ring-white/5 ${
+                        mine ? "bg-orbit-accent/20" : "bg-orbit-panel/90"
+                      }`}
+                    >
+                      {!mine && <p className="text-xs font-semibold text-orbit-muted">{msg.sender}</p>}
+                      <p className="mt-0.5 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-orbit-text">
+                        {msg.cipherText}
+                      </p>
+                    </div>
+
+                    {mine && (
+                      <div className="grid h-8 w-8 flex-none place-items-center rounded-2xl bg-orbit-accent/15 text-[11px] font-bold text-orbit-accent">
+                        {msg.sender.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
                   </article>
                 );
               })}
+              <div ref={messagesEndRef} />
             </section>
 
-            <footer className="border-t border-slate-800 p-4">
-              <div className="flex gap-3">
+            <footer className="border-t border-slate-800/80 bg-black/20 p-4 backdrop-blur">
+              <div className="flex items-end gap-3">
                 <input
-                  className="flex-1 rounded-xl border border-white/10 bg-orbit-panelAlt px-4 py-3 text-sm outline-none transition focus:border-orbit-accent"
+                  className="flex-1 rounded-2xl border border-white/10 bg-orbit-panelAlt px-4 py-3 text-sm outline-none transition focus:border-orbit-accent"
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -298,11 +336,12 @@ function App() {
                       handleSendMessage();
                     }
                   }}
-                  placeholder="Type message... (encrypted preview will be shown)"
+                  placeholder="Message @user"
                 />
                 <button
-                  className="rounded-xl bg-orbit-accent px-5 py-3 text-sm font-bold text-slate-950 transition hover:brightness-110"
+                  className="rounded-2xl bg-orbit-accent px-5 py-3 text-sm font-bold text-slate-950 transition hover:brightness-110 disabled:opacity-50"
                   onClick={handleSendMessage}
+                  disabled={!messageDraft.trim()}
                 >
                   Send
                 </button>
