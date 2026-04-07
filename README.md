@@ -1,6 +1,6 @@
 # Orbit Chat Frontend (Desktop)
 
-Electron + React + TypeScript desktop client for Orbit Chat, packaged with electron-builder as a Windows installer (.exe).
+Electron + React + TypeScript desktop client for Orbit Chat, packaged with electron-builder for Windows and macOS.
 
 ## Current System Design
 
@@ -84,6 +84,9 @@ Electron + React + TypeScript desktop client for Orbit Chat, packaged with elect
 - npm run dist:win
 	- Builds and packages Windows NSIS x64 installer (.exe).
 
+- npm run dist:mac
+	- Builds and packages macOS DMG + ZIP.
+
 ### Package management
 
 - npm ci
@@ -92,15 +95,20 @@ Electron + React + TypeScript desktop client for Orbit Chat, packaged with elect
 - npm audit
 	- Lists known dependency vulnerabilities.
 
-## Windows .exe Output
+## Build Outputs
 
-Windows installer artifacts are created in:
+Installer artifacts are created in:
 
 - release/
 
-Primary installer filename pattern:
+Windows installer filename pattern:
 
 - Orbit Chat Setup <version>.exe
+
+macOS installer filename patterns:
+
+- Orbit Chat-<version>.dmg
+- Orbit Chat-<version>-mac.zip
 
 ## Recommended Build Flow For Distribution
 
@@ -108,6 +116,13 @@ Primary installer filename pattern:
 2. Run npm ci.
 3. Run npm run dist:win.
 4. Publish the generated installer from release/.
+
+## macOS Friendly Run Instructions
+
+1. Run npm run dist:mac on macOS.
+2. Open the generated .dmg from release/.
+3. Drag Orbit Chat.app into Applications.
+4. Launch from Applications.
 
 ## Next Integration Steps
 

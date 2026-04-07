@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip && mkdir -p main/src && cp -f release/Orbit\\ Chat-$npm_package_version-*.dmg main/src/ && cp -f release/Orbit\\ Chat-$npm_package_version-*-mac.zip main/src/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -57,6 +58,13 @@
             "x64"
           ]
         }
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "target": [
+        "dmg",
+        "zip"
       ]
     }
   }
