@@ -57,6 +57,7 @@ function App() {
   const [appVersion, setAppVersion] = useState("-");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
+  const [navTab, setNavTab] = useState<"dm" | "friends" | "archive">("dm");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -399,23 +400,73 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt text-orbit-text">
-      <div className="grid h-full grid-cols-[82px_320px_1fr]">
+      <div className="grid h-full grid-cols-[74px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-3">
-          <div className="mb-4 flex items-center justify-center rounded-xl bg-orbit-accent/15 p-2">
-            <img src="logo.png" alt="Orbit Chat logo" className="h-10 w-10 rounded-xl object-cover" />
+        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-2.5">
+          <div className="mb-4 flex items-center justify-center rounded-2xl bg-orbit-accent/15 p-2.5">
+            <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover" />
           </div>
-          <div className="space-y-3 text-center text-xs text-orbit-muted">
-            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">DM</div>
-            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Friends</div>
-            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Archive</div>
+          <div className="space-y-2.5">
+            {[
+              {
+                key: "dm" as const,
+                label: "DM",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                ),
+              },
+              {
+                key: "friends" as const,
+                label: "Friends",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="8.5" cy="7" r="4" />
+                    <path d="M20 8v6" />
+                    <path d="M23 11h-6" />
+                  </svg>
+                ),
+              },
+              {
+                key: "archive" as const,
+                label: "Archive",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="4" rx="1.2" />
+                    <path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+                    <path d="M10 12h4" />
+                  </svg>
+                ),
+              },
+            ].map((item) => {
+              const active = navTab === item.key;
+              return (
+                <button
+                  key={item.key}
+                  className={`group w-full rounded-2xl border px-2 py-2 text-[11px] font-semibold transition ${
+                    active
+                      ? "border-orbit-accent/60 bg-gradient-to-br from-orbit-accent/20 to-orbit-accent/5 text-orbit-text shadow-[0_0_0_1px_rgba(0,0,0,0.15)_inset]"
+                      : "border-white/10 bg-orbit-panel/80 text-orbit-muted hover:border-white/25 hover:bg-orbit-panel"
+                  }`}
+                  onClick={() => setNavTab(item.key)}
+                  aria-pressed={active}
+                >
+                  <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-slate-200 group-hover:text-orbit-text">
+                    {item.icon}
+                  </span>
+                  <span className="block leading-none">{item.label}</span>
+                </button>
+              );
+            })}
           </div>
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panel p-4">
+        <aside className="border-r border-white/10 bg-orbit-panel p-3.5">
           <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
-          <p className="mt-1 text-sm text-orbit-muted">Search users and start secure chats</p>
+          <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
 
           <label className="mt-4 block">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search users</span>
