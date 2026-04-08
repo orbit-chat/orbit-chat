@@ -182,6 +182,23 @@ function App() {
     socket?.emit("join_conversation", { conversationId: selectedConvId });
   }, [selectedConvId, token, socket]);
 
+  /* ───── Refresh conversations on first inbound message ───── */
+  useEffect(() => {
+    if (!socket || !token) return;
+
+    const handleNewMessage = (data: { conversationId: string }) => {
+      const exists = conversations.some((conv) => conv.id === data.conversationId);
+      if (!exists) {
+        void loadConversations();
+      }
+    };
+
+    socket.on("new_message", handleNewMessage);
+    return () => {
+      socket.off("new_message", handleNewMessage);
+    };
+  }, [socket, token, conversations, loadConversations]);
+
   /* ───── Ensure conversation secret key for DMs ───── */
   useEffect(() => {
     if (!token || !user || !selectedConversation) return;
