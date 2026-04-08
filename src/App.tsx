@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState, useCallback } from "react";
+import { FormEvent, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useAuthStore } from "./stores/authStore";
 import { useMessagesStore } from "./stores/messagesStore";
 import { useSocketStore } from "./stores/socketStore";
@@ -71,6 +71,7 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<api.UserProfile[]>([]);
+  const conversationsRef = useRef<Conversation[]>([]);
 
   const { user, clearSession, token, loading, error, login, signup } = useAuthStore();
   const { connected, connect, disconnect, socket } = useSocketStore();
@@ -158,6 +159,10 @@ function App() {
   }, [loadConversations]);
 
   useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  useEffect(() => {
     if (!token || !user) return;
     profiles.fetchMe(token, user.id);
   }, [token, user?.id]);
@@ -187,7 +192,7 @@ function App() {
     if (!socket || !token) return;
 
     const handleNewMessage = (data: { conversationId: string }) => {
-      const exists = conversations.some((conv) => conv.id === data.conversationId);
+      const exists = conversationsRef.current.some((conv) => conv.id === data.conversationId);
       if (!exists) {
         void loadConversations();
       }
@@ -197,7 +202,7 @@ function App() {
     return () => {
       socket.off("new_message", handleNewMessage);
     };
-  }, [socket, token, conversations, loadConversations]);
+  }, [socket, token, loadConversations]);
 
   /* ───── Ensure conversation secret key for DMs ───── */
   useEffect(() => {
