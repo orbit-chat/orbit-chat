@@ -115,6 +115,14 @@ function App() {
     setProfilePopoverAnchor(null);
   }, []);
 
+  const openMyProfilePopover = useCallback(
+    (anchorEl?: HTMLElement | null) => {
+      if (!user?.id) return;
+      void openProfilePopover(user.id, anchorEl);
+    },
+    [openProfilePopover, user?.id]
+  );
+
   /* ───── Electron version ───── */
   useEffect(() => {
     window.electronAPI?.getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
@@ -410,6 +418,7 @@ function App() {
           <p className="mt-1 text-sm text-orbit-muted">Search users and start secure chats</p>
 
           <label className="mt-4 block">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search users</span>
             <input
               className="orbit-input py-2"
               placeholder="Search username..."
@@ -423,19 +432,31 @@ function App() {
             <div className="mt-2 space-y-1">
               <p className="text-xs text-orbit-muted">Search results</p>
               {searchResults.map((u) => (
-                <button
-                  key={u.id}
-                  className="orbit-btn w-full justify-start bg-orbit-panelAlt text-left"
-                  onClick={() => startDM(u)}
-                >
-                  @{u.username}
-                </button>
+                <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2">
+                  <button
+                    className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
+                    onClick={(event) => openProfilePopover(u.id, event.currentTarget)}
+                  >
+                    @{u.username}
+                  </button>
+                  <button
+                    className="orbit-btn px-3 py-2 text-xs"
+                    onClick={() => startDM(u)}
+                  >
+                    Chat
+                  </button>
+                </div>
               ))}
             </div>
           )}
 
           {/* Conversation list */}
-          <div className="mt-4 space-y-2 overflow-y-auto pr-1">
+          <div className="mt-4 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
+            <span className="text-xs text-orbit-muted">{conversations.length}</span>
+          </div>
+
+          <div className="mt-2 space-y-2 overflow-y-auto pr-1">
             {conversations.map((conv) => {
               const isSelected = conv.id === selectedConvId;
               const otherMember = conv.members.find((m) => m.user.id !== user.id);
@@ -471,61 +492,73 @@ function App() {
               Socket: {connected ? "Connected" : "Disconnected"}
             </p>
           </div>
-
-          <button
-            className="orbit-btn mt-3 w-full"
-            onClick={() => {
-              setMainView("profile-settings");
-              setSelectedConvId(null);
-              closeProfilePopover();
-            }}
-          >
-            Profile Settings
-          </button>
-
-          <button
-            className="orbit-btn-danger mt-3 w-full"
-            onClick={() => {
-              clearSession();
-              setSelectedConvId(null);
-              setSearch("");
-              setConversations([]);
-              setMainView("chat");
-              closeProfilePopover();
-            }}
-          >
-            Sign Out
-          </button>
         </aside>
 
         {/* ───── Main content area ───── */}
-        {mainView === "profile-settings" && token && user ? (
-          <main className="bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
-            <ProfileSettings
-              token={token}
-              myUserId={user.id}
-              onClose={() => {
-                setMainView("chat");
+        <main className="flex h-full flex-col bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+          <header className="flex items-center justify-end gap-3 border-b border-white/10 bg-orbit-panel/40 px-4 py-3 backdrop-blur">
+            <button
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text hover:border-white/20"
+              onClick={(event) => openMyProfilePopover(event.currentTarget)}
+            >
+              @{user.username}
+            </button>
+            <button
+              className="orbit-btn h-10 w-10 p-0"
+              onClick={() => {
+                setMainView("profile-settings");
+                setSelectedConvId(null);
+                closeProfilePopover();
               }}
-            />
-          </main>
-        ) : !selectedConversation ? (
-          <main className="flex items-center justify-center bg-gradient-to-b from-orbit-bg to-orbit-panelAlt p-8">
-            <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
-              <h2 className="text-3xl font-bold">Welcome back, {user.username}</h2>
-              <p className="mt-3 text-sm text-slate-300">
-                Pick someone from the sidebar to start a private conversation. Message history and encrypted payload previews will appear here.
-              </p>
-              <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">Search users by username</div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">View online presence</div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">Open secure DM threads</div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">Send encrypted payloads</div>
+              aria-label="Open profile settings"
+              title="Profile settings"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.5" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c0 .38.13.74.36 1.03.23.29.56.49.92.56H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1 .33 1.65 1.65 0 0 0-.6 1z" />
+              </svg>
+            </button>
+            <button
+              className="orbit-btn-danger px-4 py-2 text-xs"
+              onClick={() => {
+                clearSession();
+                setSelectedConvId(null);
+                setSearch("");
+                setConversations([]);
+                setMainView("chat");
+                closeProfilePopover();
+              }}
+            >
+              Sign Out
+            </button>
+          </header>
+
+          <section className="min-h-0 flex-1">
+            {mainView === "profile-settings" && token && user ? (
+              <ProfileSettings
+                token={token}
+                myUserId={user.id}
+                onClose={() => {
+                  setMainView("chat");
+                }}
+              />
+            ) : !selectedConversation ? (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
+                  <h2 className="text-3xl font-bold">Welcome back, {user.username}</h2>
+                  <p className="mt-3 text-sm text-slate-300">
+                    Pick someone from the sidebar to start a private conversation. Message history and encrypted payload previews will appear here.
+                  </p>
+                  <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">Search users by username</div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">View online presence</div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">Open secure DM threads</div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">Send encrypted payloads</div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </main>
-        ) : (
-          <main className="flex flex-col bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+            ) : (
+              <div className="flex h-full flex-col">
             <header className="flex items-center justify-between border-b border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
               <div>
                 <button
@@ -597,8 +630,10 @@ function App() {
                 </button>
               </div>
             </footer>
-          </main>
-        )}
+              </div>
+            )}
+          </section>
+        </main>
 
         <UserProfilePopover
           open={Boolean(profilePopoverUserId)}
