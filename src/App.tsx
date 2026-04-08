@@ -24,13 +24,12 @@ function DecryptedMessageText(props: {
   nonce?: string;
 }) {
   const { conversationId, cipherText, nonce } = props;
-  const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
+  const secretKey = useE2EEStore((state) => state.secretKeyByConversationId[conversationId] ?? null);
   const [plain, setPlain] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const secretKey = getConversationSecretKey(conversationId);
       if (!secretKey || !nonce) {
         setPlain(null);
         return;
@@ -48,7 +47,7 @@ function DecryptedMessageText(props: {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, cipherText, nonce, getConversationSecretKey]);
+  }, [cipherText, nonce, secretKey]);
 
   return <p className="mt-1 break-words text-orbit-text">{plain ?? "Encrypted message (unable to decrypt on this device)."}</p>;
 }
