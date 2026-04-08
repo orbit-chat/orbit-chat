@@ -33,7 +33,6 @@ export type AuthResponse = {
 };
 
 export function signup(data: {
-  email: string;
   username: string;
   password: string;
   publicKey: string;
@@ -42,7 +41,7 @@ export function signup(data: {
   return request<AuthResponse>("/auth/signup", { method: "POST", body: data });
 }
 
-export function login(data: { email: string; password: string; deviceName: string }) {
+export function login(data: { username: string; password: string; deviceName: string }) {
   return request<AuthResponse>("/auth/login", { method: "POST", body: data });
 }
 

@@ -58,9 +58,10 @@ function App() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
   const [navTab, setNavTab] = useState<"dm" | "friends" | "archive">("dm");
-  const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [authValidationError, setAuthValidationError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
 
@@ -416,12 +417,33 @@ function App() {
   /* ───── Auth submit ───── */
   const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const trimmedUsername = username.trim();
+    const strongPasswordRegex = /^(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+
+    if (!trimmedUsername) {
+      setAuthValidationError("Username is required.");
+      return;
+    }
+
+    if (authMode === "signup") {
+      if (password !== confirmPassword) {
+        setAuthValidationError("Passwords do not match.");
+        return;
+      }
+      if (!strongPasswordRegex.test(password)) {
+        setAuthValidationError("Password must be 8+ characters and include a number and special character.");
+        return;
+      }
+    }
+
+    setAuthValidationError(null);
     if (authMode === "login") {
-      await login(email.trim(), password);
+      await login(trimmedUsername, password);
     } else {
-      await signup(email.trim(), username.trim(), password);
+      await signup(trimmedUsername, password);
     }
     setPassword("");
+    setConfirmPassword("");
   };
 
   /* ───── Start DM with a searched user ───── */
@@ -558,7 +580,10 @@ function App() {
                   className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
                     authMode === "login" ? "bg-orbit-accent text-slate-950" : "text-slate-300"
                   }`}
-                  onClick={() => setAuthMode("login")}
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthValidationError(null);
+                  }}
                 >
                   Login
                 </button>
@@ -566,7 +591,10 @@ function App() {
                   className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
                     authMode === "signup" ? "bg-orbit-accent text-slate-950" : "text-slate-300"
                   }`}
-                  onClick={() => setAuthMode("signup")}
+                  onClick={() => {
+                    setAuthMode("signup");
+                    setAuthValidationError(null);
+                  }}
                 >
                   Sign Up
                 </button>
@@ -578,41 +606,61 @@ function App() {
                 </div>
               )}
 
+              {authValidationError && (
+                <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+                  {authValidationError}
+                </div>
+              )}
+
               <form className="space-y-4" onSubmit={handleAuthSubmit}>
                 <label className="block">
-                  <span className="orbit-label">Email</span>
+                  <span className="orbit-label">Username</span>
                   <input
                     className="orbit-input"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="you@example.com"
-                    type="email"
-                    autoComplete="email"
+                    value={username}
+                    onChange={(event) => {
+                      setUsername(event.target.value);
+                      if (authValidationError) setAuthValidationError(null);
+                    }}
+                    placeholder="your-name"
+                    autoComplete="username"
                   />
                 </label>
-                {authMode === "signup" && (
-                  <label className="block">
-                    <span className="orbit-label">Username</span>
-                    <input
-                      className="orbit-input"
-                      value={username}
-                      onChange={(event) => setUsername(event.target.value)}
-                      placeholder="your-name"
-                      autoComplete="username"
-                    />
-                  </label>
-                )}
                 <label className="block">
                   <span className="orbit-label">Password</span>
                   <input
                     className="orbit-input"
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      if (authValidationError) setAuthValidationError(null);
+                    }}
                     placeholder="********"
                     type="password"
                     autoComplete={authMode === "login" ? "current-password" : "new-password"}
                   />
                 </label>
+                {authMode === "signup" && (
+                  <>
+                    <label className="block">
+                      <span className="orbit-label">Confirm Password</span>
+                      <input
+                        className="orbit-input"
+                        value={confirmPassword}
+                        onChange={(event) => {
+                          setConfirmPassword(event.target.value);
+                          if (authValidationError) setAuthValidationError(null);
+                        }}
+                        placeholder="********"
+                        type="password"
+                        autoComplete="new-password"
+                      />
+                    </label>
+                    <p className="text-xs text-orbit-muted">
+                      Password must be at least 8 characters and include a number and special character.
+                    </p>
+                  </>
+                )}
                 <button
                   disabled={loading}
                   className="orbit-btn-primary w-full"
