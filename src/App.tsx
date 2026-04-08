@@ -24,13 +24,13 @@ function DecryptedMessageText(props: {
   nonce?: string;
 }) {
   const { conversationId, cipherText, nonce } = props;
-  const e2ee = useE2EEStore();
+  const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
   const [plain, setPlain] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const secretKey = e2ee.getConversationSecretKey(conversationId);
+      const secretKey = getConversationSecretKey(conversationId);
       if (!secretKey || !nonce) {
         setPlain(null);
         return;
@@ -48,7 +48,7 @@ function DecryptedMessageText(props: {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, cipherText, nonce, e2ee]);
+  }, [conversationId, cipherText, nonce, getConversationSecretKey]);
 
   return <p className="mt-1 break-words text-orbit-text">{plain ?? "Encrypted message (unable to decrypt on this device)."}</p>;
 }
@@ -76,7 +76,10 @@ function App() {
   const { connected, connect, disconnect, socket } = useSocketStore();
   const { byConversation, upsertMessage } = useMessagesStore();
   const profiles = useProfilesStore();
-  const e2ee = useE2EEStore();
+  const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
+  const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
+  const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
+  const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
 
   const selectedConversation = useMemo(
     () => conversations.find((c) => c.id === selectedConvId) ?? null,
@@ -183,8 +186,8 @@ function App() {
   useEffect(() => {
     if (!token || !user || !selectedConversation) return;
     if (selectedConversation.type !== "dm") return;
-    e2ee.ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
-  }, [token, user?.id, selectedConversation, e2ee]);
+    ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
+  }, [token, user?.id, selectedConversation, ensureConversationSecretKey]);
 
   /* ───── Search users ───── */
   useEffect(() => {
@@ -225,7 +228,7 @@ function App() {
       setSearch("");
       setSearchResults([]);
       if (user) {
-        await e2ee.ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
+        await ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
       }
       return;
     }
@@ -234,7 +237,7 @@ function App() {
     try {
       if (!user) return;
 
-      const { publicKey: myPublicKey } = await e2ee.ensureDeviceKeypair(user.id, token);
+      const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
       const otherKeys = await api.getUserKeys(targetUser.id, token);
       const otherPublicKey = latestPublicKey(otherKeys);
       if (!otherPublicKey) return;
@@ -255,7 +258,7 @@ function App() {
       setSearch("");
       setSearchResults([]);
 
-      await e2ee.ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
+      await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
     } catch {
       // handle error
     }
@@ -271,7 +274,7 @@ function App() {
 
     (async () => {
       try {
-        const secretKey = await e2ee.ensureConversationSecretKey({
+        const secretKey = await ensureConversationSecretKey({
           conversation: selectedConversation,
           token,
           myUserId: user.id,
@@ -623,9 +626,9 @@ function App() {
                 </button>
                 <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
               </div>
-              {e2ee.getConversationSecretKey(selectedConversation.id) ? (
+              {getConversationSecretKey(selectedConversation.id) ? (
                 <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
-              ) : e2ee.loadingByConversationId[selectedConversation.id] ? (
+              ) : loadingByConversationId[selectedConversation.id] ? (
                 <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-orbit-muted">Setting up encryption…</span>
               ) : (
                 <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
