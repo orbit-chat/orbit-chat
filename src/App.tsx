@@ -83,6 +83,7 @@ function App() {
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
+  const getConversationKeyVersion = useE2EEStore((state) => state.getConversationKeyVersion);
   const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
 
   const selectedConversation = useMemo(
@@ -478,7 +479,7 @@ function App() {
           conversationId: selectedConvId,
           ciphertext: cipherText,
           nonce,
-          keyVersion: 1,
+          keyVersion: getConversationKeyVersion(selectedConvId) ?? 1,
         });
 
         setMessageDraft("");
