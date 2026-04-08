@@ -116,14 +116,15 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
       const secretKey = await generateSecretKey();
       const encryptedForMe = await sealToPublicKey(secretKey, myPublicKey);
       const encryptedForOther = await sealToPublicKey(secretKey, otherPublicKey);
+      const nextKeyVersion = (orderedKeys[0]?.keyVersion ?? 0) + 1;
 
       await Promise.all([
         api.storeConversationKey(
-          { conversationId: conversation.id, userId: myUserId, encryptedGroupKey: encryptedForMe, keyVersion: 1 },
+          { conversationId: conversation.id, userId: myUserId, encryptedGroupKey: encryptedForMe, keyVersion: nextKeyVersion },
           token
         ),
         api.storeConversationKey(
-          { conversationId: conversation.id, userId: other.id, encryptedGroupKey: encryptedForOther, keyVersion: 1 },
+          { conversationId: conversation.id, userId: other.id, encryptedGroupKey: encryptedForOther, keyVersion: nextKeyVersion },
           token
         ),
       ]);

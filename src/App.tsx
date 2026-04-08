@@ -101,6 +101,31 @@ function App() {
     [byConversation, selectedConvId]
   );
 
+  const sortedConversations = useMemo(() => {
+    const getConversationLastActivity = (conversation: Conversation) => {
+      const convoMessages = byConversation[conversation.id] ?? [];
+      const lastMessageAt = convoMessages.length ? convoMessages[convoMessages.length - 1]!.createdAt : 0;
+      return Math.max(lastMessageAt, new Date(conversation.createdAt).getTime());
+    };
+
+    return conversations
+      .slice()
+      .sort((a, b) => getConversationLastActivity(b) - getConversationLastActivity(a));
+  }, [byConversation, conversations]);
+
+  const formatRecentTimestamp = useCallback((timestampMs: number) => {
+    const now = Date.now();
+    const diffMs = now - timestampMs;
+    const minuteMs = 60_000;
+    const hourMs = 60 * minuteMs;
+    const dayMs = 24 * hourMs;
+
+    if (diffMs < minuteMs) return "now";
+    if (diffMs < hourMs) return `${Math.floor(diffMs / minuteMs)}m`;
+    if (diffMs < dayMs) return `${Math.floor(diffMs / hourMs)}h`;
+    return `${Math.floor(diffMs / dayMs)}d`;
+  }, []);
+
   // Get the "other" user's name in a DM
   const dmPartnerName = useMemo(() => {
     if (!selectedConversation || !user) return null;
@@ -364,27 +389,42 @@ function App() {
   /* ───── Start DM with a searched user ───── */
   const startDM = async (targetUser: { id: string; username: string }) => {
     if (!token) return;
+    if (!user) return;
+
+    setMainView("chat");
 
     // Check if a DM already exists with this user
-    const existing = conversations.find(
+    let existing = conversations.find(
       (c) =>
         c.type === "dm" &&
         c.members.some((m) => m.user.id === targetUser.id)
     );
+
+    // If not found in local state, fetch latest conversations once to avoid duplicate DMs.
+    if (!existing) {
+      try {
+        const latestConversations = await api.getConversations(token);
+        setConversations(latestConversations);
+        existing = latestConversations.find(
+          (c) =>
+            c.type === "dm" &&
+            c.members.some((m) => m.user.id === targetUser.id)
+        );
+      } catch {
+        // Ignore and proceed with create flow.
+      }
+    }
+
     if (existing) {
       setSelectedConvId(existing.id);
       setSearch("");
       setSearchResults([]);
-      if (user) {
-        await ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
-      }
+      await ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
       return;
     }
 
     // Create a new DM conversation
     try {
-      if (!user) return;
-
       const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
       const otherKeys = await api.getUserKeys(targetUser.id, token);
       const otherPublicKey = latestPublicKey(otherKeys);
@@ -400,7 +440,10 @@ function App() {
         { type: "dm", memberIds: [targetUser.id], encryptedKeys },
         token
       );
-      setConversations((prev) => [conv, ...prev]);
+      setConversations((prev) => {
+        const withoutDup = prev.filter((existingConv) => existingConv.id !== conv.id);
+        return [conv, ...withoutDup];
+      });
       setSelectedConvId(conv.id);
       setMainView("chat");
       setSearch("");
@@ -694,17 +737,27 @@ function App() {
 
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
-                <span className="text-xs text-orbit-muted">{conversations.length}</span>
+                <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
               </div>
 
               <div className="mt-2 space-y-2 overflow-y-auto pr-1">
-                {conversations.map((conv) => {
+                {sortedConversations.map((conv) => {
                   const isSelected = conv.id === selectedConvId;
                   const otherMember = conv.members.find((m) => m.user.id !== user.id);
+                  const convoMessages = byConversation[conv.id] ?? [];
+                  const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
                   const displayName =
                     conv.type === "dm"
                       ? otherMember?.user.username ?? "DM"
                       : conv.name ?? "Group";
+                  const preview = lastMessage
+                    ? `${lastMessage.sender === user.username ? "You" : lastMessage.sender}: Encrypted message`
+                    : conv.type === "dm"
+                      ? "Direct message"
+                      : `${conv.members.length} members`;
+                  const activityTime = lastMessage
+                    ? formatRecentTimestamp(lastMessage.createdAt)
+                    : formatRecentTimestamp(new Date(conv.createdAt).getTime());
                   return (
                     <button
                       key={conv.id}
@@ -715,14 +768,15 @@ function App() {
                       }`}
                       onClick={() => setSelectedConvId(conv.id)}
                     >
-                      <p className="text-sm font-semibold">@{displayName}</p>
-                      <p className="mt-1 text-xs text-slate-400">
-                        {conv.type === "dm" ? "Direct message" : `${conv.members.length} members`}
-                      </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-semibold">@{displayName}</p>
+                        <span className="shrink-0 text-[10px] uppercase tracking-wide text-orbit-muted">{activityTime}</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-400">{preview}</p>
                     </button>
                   );
                 })}
-                {conversations.length === 0 && (
+                {sortedConversations.length === 0 && (
                   <p className="text-xs text-orbit-muted">No conversations yet. Search for a user above to start one.</p>
                 )}
               </div>
