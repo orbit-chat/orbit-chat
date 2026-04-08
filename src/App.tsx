@@ -245,6 +245,46 @@ function App() {
   }, [loadFriendsData, token]);
 
   useEffect(() => {
+    if (!token) return;
+
+    const refreshFriendsSilently = () => {
+      loadFriendsData().catch(() => {
+        // Keep background refresh silent to avoid noisy transient network errors.
+      });
+    };
+
+    const onWindowFocus = () => refreshFriendsSilently();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshFriendsSilently();
+      }
+    };
+
+    const onFriendshipsUpdated = () => {
+      refreshFriendsSilently();
+    };
+
+    window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    socket?.on("friendships_updated", onFriendshipsUpdated);
+
+    return () => {
+      window.removeEventListener("focus", onWindowFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      socket?.off("friendships_updated", onFriendshipsUpdated);
+    };
+  }, [loadFriendsData, socket, token]);
+
+  useEffect(() => {
+    if (!token) return;
+    if (navTab !== "friends") return;
+
+    loadFriendsData().catch(() => {
+      // Explicit refresh when opening the Friends tab.
+    });
+  }, [loadFriendsData, navTab, token]);
+
+  useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
 
