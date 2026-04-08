@@ -22,9 +22,10 @@ function DecryptedMessageText(props: {
   conversationId: string;
   cipherText: string;
   nonce?: string;
+  keyVersion?: number;
 }) {
-  const { conversationId, cipherText, nonce } = props;
-  const secretKey = useE2EEStore((state) => state.secretKeyByConversationId[conversationId] ?? null);
+  const { conversationId, cipherText, nonce, keyVersion } = props;
+  const secretKey = useE2EEStore((state) => state.getConversationSecretKeyForVersion(conversationId, keyVersion));
   const [plain, setPlain] = useState<string | null>(null);
 
   useEffect(() => {
@@ -329,6 +330,7 @@ function App() {
           senderId: m.sender.id,
           sender: m.sender.username,
           cipherText: m.ciphertext,
+          keyVersion: m.keyVersion,
           nonce: m.nonce,
           createdAt: new Date(m.createdAt).getTime(),
         });
@@ -1123,7 +1125,12 @@ function App() {
                     >
                       {msg.sender}
                     </button>
-                    <DecryptedMessageText conversationId={selectedConversation.id} cipherText={msg.cipherText} nonce={msg.nonce} />
+                    <DecryptedMessageText
+                      conversationId={selectedConversation.id}
+                      cipherText={msg.cipherText}
+                      nonce={msg.nonce}
+                      keyVersion={msg.keyVersion}
+                    />
                   </article>
                 );
               })}

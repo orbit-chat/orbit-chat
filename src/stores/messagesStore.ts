@@ -6,6 +6,7 @@ export type ChatMessage = {
   sender: string;
   cipherText: string;
   nonce?: string;
+  keyVersion?: number;
   createdAt: number;
   ttlSeconds?: number;
 };

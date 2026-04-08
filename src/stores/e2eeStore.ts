@@ -25,6 +25,7 @@ const conversationKeyLoadInFlight = new Map<string, Promise<string | null>>();
 
 type E2EEState = {
   secretKeyByConversationId: Record<string, string>;
+  secretKeyByConversationIdAndVersion: Record<string, Record<number, string>>;
   keyVersionByConversationId: Record<string, number>;
   loadingByConversationId: Record<string, boolean>;
   errorByConversationId: Record<string, string | null>;
@@ -33,6 +34,7 @@ type E2EEState = {
   ensureDeviceKeypair: (userId: string, token: string) => Promise<{ publicKey: string; privateKey: string }>;
 
   getConversationSecretKey: (conversationId: string) => string | null;
+  getConversationSecretKeyForVersion: (conversationId: string, keyVersion?: number | null) => string | null;
   getConversationKeyVersion: (conversationId: string) => number | null;
   ensureConversationSecretKey: (params: {
     conversation: api.Conversation;
@@ -43,6 +45,7 @@ type E2EEState = {
 
 export const useE2EEStore = create<E2EEState>((set, get) => ({
   secretKeyByConversationId: {},
+  secretKeyByConversationIdAndVersion: {},
   keyVersionByConversationId: {},
   loadingByConversationId: {},
   errorByConversationId: {},
@@ -73,6 +76,13 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
   },
 
   getConversationSecretKey: (conversationId) => get().secretKeyByConversationId[conversationId] ?? null,
+  getConversationSecretKeyForVersion: (conversationId, keyVersion) => {
+    const byVersion = get().secretKeyByConversationIdAndVersion[conversationId] ?? {};
+    if (typeof keyVersion === "number" && byVersion[keyVersion]) {
+      return byVersion[keyVersion];
+    }
+    return get().secretKeyByConversationId[conversationId] ?? null;
+  },
   getConversationKeyVersion: (conversationId) => get().keyVersionByConversationId[conversationId] ?? null,
 
   ensureConversationSecretKey: async ({ conversation, token, myUserId }) => {
@@ -99,22 +109,43 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
           .slice()
           .sort((a, b) => (b.keyVersion ?? 0) - (a.keyVersion ?? 0));
 
+        const decryptedByVersion: Record<number, string> = {};
+
         for (const candidate of orderedKeys) {
           if (!candidate.encryptedGroupKey) continue;
           try {
             const secretKey = await openSealedWithKeypair(candidate.encryptedGroupKey, myPublicKey, myPrivateKey);
-            set({
-              secretKeyByConversationId: { ...get().secretKeyByConversationId, [conversation.id]: secretKey },
-              keyVersionByConversationId: {
-                ...get().keyVersionByConversationId,
-                [conversation.id]: candidate.keyVersion ?? 1,
-              },
-              loadingByConversationId: { ...get().loadingByConversationId, [conversation.id]: false },
-            });
-            return secretKey;
+            const keyVersion = candidate.keyVersion ?? 1;
+            decryptedByVersion[keyVersion] = secretKey;
           } catch {
             // Try older keys when the latest key was encrypted for a different device.
           }
+        }
+
+        const availableVersions = Object.keys(decryptedByVersion)
+          .map((version) => Number(version))
+          .filter((version) => Number.isFinite(version))
+          .sort((a, b) => b - a);
+
+        if (availableVersions.length > 0) {
+          const activeVersion = availableVersions[0]!;
+          const activeSecret = decryptedByVersion[activeVersion]!;
+          set({
+            secretKeyByConversationId: { ...get().secretKeyByConversationId, [conversation.id]: activeSecret },
+            secretKeyByConversationIdAndVersion: {
+              ...get().secretKeyByConversationIdAndVersion,
+              [conversation.id]: {
+                ...(get().secretKeyByConversationIdAndVersion[conversation.id] ?? {}),
+                ...decryptedByVersion,
+              },
+            },
+            keyVersionByConversationId: {
+              ...get().keyVersionByConversationId,
+              [conversation.id]: activeVersion,
+            },
+            loadingByConversationId: { ...get().loadingByConversationId, [conversation.id]: false },
+          });
+          return activeSecret;
         }
 
         // 2) No stored key yet: bootstrap one for DMs by encrypting a new secret key to each member.
@@ -147,6 +178,13 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
 
         set({
           secretKeyByConversationId: { ...get().secretKeyByConversationId, [conversation.id]: secretKey },
+          secretKeyByConversationIdAndVersion: {
+            ...get().secretKeyByConversationIdAndVersion,
+            [conversation.id]: {
+              ...(get().secretKeyByConversationIdAndVersion[conversation.id] ?? {}),
+              [nextKeyVersion]: secretKey,
+            },
+          },
           keyVersionByConversationId: { ...get().keyVersionByConversationId, [conversation.id]: nextKeyVersion },
           loadingByConversationId: { ...get().loadingByConversationId, [conversation.id]: false },
         });

@@ -46,6 +46,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         cipherText: data.ciphertext,
         createdAt: data.createdAt,
         nonce: data.nonce,
+        keyVersion: data.keyVersion,
       });
     });
 
