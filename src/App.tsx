@@ -70,6 +70,10 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<api.UserProfile[]>([]);
+  const [friends, setFriends] = useState<api.FriendListItem[]>([]);
+  const [friendRequests, setFriendRequests] = useState<api.FriendRequestsResponse>({ incoming: [], outgoing: [] });
+  const [friendError, setFriendError] = useState<string | null>(null);
+  const [friendActionLoading, setFriendActionLoading] = useState<Record<string, boolean>>({});
   const conversationsRef = useRef<Conversation[]>([]);
 
   const { user, clearSession, token, loading, error, login, signup } = useAuthStore();
@@ -103,6 +107,78 @@ function App() {
     const other = selectedConversation.members.find((m) => m.user.id !== user.id);
     return other?.user.username ?? selectedConversation.name ?? "Chat";
   }, [selectedConversation, user]);
+
+  const friendStatusByUserId = useMemo(() => {
+    const map = new Map<string, "friend" | "incoming" | "outgoing">();
+    for (const friend of friends) map.set(friend.user.id, "friend");
+    for (const incoming of friendRequests.incoming) map.set(incoming.user.id, "incoming");
+    for (const outgoing of friendRequests.outgoing) {
+      if (!map.has(outgoing.user.id)) map.set(outgoing.user.id, "outgoing");
+    }
+    return map;
+  }, [friendRequests.incoming, friendRequests.outgoing, friends]);
+
+  const runFriendAction = useCallback(async (actionKey: string, action: () => Promise<void>) => {
+    setFriendActionLoading((prev) => ({ ...prev, [actionKey]: true }));
+    try {
+      await action();
+      setFriendError(null);
+    } catch (err: any) {
+      setFriendError(err?.message ?? "Friend action failed");
+    } finally {
+      setFriendActionLoading((prev) => ({ ...prev, [actionKey]: false }));
+    }
+  }, []);
+
+  const loadFriendsData = useCallback(async () => {
+    if (!token) return;
+    const [friendList, requests] = await Promise.all([
+      api.getFriends(token),
+      api.getFriendRequests(token),
+    ]);
+    setFriends(friendList);
+    setFriendRequests(requests);
+  }, [token]);
+
+  const sendFriendRequest = useCallback(async (targetUserId: string) => {
+    if (!token) return;
+    await runFriendAction(`send:${targetUserId}`, async () => {
+      await api.sendFriendRequest(targetUserId, token);
+      await loadFriendsData();
+    });
+  }, [loadFriendsData, runFriendAction, token]);
+
+  const acceptIncomingRequest = useCallback(async (requestId: string) => {
+    if (!token) return;
+    await runFriendAction(`accept:${requestId}`, async () => {
+      await api.acceptFriendRequest(requestId, token);
+      await loadFriendsData();
+    });
+  }, [loadFriendsData, runFriendAction, token]);
+
+  const declineIncomingRequest = useCallback(async (requestId: string) => {
+    if (!token) return;
+    await runFriendAction(`decline:${requestId}`, async () => {
+      await api.declineFriendRequest(requestId, token);
+      await loadFriendsData();
+    });
+  }, [loadFriendsData, runFriendAction, token]);
+
+  const cancelOutgoingRequest = useCallback(async (requestId: string) => {
+    if (!token) return;
+    await runFriendAction(`cancel:${requestId}`, async () => {
+      await api.cancelFriendRequest(requestId, token);
+      await loadFriendsData();
+    });
+  }, [loadFriendsData, runFriendAction, token]);
+
+  const removeFriend = useCallback(async (friendUserId: string) => {
+    if (!token) return;
+    await runFriendAction(`remove:${friendUserId}`, async () => {
+      await api.removeFriend(friendUserId, token);
+      await loadFriendsData();
+    });
+  }, [loadFriendsData, runFriendAction, token]);
 
   const openProfilePopover = useCallback(
     async (userId: string, anchorEl?: HTMLElement | null) => {
@@ -156,6 +232,17 @@ function App() {
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  useEffect(() => {
+    if (!token) {
+      setFriends([]);
+      setFriendRequests({ incoming: [], outgoing: [] });
+      return;
+    }
+    loadFriendsData().catch(() => {
+      setFriendError("Unable to load friends right now.");
+    });
+  }, [loadFriendsData, token]);
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -235,7 +322,7 @@ function App() {
   };
 
   /* ───── Start DM with a searched user ───── */
-  const startDM = async (targetUser: api.UserProfile) => {
+  const startDM = async (targetUser: { id: string; username: string }) => {
     if (!token) return;
 
     // Check if a DM already exists with this user
@@ -474,7 +561,12 @@ function App() {
                       ? "border-orbit-accent/60 bg-gradient-to-br from-orbit-accent/20 to-orbit-accent/5 text-orbit-text shadow-[0_0_0_1px_rgba(0,0,0,0.15)_inset]"
                       : "border-white/10 bg-orbit-panel/80 text-orbit-muted hover:border-white/25 hover:bg-orbit-panel"
                   }`}
-                  onClick={() => setNavTab(item.key)}
+                  onClick={() => {
+                    setNavTab(item.key);
+                    if (item.key !== "dm") {
+                      setSelectedConvId(null);
+                    }
+                  }}
                   aria-pressed={active}
                 >
                   <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-slate-200 group-hover:text-orbit-text">
@@ -489,77 +581,301 @@ function App() {
 
         {/* ───── Sidebar: search + conversation list ───── */}
         <aside className="border-r border-white/10 bg-orbit-panel p-3.5">
-          <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
-          <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
+          {navTab === "dm" && (
+            <>
+              <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
+              <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
 
-          <label className="mt-4 block">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search users</span>
-            <input
-              className="orbit-input py-2"
-              placeholder="Search username..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search users</span>
+                <input
+                  className="orbit-input py-2"
+                  placeholder="Search username..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
 
-          {/* Search results */}
-          {searchResults.length > 0 && (
-            <div className="mt-2 space-y-1">
-              <p className="text-xs text-orbit-muted">Search results</p>
-              {searchResults.map((u) => (
-                <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2">
-                  <button
-                    className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
-                    onClick={(event) => openProfilePopover(u.id, event.currentTarget)}
-                  >
-                    @{u.username}
-                  </button>
-                  <button
-                    className="orbit-btn px-3 py-2 text-xs"
-                    onClick={() => startDM(u)}
-                  >
-                    Chat
-                  </button>
+              {searchResults.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-orbit-muted">Search results</p>
+                  {searchResults.map((u) => {
+                    const relation = friendStatusByUserId.get(u.id);
+                    const incomingRequest = friendRequests.incoming.find((request) => request.user.id === u.id);
+                    const outgoingRequest = friendRequests.outgoing.find((request) => request.user.id === u.id);
+
+                    return (
+                      <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2">
+                        <button
+                          className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
+                          onClick={(event) => openProfilePopover(u.id, event.currentTarget)}
+                        >
+                          @{u.username}
+                        </button>
+                        {u.id === user.id ? (
+                          <span className="rounded-lg border border-white/10 px-2 py-1 text-xs text-orbit-muted">You</span>
+                        ) : relation === "friend" ? (
+                          <button
+                            className="orbit-btn px-3 py-2 text-xs"
+                            onClick={() => startDM(u)}
+                          >
+                            Message
+                          </button>
+                        ) : relation === "incoming" && incomingRequest ? (
+                          <button
+                            className="orbit-btn-primary px-3 py-2 text-xs"
+                            disabled={friendActionLoading[`accept:${incomingRequest.id}`]}
+                            onClick={() => void acceptIncomingRequest(incomingRequest.id)}
+                          >
+                            {friendActionLoading[`accept:${incomingRequest.id}`] ? "Accepting..." : "Accept"}
+                          </button>
+                        ) : relation === "outgoing" && outgoingRequest ? (
+                          <button
+                            className="orbit-btn px-3 py-2 text-xs"
+                            disabled={friendActionLoading[`cancel:${outgoingRequest.id}`]}
+                            onClick={() => void cancelOutgoingRequest(outgoingRequest.id)}
+                          >
+                            {friendActionLoading[`cancel:${outgoingRequest.id}`] ? "Cancelling..." : "Pending"}
+                          </button>
+                        ) : (
+                          <button
+                            className="orbit-btn-primary px-3 py-2 text-xs"
+                            disabled={friendActionLoading[`send:${u.id}`]}
+                            onClick={() => void sendFriendRequest(u.id)}
+                          >
+                            {friendActionLoading[`send:${u.id}`] ? "Sending..." : "Add Friend"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
+                <span className="text-xs text-orbit-muted">{conversations.length}</span>
+              </div>
+
+              <div className="mt-2 space-y-2 overflow-y-auto pr-1">
+                {conversations.map((conv) => {
+                  const isSelected = conv.id === selectedConvId;
+                  const otherMember = conv.members.find((m) => m.user.id !== user.id);
+                  const displayName =
+                    conv.type === "dm"
+                      ? otherMember?.user.username ?? "DM"
+                      : conv.name ?? "Group";
+                  return (
+                    <button
+                      key={conv.id}
+                      className={`w-full rounded-xl border p-3 text-left transition ${
+                        isSelected
+                          ? "border-orbit-accent/60 bg-orbit-accent/10"
+                          : "border-white/5 bg-orbit-panelAlt hover:border-white/20"
+                      }`}
+                      onClick={() => setSelectedConvId(conv.id)}
+                    >
+                      <p className="text-sm font-semibold">@{displayName}</p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {conv.type === "dm" ? "Direct message" : `${conv.members.length} members`}
+                      </p>
+                    </button>
+                  );
+                })}
+                {conversations.length === 0 && (
+                  <p className="text-xs text-orbit-muted">No conversations yet. Search for a user above to start one.</p>
+                )}
+              </div>
+            </>
           )}
 
-          {/* Conversation list */}
-          <div className="mt-4 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
-            <span className="text-xs text-orbit-muted">{conversations.length}</span>
-          </div>
+          {navTab === "friends" && (
+            <>
+              <h1 className="text-lg font-semibold">Friends</h1>
+              <p className="mt-1 text-[13px] text-orbit-muted">Manage your network and jump into DMs fast</p>
 
-          <div className="mt-2 space-y-2 overflow-y-auto pr-1">
-            {conversations.map((conv) => {
-              const isSelected = conv.id === selectedConvId;
-              const otherMember = conv.members.find((m) => m.user.id !== user.id);
-              const displayName =
-                conv.type === "dm"
-                  ? otherMember?.user.username ?? "DM"
-                  : conv.name ?? "Group";
-              return (
-                <button
-                  key={conv.id}
-                  className={`w-full rounded-xl border p-3 text-left transition ${
-                    isSelected
-                      ? "border-orbit-accent/60 bg-orbit-accent/10"
-                      : "border-white/5 bg-orbit-panelAlt hover:border-white/20"
-                  }`}
-                  onClick={() => setSelectedConvId(conv.id)}
-                >
-                  <p className="text-sm font-semibold">@{displayName}</p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {conv.type === "dm" ? "Direct message" : `${conv.members.length} members`}
-                  </p>
-                </button>
-              );
-            })}
-            {conversations.length === 0 && (
-              <p className="text-xs text-orbit-muted">No conversations yet. Search for a user above to start one.</p>
-            )}
-          </div>
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Add friend by username</span>
+                <input
+                  className="orbit-input py-2"
+                  placeholder="Find people..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
+
+              {friendError && (
+                <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {friendError}
+                </div>
+              )}
+
+              {searchResults.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Directory</p>
+                  {searchResults.slice(0, 6).map((u) => {
+                    const relation = friendStatusByUserId.get(u.id);
+                    const incomingRequest = friendRequests.incoming.find((request) => request.user.id === u.id);
+                    const outgoingRequest = friendRequests.outgoing.find((request) => request.user.id === u.id);
+                    return (
+                      <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
+                        <button
+                          className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
+                          onClick={(event) => openProfilePopover(u.id, event.currentTarget)}
+                        >
+                          @{u.username}
+                        </button>
+                        {u.id === user.id ? (
+                          <span className="rounded-lg border border-white/10 px-2 py-1 text-xs text-orbit-muted">You</span>
+                        ) : relation === "friend" ? (
+                          <button className="orbit-btn px-3 py-2 text-xs" onClick={() => startDM(u)}>Message</button>
+                        ) : relation === "incoming" && incomingRequest ? (
+                          <button
+                            className="orbit-btn-primary px-3 py-2 text-xs"
+                            disabled={friendActionLoading[`accept:${incomingRequest.id}`]}
+                            onClick={() => void acceptIncomingRequest(incomingRequest.id)}
+                          >
+                            Accept
+                          </button>
+                        ) : relation === "outgoing" && outgoingRequest ? (
+                          <button
+                            className="orbit-btn px-3 py-2 text-xs"
+                            disabled={friendActionLoading[`cancel:${outgoingRequest.id}`]}
+                            onClick={() => void cancelOutgoingRequest(outgoingRequest.id)}
+                          >
+                            Pending
+                          </button>
+                        ) : (
+                          <button
+                            className="orbit-btn-primary px-3 py-2 text-xs"
+                            disabled={friendActionLoading[`send:${u.id}`]}
+                            onClick={() => void sendFriendRequest(u.id)}
+                          >
+                            Add
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Incoming Requests</p>
+                <span className="text-xs text-orbit-muted">{friendRequests.incoming.length}</span>
+              </div>
+              <div className="mt-2 space-y-2">
+                {friendRequests.incoming.slice(0, 4).map((request) => (
+                  <div key={request.id} className="rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
+                    <button
+                      className="text-sm font-semibold hover:underline"
+                      onClick={(event) => openProfilePopover(request.user.id, event.currentTarget)}
+                    >
+                      @{request.user.username}
+                    </button>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        className="orbit-btn-primary flex-1 px-3 py-2 text-xs"
+                        disabled={friendActionLoading[`accept:${request.id}`]}
+                        onClick={() => void acceptIncomingRequest(request.id)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="orbit-btn flex-1 px-3 py-2 text-xs"
+                        disabled={friendActionLoading[`decline:${request.id}`]}
+                        onClick={() => void declineIncomingRequest(request.id)}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {friendRequests.incoming.length === 0 && (
+                  <p className="text-xs text-orbit-muted">No incoming requests.</p>
+                )}
+              </div>
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Outgoing Requests</p>
+                <span className="text-xs text-orbit-muted">{friendRequests.outgoing.length}</span>
+              </div>
+              <div className="mt-2 space-y-2">
+                {friendRequests.outgoing.slice(0, 3).map((request) => (
+                  <div key={request.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
+                    <button
+                      className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
+                      onClick={(event) => openProfilePopover(request.user.id, event.currentTarget)}
+                    >
+                      @{request.user.username}
+                    </button>
+                    <button
+                      className="orbit-btn px-3 py-2 text-xs"
+                      disabled={friendActionLoading[`cancel:${request.id}`]}
+                      onClick={() => void cancelOutgoingRequest(request.id)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ))}
+                {friendRequests.outgoing.length === 0 && (
+                  <p className="text-xs text-orbit-muted">No outgoing requests.</p>
+                )}
+              </div>
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">All Friends</p>
+                <span className="text-xs text-orbit-muted">{friends.length}</span>
+              </div>
+              <div className="mt-2 max-h-[240px] space-y-2 overflow-y-auto pr-1">
+                {friends.map((friend) => (
+                  <div key={friend.id} className="rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        className="min-w-0 flex-1 text-left"
+                        onClick={(event) => openProfilePopover(friend.user.id, event.currentTarget)}
+                      >
+                        <p className="truncate text-sm font-semibold">@{friend.user.username}</p>
+                        <p className="truncate text-xs text-orbit-muted">
+                          {friend.user.statusEmoji ? `${friend.user.statusEmoji} ` : ""}
+                          {friend.user.statusText || friend.user.presence || "Available"}
+                        </p>
+                      </button>
+                      <span className={`h-2.5 w-2.5 rounded-full ${friend.user.presence === "online" ? "bg-emerald-400" : friend.user.presence === "idle" ? "bg-amber-400" : friend.user.presence === "dnd" ? "bg-rose-400" : "bg-slate-500"}`} />
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        className="orbit-btn flex-1 px-3 py-2 text-xs"
+                        onClick={() => {
+                          setNavTab("dm");
+                          void startDM({ id: friend.user.id, username: friend.user.username });
+                        }}
+                      >
+                        Message
+                      </button>
+                      <button
+                        className="orbit-btn flex-1 px-3 py-2 text-xs"
+                        disabled={friendActionLoading[`remove:${friend.user.id}`]}
+                        onClick={() => void removeFriend(friend.user.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {friends.length === 0 && (
+                  <p className="text-xs text-orbit-muted">No friends yet. Send a request from the directory above.</p>
+                )}
+              </div>
+            </>
+          )}
+
+          {navTab === "archive" && (
+            <>
+              <h1 className="text-lg font-semibold">Archive</h1>
+              <p className="mt-2 text-sm text-orbit-muted">Archive tools are coming soon.</p>
+            </>
+          )}
 
           <div className="orbit-card-solid mt-4 rounded-xl bg-orbit-panelAlt p-4 text-sm">
             <p className="font-semibold">Build {appVersion}</p>
@@ -600,6 +916,9 @@ function App() {
                 setSelectedConvId(null);
                 setSearch("");
                 setConversations([]);
+                setFriends([]);
+                setFriendRequests({ incoming: [], outgoing: [] });
+                setFriendError(null);
                 setMainView("chat");
                 closeProfilePopover();
               }}
@@ -617,6 +936,38 @@ function App() {
                   setMainView("chat");
                 }}
               />
+            ) : navTab === "friends" ? (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="orbit-card max-w-2xl rounded-3xl p-8 text-center">
+                  <h2 className="text-3xl font-bold">Friends Hub</h2>
+                  <p className="mt-3 text-sm text-slate-300">
+                    Accept requests, remove connections, and jump into private chats from the Friends panel.
+                  </p>
+                  <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-3">
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                      <p className="font-semibold">Accepted</p>
+                      <p className="mt-1 text-xs text-orbit-muted">{friends.length} friends</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                      <p className="font-semibold">Incoming</p>
+                      <p className="mt-1 text-xs text-orbit-muted">{friendRequests.incoming.length} requests</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                      <p className="font-semibold">Outgoing</p>
+                      <p className="mt-1 text-xs text-orbit-muted">{friendRequests.outgoing.length} pending</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : navTab === "archive" ? (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
+                  <h2 className="text-3xl font-bold">Archive</h2>
+                  <p className="mt-3 text-sm text-slate-300">
+                    Archived threads and media controls will appear here in a future update.
+                  </p>
+                </div>
+              </div>
             ) : !selectedConversation ? (
               <div className="flex h-full items-center justify-center p-8">
                 <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
