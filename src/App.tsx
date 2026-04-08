@@ -18,13 +18,6 @@ function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
     .publicKey;
 }
 
-function looksLikeBase64(value: string) {
-  // sodium.to_base64 output is typically URL-safe-ish but can include +/=
-  // This is just a heuristic for legacy plaintext messages.
-  if (value.length < 12) return false;
-  return /^[A-Za-z0-9+/=_-]+$/.test(value);
-}
-
 function DecryptedMessageText(props: {
   conversationId: string;
   cipherText: string;
@@ -47,8 +40,7 @@ function DecryptedMessageText(props: {
         const text = await decryptMessage(cipherText, nonce, secretKey);
         if (!cancelled) setPlain(text);
       } catch {
-        // Legacy compatibility: older messages used plaintext in the ciphertext field.
-        if (!cancelled) setPlain(looksLikeBase64(cipherText) ? null : cipherText);
+        if (!cancelled) setPlain(null);
       }
     };
 
