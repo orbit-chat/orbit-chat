@@ -79,7 +79,7 @@ function App() {
 
   const { user, clearSession, token, loading, error, login, signup } = useAuthStore();
   const { connected, connect, disconnect, socket } = useSocketStore();
-  const { byConversation, upsertMessage } = useMessagesStore();
+  const { byConversation, unreadCountByConversation, upsertMessage, setActiveConversation } = useMessagesStore();
   const profiles = useProfilesStore();
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
@@ -115,6 +115,13 @@ function App() {
       .sort((a, b) => getConversationLastActivity(b) - getConversationLastActivity(a));
   }, [byConversation, conversations]);
 
+  const hasUnreadDm = useMemo(() => {
+    return conversations.some((conv) => {
+      if (conv.type !== "dm") return false;
+      return (unreadCountByConversation[conv.id] ?? 0) > 0;
+    });
+  }, [conversations, unreadCountByConversation]);
+
   const formatRecentTimestamp = useCallback((timestampMs: number) => {
     const now = Date.now();
     const diffMs = now - timestampMs;
@@ -126,6 +133,26 @@ function App() {
     if (diffMs < hourMs) return `${Math.floor(diffMs / minuteMs)}m`;
     if (diffMs < dayMs) return `${Math.floor(diffMs / hourMs)}h`;
     return `${Math.floor(diffMs / dayMs)}d`;
+  }, []);
+
+  const formatMessageTimestamp = useCallback((timestampMs: number) => {
+    const tsDate = new Date(timestampMs);
+    const now = new Date();
+    const isSameDay =
+      tsDate.getFullYear() === now.getFullYear() &&
+      tsDate.getMonth() === now.getMonth() &&
+      tsDate.getDate() === now.getDate();
+
+    if (isSameDay) {
+      return tsDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+
+    return tsDate.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
   }, []);
 
   // Get the "other" user's name in a DM
@@ -320,6 +347,14 @@ function App() {
     profiles.fetchMe(token, user.id);
   }, [token, user?.id]);
 
+  useEffect(() => {
+    if (navTab !== "dm") {
+      setActiveConversation(null);
+      return;
+    }
+    setActiveConversation(selectedConvId);
+  }, [navTab, selectedConvId, setActiveConversation]);
+
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -333,13 +368,13 @@ function App() {
           keyVersion: m.keyVersion,
           nonce: m.nonce,
           createdAt: new Date(m.createdAt).getTime(),
-        });
+        }, { currentUserId: user?.id, markAsRead: true });
       }
     }).catch(() => {});
 
     // Join the room via socket
     socket?.emit("join_conversation", { conversationId: selectedConvId });
-  }, [selectedConvId, token, socket]);
+  }, [selectedConvId, token, socket, upsertMessage, user?.id]);
 
   /* ───── Refresh conversations on first inbound message ───── */
   useEffect(() => {
@@ -655,8 +690,15 @@ function App() {
                   }}
                   aria-pressed={active}
                 >
-                  <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-slate-200 group-hover:text-orbit-text">
+                  <span className="relative mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-slate-200 group-hover:text-orbit-text">
                     {item.icon}
+                    {item.key === "friends" && hasUnreadDm && (
+                      <span
+                        className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-orbit-panelAlt bg-orbit-accent"
+                        aria-label="Unread direct messages"
+                        title="Unread direct messages"
+                      />
+                    )}
                   </span>
                   <span className="block leading-none">{item.label}</span>
                 </button>
@@ -761,6 +803,7 @@ function App() {
                   const activityTime = lastMessage
                     ? formatRecentTimestamp(lastMessage.createdAt)
                     : formatRecentTimestamp(new Date(conv.createdAt).getTime());
+                  const unreadCount = unreadCountByConversation[conv.id] ?? 0;
                   return (
                     <button
                       key={conv.id}
@@ -773,7 +816,14 @@ function App() {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="truncate text-sm font-semibold">@{displayName}</p>
-                        <span className="shrink-0 text-[10px] uppercase tracking-wide text-orbit-muted">{activityTime}</span>
+                        <div className="flex items-center gap-2">
+                          {unreadCount > 0 && (
+                            <span className="inline-flex min-w-[1.3rem] items-center justify-center rounded-full bg-orbit-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
+                              {unreadCount > 99 ? "99+" : unreadCount}
+                            </span>
+                          )}
+                          <span className="shrink-0 text-[10px] uppercase tracking-wide text-orbit-muted">{activityTime}</span>
+                        </div>
                       </div>
                       <p className="mt-1 truncate text-xs text-slate-400">{preview}</p>
                     </button>
@@ -1131,6 +1181,9 @@ function App() {
                       nonce={msg.nonce}
                       keyVersion={msg.keyVersion}
                     />
+                    <p className={`mt-2 text-[11px] ${mine ? "text-right text-slate-300" : "text-orbit-muted"}`}>
+                      {formatMessageTimestamp(msg.createdAt)}
+                    </p>
                   </article>
                 );
               })}
