@@ -12,6 +12,7 @@ Orbit Chat combines:
 - a chat interface (React)
 - realtime delivery (websockets)
 - client-side cryptography (libsodium)
+- profile viewing and editing UI (popover + settings)
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
@@ -67,6 +68,11 @@ How a message is sent:
 3. Server relays/stores encrypted payload.
 4. Recipient decrypts locally with the same conversation key.
 
+Runtime behavior notes:
+
+- If a DM key is still being prepared on first receive, UI may briefly show encrypted fallback text, then decrypt once key material is available.
+- First-time inbound DM messages are delivered in realtime without requiring a re-login refresh.
+
 ## System Design
 
 ```text
@@ -82,7 +88,7 @@ Orbit Backend (NestJS)
 	|- Auth + user profiles
 	|- Conversation membership + message storage
 	|- Encrypted conversation key storage
-	|- Realtime fanout (Socket.IO)
+	|- Realtime fanout (Socket.IO conversation + user room delivery)
 	|- Presence cache + optional media services
 ```
 
@@ -126,7 +132,7 @@ Server is trusted for:
 - auth decisions
 - access control and membership checks
 - storage durability
-- message routing/realtime delivery
+- message routing/realtime delivery (including first-time DM recipient fanout)
 
 Server is not trusted for:
 
