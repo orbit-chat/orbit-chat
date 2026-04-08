@@ -53,6 +53,9 @@ export async function openSealedWithKeypair(
   const pk = fromB64(myPublicKeyBase64);
   const sk = fromB64(myPrivateKeyBase64);
   const opened = sodium.crypto_box_seal_open(sealed, pk, sk);
+  if (!opened) {
+    throw new Error("Unable to decrypt conversation key with this device keypair");
+  }
   return toB64(opened);
 }
 
@@ -73,5 +76,8 @@ export async function decryptMessage(cipherTextBase64: string, nonceBase64: stri
   const nonce = fromB64(nonceBase64);
   const secretKey = fromB64(secretKeyBase64);
   const plain = sodium.crypto_secretbox_open_easy(cipher, nonce, secretKey);
+  if (!plain) {
+    throw new Error("Unable to decrypt message with the current conversation key");
+  }
   return sodium.to_string(plain);
 }

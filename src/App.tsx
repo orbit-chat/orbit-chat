@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState, useCallback } from "react";
+import { FormEvent, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useAuthStore } from "./stores/authStore";
 import { useMessagesStore } from "./stores/messagesStore";
 import { useSocketStore } from "./stores/socketStore";
@@ -24,13 +24,12 @@ function DecryptedMessageText(props: {
   nonce?: string;
 }) {
   const { conversationId, cipherText, nonce } = props;
-  const e2ee = useE2EEStore();
+  const secretKey = useE2EEStore((state) => state.secretKeyByConversationId[conversationId] ?? null);
   const [plain, setPlain] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const secretKey = e2ee.getConversationSecretKey(conversationId);
       if (!secretKey || !nonce) {
         setPlain(null);
         return;
@@ -48,7 +47,7 @@ function DecryptedMessageText(props: {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, cipherText, nonce, e2ee]);
+  }, [cipherText, nonce, secretKey]);
 
   return <p className="mt-1 break-words text-orbit-text">{plain ?? "Encrypted message (unable to decrypt on this device)."}</p>;
 }
@@ -57,6 +56,7 @@ function App() {
   const [appVersion, setAppVersion] = useState("-");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
+  const [navTab, setNavTab] = useState<"dm" | "friends" | "archive">("dm");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -70,12 +70,16 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<api.UserProfile[]>([]);
+  const conversationsRef = useRef<Conversation[]>([]);
 
   const { user, clearSession, token, loading, error, login, signup } = useAuthStore();
   const { connected, connect, disconnect, socket } = useSocketStore();
   const { byConversation, upsertMessage } = useMessagesStore();
   const profiles = useProfilesStore();
-  const e2ee = useE2EEStore();
+  const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
+  const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
+  const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
+  const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
 
   const selectedConversation = useMemo(
     () => conversations.find((c) => c.id === selectedConvId) ?? null,
@@ -115,6 +119,14 @@ function App() {
     setProfilePopoverAnchor(null);
   }, []);
 
+  const openMyProfilePopover = useCallback(
+    (anchorEl?: HTMLElement | null) => {
+      if (!user?.id) return;
+      void openProfilePopover(user.id, anchorEl);
+    },
+    [openProfilePopover, user?.id]
+  );
+
   /* ───── Electron version ───── */
   useEffect(() => {
     window.electronAPI?.getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
@@ -146,6 +158,10 @@ function App() {
   }, [loadConversations]);
 
   useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  useEffect(() => {
     if (!token || !user) return;
     profiles.fetchMe(token, user.id);
   }, [token, user?.id]);
@@ -170,12 +186,29 @@ function App() {
     socket?.emit("join_conversation", { conversationId: selectedConvId });
   }, [selectedConvId, token, socket]);
 
+  /* ───── Refresh conversations on first inbound message ───── */
+  useEffect(() => {
+    if (!socket || !token) return;
+
+    const handleNewMessage = (data: { conversationId: string }) => {
+      const exists = conversationsRef.current.some((conv) => conv.id === data.conversationId);
+      if (!exists) {
+        void loadConversations();
+      }
+    };
+
+    socket.on("new_message", handleNewMessage);
+    return () => {
+      socket.off("new_message", handleNewMessage);
+    };
+  }, [socket, token, loadConversations]);
+
   /* ───── Ensure conversation secret key for DMs ───── */
   useEffect(() => {
     if (!token || !user || !selectedConversation) return;
     if (selectedConversation.type !== "dm") return;
-    e2ee.ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
-  }, [token, user?.id, selectedConversation, e2ee]);
+    ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
+  }, [token, user?.id, selectedConversation, ensureConversationSecretKey]);
 
   /* ───── Search users ───── */
   useEffect(() => {
@@ -216,7 +249,7 @@ function App() {
       setSearch("");
       setSearchResults([]);
       if (user) {
-        await e2ee.ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
+        await ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
       }
       return;
     }
@@ -225,7 +258,7 @@ function App() {
     try {
       if (!user) return;
 
-      const { publicKey: myPublicKey } = await e2ee.ensureDeviceKeypair(user.id, token);
+      const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
       const otherKeys = await api.getUserKeys(targetUser.id, token);
       const otherPublicKey = latestPublicKey(otherKeys);
       if (!otherPublicKey) return;
@@ -246,7 +279,7 @@ function App() {
       setSearch("");
       setSearchResults([]);
 
-      await e2ee.ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
+      await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
     } catch {
       // handle error
     }
@@ -262,7 +295,7 @@ function App() {
 
     (async () => {
       try {
-        const secretKey = await e2ee.ensureConversationSecretKey({
+        const secretKey = await ensureConversationSecretKey({
           conversation: selectedConversation,
           token,
           myUserId: user.id,
@@ -391,25 +424,76 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt text-orbit-text">
-      <div className="grid h-full grid-cols-[82px_320px_1fr]">
+      <div className="grid h-full grid-cols-[74px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-3">
-          <div className="mb-4 flex items-center justify-center rounded-xl bg-orbit-accent/15 p-2">
-            <img src="logo.png" alt="Orbit Chat logo" className="h-10 w-10 rounded-xl object-cover" />
+        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-2.5">
+          <div className="mb-4 flex items-center justify-center rounded-2xl bg-orbit-accent/15 p-2.5">
+            <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover" />
           </div>
-          <div className="space-y-3 text-center text-xs text-orbit-muted">
-            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">DM</div>
-            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Friends</div>
-            <div className="rounded-xl border border-white/10 bg-orbit-panel/90 p-2">Archive</div>
+          <div className="space-y-2.5">
+            {[
+              {
+                key: "dm" as const,
+                label: "DM",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                ),
+              },
+              {
+                key: "friends" as const,
+                label: "Friends",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="8.5" cy="7" r="4" />
+                    <path d="M20 8v6" />
+                    <path d="M23 11h-6" />
+                  </svg>
+                ),
+              },
+              {
+                key: "archive" as const,
+                label: "Archive",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="4" rx="1.2" />
+                    <path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+                    <path d="M10 12h4" />
+                  </svg>
+                ),
+              },
+            ].map((item) => {
+              const active = navTab === item.key;
+              return (
+                <button
+                  key={item.key}
+                  className={`group w-full rounded-2xl border px-2 py-2 text-[11px] font-semibold transition ${
+                    active
+                      ? "border-orbit-accent/60 bg-gradient-to-br from-orbit-accent/20 to-orbit-accent/5 text-orbit-text shadow-[0_0_0_1px_rgba(0,0,0,0.15)_inset]"
+                      : "border-white/10 bg-orbit-panel/80 text-orbit-muted hover:border-white/25 hover:bg-orbit-panel"
+                  }`}
+                  onClick={() => setNavTab(item.key)}
+                  aria-pressed={active}
+                >
+                  <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-slate-200 group-hover:text-orbit-text">
+                    {item.icon}
+                  </span>
+                  <span className="block leading-none">{item.label}</span>
+                </button>
+              );
+            })}
           </div>
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panel p-4">
+        <aside className="border-r border-white/10 bg-orbit-panel p-3.5">
           <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
-          <p className="mt-1 text-sm text-orbit-muted">Search users and start secure chats</p>
+          <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
 
           <label className="mt-4 block">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search users</span>
             <input
               className="orbit-input py-2"
               placeholder="Search username..."
@@ -423,19 +507,31 @@ function App() {
             <div className="mt-2 space-y-1">
               <p className="text-xs text-orbit-muted">Search results</p>
               {searchResults.map((u) => (
-                <button
-                  key={u.id}
-                  className="orbit-btn w-full justify-start bg-orbit-panelAlt text-left"
-                  onClick={() => startDM(u)}
-                >
-                  @{u.username}
-                </button>
+                <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2">
+                  <button
+                    className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
+                    onClick={(event) => openProfilePopover(u.id, event.currentTarget)}
+                  >
+                    @{u.username}
+                  </button>
+                  <button
+                    className="orbit-btn px-3 py-2 text-xs"
+                    onClick={() => startDM(u)}
+                  >
+                    Chat
+                  </button>
+                </div>
               ))}
             </div>
           )}
 
           {/* Conversation list */}
-          <div className="mt-4 space-y-2 overflow-y-auto pr-1">
+          <div className="mt-4 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
+            <span className="text-xs text-orbit-muted">{conversations.length}</span>
+          </div>
+
+          <div className="mt-2 space-y-2 overflow-y-auto pr-1">
             {conversations.map((conv) => {
               const isSelected = conv.id === selectedConvId;
               const otherMember = conv.members.find((m) => m.user.id !== user.id);
@@ -471,61 +567,73 @@ function App() {
               Socket: {connected ? "Connected" : "Disconnected"}
             </p>
           </div>
-
-          <button
-            className="orbit-btn mt-3 w-full"
-            onClick={() => {
-              setMainView("profile-settings");
-              setSelectedConvId(null);
-              closeProfilePopover();
-            }}
-          >
-            Profile Settings
-          </button>
-
-          <button
-            className="orbit-btn-danger mt-3 w-full"
-            onClick={() => {
-              clearSession();
-              setSelectedConvId(null);
-              setSearch("");
-              setConversations([]);
-              setMainView("chat");
-              closeProfilePopover();
-            }}
-          >
-            Sign Out
-          </button>
         </aside>
 
         {/* ───── Main content area ───── */}
-        {mainView === "profile-settings" && token && user ? (
-          <main className="bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
-            <ProfileSettings
-              token={token}
-              myUserId={user.id}
-              onClose={() => {
-                setMainView("chat");
+        <main className="flex h-full flex-col bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+          <header className="flex items-center justify-end gap-3 border-b border-white/10 bg-orbit-panel/40 px-4 py-3 backdrop-blur">
+            <button
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text hover:border-white/20"
+              onClick={(event) => openMyProfilePopover(event.currentTarget)}
+            >
+              @{user.username}
+            </button>
+            <button
+              className="orbit-btn h-10 w-10 p-0"
+              onClick={() => {
+                setMainView("profile-settings");
+                setSelectedConvId(null);
+                closeProfilePopover();
               }}
-            />
-          </main>
-        ) : !selectedConversation ? (
-          <main className="flex items-center justify-center bg-gradient-to-b from-orbit-bg to-orbit-panelAlt p-8">
-            <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
-              <h2 className="text-3xl font-bold">Welcome back, {user.username}</h2>
-              <p className="mt-3 text-sm text-slate-300">
-                Pick someone from the sidebar to start a private conversation. Message history and encrypted payload previews will appear here.
-              </p>
-              <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">Search users by username</div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">View online presence</div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">Open secure DM threads</div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">Send encrypted payloads</div>
+              aria-label="Open profile settings"
+              title="Profile settings"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.5" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c0 .38.13.74.36 1.03.23.29.56.49.92.56H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1 .33 1.65 1.65 0 0 0-.6 1z" />
+              </svg>
+            </button>
+            <button
+              className="orbit-btn-danger px-4 py-2 text-xs"
+              onClick={() => {
+                clearSession();
+                setSelectedConvId(null);
+                setSearch("");
+                setConversations([]);
+                setMainView("chat");
+                closeProfilePopover();
+              }}
+            >
+              Sign Out
+            </button>
+          </header>
+
+          <section className="min-h-0 flex-1">
+            {mainView === "profile-settings" && token && user ? (
+              <ProfileSettings
+                token={token}
+                myUserId={user.id}
+                onClose={() => {
+                  setMainView("chat");
+                }}
+              />
+            ) : !selectedConversation ? (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
+                  <h2 className="text-3xl font-bold">Welcome back, {user.username}</h2>
+                  <p className="mt-3 text-sm text-slate-300">
+                    Pick someone from the sidebar to start a private conversation. Message history and encrypted payload previews will appear here.
+                  </p>
+                  <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">Search users by username</div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">View online presence</div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">Open secure DM threads</div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">Send encrypted payloads</div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </main>
-        ) : (
-          <main className="flex flex-col bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+            ) : (
+              <div className="flex h-full flex-col">
             <header className="flex items-center justify-between border-b border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
               <div>
                 <button
@@ -539,9 +647,9 @@ function App() {
                 </button>
                 <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
               </div>
-              {e2ee.getConversationSecretKey(selectedConversation.id) ? (
+              {getConversationSecretKey(selectedConversation.id) ? (
                 <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
-              ) : e2ee.loadingByConversationId[selectedConversation.id] ? (
+              ) : loadingByConversationId[selectedConversation.id] ? (
                 <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-orbit-muted">Setting up encryption…</span>
               ) : (
                 <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
@@ -597,8 +705,10 @@ function App() {
                 </button>
               </div>
             </footer>
-          </main>
-        )}
+              </div>
+            )}
+          </section>
+        </main>
 
         <UserProfilePopover
           open={Boolean(profilePopoverUserId)}

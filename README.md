@@ -1,154 +1,151 @@
-# Orbit Chat (Desktop)
+# Orbit Chat Desktop
 
-Orbit Chat is an Electron desktop client (React + TypeScript) that supports **end-to-end encrypted (E2EE) direct messages**.
+Orbit Chat is a desktop direct-messaging app focused on private communication.
 
-This README is intentionally security/architecture-first. It explains what is encrypted, what the server can and cannot see, and how the system fits together.
+This app is designed so message text in one-to-one chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
-## What “Encrypted” Means Here
+## What This Is
 
-### Scope
+Orbit Chat combines:
 
-- **Direct messages (DMs):** message content is E2EE.
-- **Group chats:** not currently E2EE.
-- **Metadata:** not E2EE (the server still sees who is talking to whom, message timestamps, and other operational metadata needed to deliver messages).
+- a desktop shell (Electron)
+- a chat interface (React)
+- realtime delivery (websockets)
+- client-side cryptography (libsodium)
+- profile viewing and editing UI (popover + settings)
 
-### Security goals
+The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
-- A network attacker should not be able to read message contents.
-- The server should not be able to decrypt DM message contents.
-- Only devices that have the correct conversation key can decrypt messages.
+## What Is Actually Encrypted
 
-### Threat model (practical)
+Encrypted end-to-end:
 
-- Transport is assumed to be protected (HTTPS/WSS), but **transport encryption is not the same as E2EE**.
-- E2EE protects message content even if the server database is exposed.
-- This client is **not a formally audited cryptosystem** and should be treated as “security-conscious” rather than “security-certified.”
+- direct message text payloads (DM content)
 
-## How DM E2EE Works
+Not encrypted end-to-end:
 
-Orbit Chat uses `libsodium-wrappers` (libsodium) primitives:
+- who you talk to
+- conversation membership
+- message timestamps
+- delivery and seen metadata
+- profile data
 
-- **Sealed boxes** (`crypto_box_seal` / `crypto_box_seal_open`) to encrypt (wrap) a per-conversation symmetric key to a user’s public key.
-- **Secretbox** (`crypto_secretbox_easy` / `crypto_secretbox_open_easy`) to encrypt/decrypt message bodies with that symmetric key.
+In plain terms: the server can route messages and know chat structure, but should not be able to read encrypted DM text.
 
-### Key types
+## Why It Is Considered Safe
 
-- **Device keypair (asymmetric):** each user has a device keypair. The public key is registered with the server; the private key stays on the device.
-- **Conversation key (symmetric):** each DM has a random symmetric key used to encrypt messages in that DM.
+Orbit Chat uses a layered model:
 
-### Key distribution
+1. Transport security protects data in transit.
+2. End-to-end encryption protects DM content even if transport or storage is inspected.
+3. Device private keys remain on client devices.
 
-When a DM is created (or when a DM is used and no key exists yet):
+Core safety properties:
 
-1. The sender creates a random conversation key.
-2. The sender encrypts that conversation key separately to:
-   - their own public key
-   - the other user’s public key
-3. The server stores **only the encrypted conversation keys**, indexed by `(conversationId, userId)`.
+- Message ciphertext is created on sender device.
+- Message ciphertext is decrypted on recipient device.
+- Server stores encrypted conversation keys and encrypted messages.
+- Server does not perform plaintext decryption of DM payloads.
 
-Each device decrypts its encrypted conversation key locally using its private key, and then uses the resulting symmetric key to decrypt messages.
+## Cryptography Model (Plain English)
 
-### Message encryption
+There are two key types:
 
-Each DM message is sent as:
+- Device keypair (public/private): one per device identity.
+- Conversation key (symmetric): shared secret used to encrypt DM messages.
 
-- `ciphertext`: secretbox-encrypted message text
-- `nonce`: unique per-message nonce
-- `keyVersion`: currently `1` (room for future rotation)
+How a DM key is shared:
 
-The server forwards/stores `ciphertext` + `nonce` but cannot decrypt them without the conversation key.
+1. A random conversation key is generated.
+2. That key is sealed separately to each participant's public key.
+3. Server stores only the sealed versions.
+4. Each device opens its own sealed copy using its private key.
 
-## System Architecture
+How a message is sent:
 
-### Runtime components
+1. Sender encrypts text with the conversation key.
+2. Sender sends ciphertext + nonce.
+3. Server relays/stores encrypted payload.
+4. Recipient decrypts locally with the same conversation key.
+
+Runtime behavior notes:
+
+- If a DM key is still being prepared on first receive, UI may briefly show encrypted fallback text, then decrypt once key material is available.
+- First-time inbound DM messages are delivered in realtime without requiring a re-login refresh.
+
+## System Design
 
 ```text
-┌──────────────────────────────┐
-│ Electron Main Process         │
-│ - Creates BrowserWindow       │
-│ - Owns app-level privileges   │
-└───────────────┬──────────────┘
-                │
-                │ contextBridge (safe IPC surface)
-                ▼
-┌──────────────────────────────┐
-│ Preload Script                │
-│ - Exposes minimal APIs        │
-│ - Keeps Node out of renderer  │
-└───────────────┬──────────────┘
-                │
-                ▼
-┌──────────────────────────────┐
-│ React Renderer (UI)           │
-│ - Auth + session state        │
-│ - Socket connection           │
-│ - Encrypt/decrypt DM messages │
-└───────────────┬──────────────┘
-                │ HTTPS/WSS
-                ▼
-┌──────────────────────────────┐
-│ Orbit Server (separate repo)  │
-│ - Auth + user profiles        │
-│ - Conversation + message APIs │
-│ - Stores encrypted DM keys    │
-└──────────────────────────────┘
+Desktop App (Electron + React)
+	|- Auth/session state
+	|- Realtime socket client
+	|- E2EE key management
+	|- Encrypt/decrypt message content
+					|
+					| HTTPS + WSS
+					v
+Orbit Backend (NestJS)
+	|- Auth + user profiles
+	|- Conversation membership + message storage
+	|- Encrypted conversation key storage
+	|- Realtime fanout (Socket.IO conversation + user room delivery)
+	|- Presence cache + optional media services
 ```
 
-### Data-flow: sending a DM
+## Architecture View
+
+```mermaid
+flowchart LR
+	A[Sender Desktop Client] -->|Encrypted payload| B[Orbit Server]
+	B -->|Encrypted payload| C[Recipient Desktop Client]
+	A -->|Sealed conversation key for sender| B
+	A -->|Sealed conversation key for recipient| B
+	B -. cannot decrypt payload without private keys .- B
+```
+
+## Example Message Flow
 
 ```mermaid
 sequenceDiagram
+	participant S as Sender Client
+	participant API as Orbit Server
+	participant R as Receiver Client
 
-  autonumber
-  participant A as Alice (this client)
-  participant S as Server
-  participant B as Bob (client)
-
-  A->>S: Fetch conversation (members)
-  A->>S: Fetch my encrypted conversation key (if exists)
-
-  alt missing key
-    A->>S: Fetch Bob public keys
-    A->>A: Generate random conversation key
-    A->>A: Seal key to Alice public key
-    A->>A: Seal key to Bob public key
-    A->>S: Store encrypted keys (per user)
-  end
-
-  A->>A: Encrypt message with secretbox
-  A->>S: Send {ciphertext, nonce, keyVersion}
-  S->>B: Forward ciphertext + nonce
-  B->>B: Decrypt using local conversation key
+	S->>S: Ensure conversation key exists
+	S->>S: Encrypt plaintext -> ciphertext + nonce
+	S->>API: Send encrypted message payload
+	API->>R: Emit realtime encrypted message event
+	R->>R: Decrypt locally using conversation key
+	R->>R: Render plaintext in UI
 ```
 
-## Where Things Live In This Repo
+## Trust Boundaries
 
-- `electron/main.ts`: Electron main process bootstrap
-- `electron/preload.ts`: renderer-safe IPC bridge
-- `src/App.tsx`: chat UI and message send/decrypt wiring
-- `src/stores/e2eeStore.ts`: device key + conversation key management
-- `src/lib/crypto.ts`: libsodium helpers (sealed box + secretbox)
-- `src/stores/socketStore.ts`: Socket.io lifecycle
-- `src/stores/messagesStore.ts`: in-memory message store
+Client is trusted for:
 
-## Security Notes & Limitations (Important)
+- plaintext handling
+- key generation
+- encryption and decryption
 
-- **Multi-device E2EE is partial:** users can register multiple public keys, but conversation key storage is currently **per user**, not per device. A new device may not be able to decrypt older DMs unless a key is re-shared/rotated.
-- **Key verification is not implemented:** there is no QR-code / fingerprint verification to detect MITM key-substitution by a malicious server.
-- **Forward secrecy is not implemented:** if a conversation key is compromised, historical messages for that DM could be decrypted.
-- **Local private key storage:** private keys are stored in the renderer’s storage (currently `localStorage`). This is convenient but not as strong as using OS keychain/secure storage.
-- **E2EE covers message body only:** usernames, membership, timestamps, and delivery metadata are not end-to-end encrypted.
+Server is trusted for:
 
-## Minimal Setup (Local)
+- auth decisions
+- access control and membership checks
+- storage durability
+- message routing/realtime delivery (including first-time DM recipient fanout)
 
-This repo is the desktop client only; it requires a running backend.
+Server is not trusted for:
 
-- Create a `.env` from `.env.example`
-- Set:
-  - `VITE_API_URL`
-  - `VITE_SOCKET_URL`
+- reading plaintext DM content
 
-If you do need to run it locally:
+## Important Limits (Honest Security Notes)
 
-- Install: `npm install --cache .npm-cache`
-- Start dev app: `npm run dev`
+- Group chats are not fully E2EE in the same way as DMs.
+- Metadata is still visible to backend.
+- Private keys are currently stored in local app storage, not OS keychain.
+- Fingerprint verification between users is not implemented.
+- Forward secrecy and ratcheting are not implemented yet.
+
+## Product Summary
+
+Orbit Chat is a desktop-first secure messaging client where DM content is encrypted on-device and decrypted on-device, with backend infrastructure focused on identity, routing, and encrypted data transport rather than plaintext access.

@@ -25,6 +25,7 @@ type E2EEState = {
   secretKeyByConversationId: Record<string, string>;
   loadingByConversationId: Record<string, boolean>;
   errorByConversationId: Record<string, string | null>;
+  publishedDeviceKeyByUserId: Record<string, boolean>;
 
   ensureDeviceKeypair: (userId: string, token: string) => Promise<{ publicKey: string; privateKey: string }>;
 
@@ -40,11 +41,19 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
   secretKeyByConversationId: {},
   loadingByConversationId: {},
   errorByConversationId: {},
+  publishedDeviceKeyByUserId: {},
 
   ensureDeviceKeypair: async (userId, token) => {
     const existingPrivateKey = localStorage.getItem(getPrivateKeyStorageKey(userId));
     if (existingPrivateKey) {
       const publicKey = await publicKeyFromPrivateKey(existingPrivateKey);
+      if (!get().publishedDeviceKeyByUserId[userId]) {
+        // Re-publish current device key once per session so peers encrypt to an active key for this device.
+        await api.addMyPublicKey(publicKey, token).catch(() => undefined);
+        set({
+          publishedDeviceKeyByUserId: { ...get().publishedDeviceKeyByUserId, [userId]: true },
+        });
+      }
       return { publicKey, privateKey: existingPrivateKey };
     }
 
@@ -52,6 +61,9 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
     const keypair = await generateKeypair();
     await api.addMyPublicKey(keypair.publicKey, token);
     localStorage.setItem(getPrivateKeyStorageKey(userId), keypair.privateKey);
+    set({
+      publishedDeviceKeyByUserId: { ...get().publishedDeviceKeyByUserId, [userId]: true },
+    });
     return keypair;
   },
 
@@ -71,17 +83,22 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
 
       // 1) Try to fetch my encrypted conversation keys and decrypt the latest.
       const existingKeys = await api.getMyConversationKeys(conversation.id, token).catch(() => [] as api.ConversationKey[]);
-      const latest = existingKeys
+      const orderedKeys = existingKeys
         .slice()
-        .sort((a, b) => (b.keyVersion ?? 0) - (a.keyVersion ?? 0))[0];
+        .sort((a, b) => (b.keyVersion ?? 0) - (a.keyVersion ?? 0));
 
-      if (latest?.encryptedGroupKey) {
-        const secretKey = await openSealedWithKeypair(latest.encryptedGroupKey, myPublicKey, myPrivateKey);
-        set({
-          secretKeyByConversationId: { ...get().secretKeyByConversationId, [conversation.id]: secretKey },
-          loadingByConversationId: { ...get().loadingByConversationId, [conversation.id]: false },
-        });
-        return secretKey;
+      for (const candidate of orderedKeys) {
+        if (!candidate.encryptedGroupKey) continue;
+        try {
+          const secretKey = await openSealedWithKeypair(candidate.encryptedGroupKey, myPublicKey, myPrivateKey);
+          set({
+            secretKeyByConversationId: { ...get().secretKeyByConversationId, [conversation.id]: secretKey },
+            loadingByConversationId: { ...get().loadingByConversationId, [conversation.id]: false },
+          });
+          return secretKey;
+        } catch {
+          // Try older keys when the latest key was encrypted for a different device.
+        }
       }
 
       // 2) No stored key yet: bootstrap one for DMs by encrypting a new secret key to each member.
