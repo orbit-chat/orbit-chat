@@ -1,150 +1,145 @@
 # Orbit Chat Desktop
 
-Orbit Chat is an Electron desktop client built with React and TypeScript.
+Orbit Chat is a desktop direct-messaging app focused on private communication.
 
-It provides:
+This app is designed so message text in one-to-one chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
-- encrypted direct messages (E2EE payloads)
-- realtime messaging over Socket.IO
-- profile popovers and profile settings
-- desktop packaging for macOS and Windows
+## What This Is
 
-This repository is the client app. The backend lives in `../orbit-server`.
+Orbit Chat combines:
 
-## Current Features
+- a desktop shell (Electron)
+- a chat interface (React)
+- realtime delivery (websockets)
+- client-side cryptography (libsodium)
 
-- Login and signup with JWT session handling
-- DM conversation list + live incoming messages
-- User search with quick "Chat" action
-- User profile popover (from search results, message sender, and top-right profile chip)
-- Profile settings page (display name, bio, pronouns, timezone, presence, status, links, avatar, banner)
-- E2EE DM message encryption/decryption using libsodium
-- Electron desktop shell with secure preload bridge
+The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
-## Tech Stack
+## What Is Actually Encrypted
 
-- Electron 34
-- Vite 6
-- React 18 + TypeScript 5
-- Tailwind CSS 3
-- Zustand state stores
-- Socket.IO client
-- libsodium-wrappers
+Encrypted end-to-end:
 
-## Quick Start
+- direct message text payloads (DM content)
 
-### 1. Install dependencies
+Not encrypted end-to-end:
 
-```bash
-npm install
+- who you talk to
+- conversation membership
+- message timestamps
+- delivery and seen metadata
+- profile data
+
+In plain terms: the server can route messages and know chat structure, but should not be able to read encrypted DM text.
+
+## Why It Is Considered Safe
+
+Orbit Chat uses a layered model:
+
+1. Transport security protects data in transit.
+2. End-to-end encryption protects DM content even if transport or storage is inspected.
+3. Device private keys remain on client devices.
+
+Core safety properties:
+
+- Message ciphertext is created on sender device.
+- Message ciphertext is decrypted on recipient device.
+- Server stores encrypted conversation keys and encrypted messages.
+- Server does not perform plaintext decryption of DM payloads.
+
+## Cryptography Model (Plain English)
+
+There are two key types:
+
+- Device keypair (public/private): one per device identity.
+- Conversation key (symmetric): shared secret used to encrypt DM messages.
+
+How a DM key is shared:
+
+1. A random conversation key is generated.
+2. That key is sealed separately to each participant's public key.
+3. Server stores only the sealed versions.
+4. Each device opens its own sealed copy using its private key.
+
+How a message is sent:
+
+1. Sender encrypts text with the conversation key.
+2. Sender sends ciphertext + nonce.
+3. Server relays/stores encrypted payload.
+4. Recipient decrypts locally with the same conversation key.
+
+## System Design
+
+```text
+Desktop App (Electron + React)
+	|- Auth/session state
+	|- Realtime socket client
+	|- E2EE key management
+	|- Encrypt/decrypt message content
+					|
+					| HTTPS + WSS
+					v
+Orbit Backend (NestJS)
+	|- Auth + user profiles
+	|- Conversation membership + message storage
+	|- Encrypted conversation key storage
+	|- Realtime fanout (Socket.IO)
+	|- Presence cache + optional media services
 ```
 
-### 2. Configure environment
+## Architecture View
 
-Copy `.env.example` to `.env` and set values:
-
-```env
-VITE_API_URL=http://localhost:3000
-VITE_SOCKET_URL=http://localhost:3000
+```mermaid
+flowchart LR
+	A[Sender Desktop Client] -->|Encrypted payload| B[Orbit Server]
+	B -->|Encrypted payload| C[Recipient Desktop Client]
+	A -->|Sealed conversation key for sender| B
+	A -->|Sealed conversation key for recipient| B
+	B -. cannot decrypt payload without private keys .- B
 ```
 
-### 3. Run in development
+## Example Message Flow
 
-```bash
-npm run dev
+```mermaid
+sequenceDiagram
+	participant S as Sender Client
+	participant API as Orbit Server
+	participant R as Receiver Client
+
+	S->>S: Ensure conversation key exists
+	S->>S: Encrypt plaintext -> ciphertext + nonce
+	S->>API: Send encrypted message payload
+	API->>R: Emit realtime encrypted message event
+	R->>R: Decrypt locally using conversation key
+	R->>R: Render plaintext in UI
 ```
 
-## Scripts
+## Trust Boundaries
 
-- `npm run dev`: start Vite + Electron dev workflow
-- `npm run typecheck`: TypeScript check only
-- `npm run build`: production build (`dist/` + `dist-electron/`)
-- `npm run check`: typecheck + build
-- `npm run dist`: package app for current platform with Electron Builder
-- `npm run dist:mac`: build macOS `dmg` + `zip`
-- `npm run dist:win`: build Windows NSIS installer (`.exe`)
-- `npm run release:publish`: upload build artifacts to GitHub Release and sync website downloads
+Client is trusted for:
 
-## Release Publishing
+- plaintext handling
+- key generation
+- encryption and decryption
 
-`npm run release:publish` runs `scripts/publish-release.mjs`.
+Server is trusted for:
 
-It:
+- auth decisions
+- access control and membership checks
+- storage durability
+- message routing/realtime delivery
 
-1. reads version from `package.json`
-2. finds matching artifacts in `release/`
-3. creates or updates GitHub Release tag `v<version>`
-4. uploads artifacts using `gh release upload --clobber`
-5. copies installers into `../orbit-chat.github.io/downloads`
-6. updates download links in `../orbit-chat.github.io/index.html`
+Server is not trusted for:
 
-Prerequisites:
+- reading plaintext DM content
 
-- GitHub CLI installed (`gh`)
-- authenticated (`gh auth login`)
-- release artifacts already generated (`npm run dist`, `npm run dist:mac`, or `npm run dist:win`)
+## Important Limits (Honest Security Notes)
 
-Dry run:
+- Group chats are not fully E2EE in the same way as DMs.
+- Metadata is still visible to backend.
+- Private keys are currently stored in local app storage, not OS keychain.
+- Fingerprint verification between users is not implemented.
+- Forward secrecy and ratcheting are not implemented yet.
 
-```bash
-node scripts/publish-release.mjs --dry-run
-```
+## Product Summary
 
-## E2EE Model (Direct Messages)
-
-Orbit Chat encrypts DM message content client-side.
-
-- Message payloads use `crypto_secretbox_easy`.
-- Per-conversation symmetric keys are sealed with recipient public keys via `crypto_box_seal`.
-- Server stores encrypted conversation keys and ciphertext, but not plaintext messages.
-
-Current behavior in code:
-
-- Device private key is stored locally (per user) in `localStorage`.
-- Existing device public key is re-published once per session to improve key availability.
-- Conversation key bootstrap occurs when missing for a DM.
-- Receiver decrypt path attempts available key versions from newest to oldest.
-
-## Security Notes
-
-- E2EE currently applies to DM message body payloads, not metadata.
-- Group chats are not end-to-end encrypted yet.
-- Key verification UX (fingerprints/QR) is not implemented yet.
-- Private key storage uses renderer local storage, not OS keychain.
-- No forward secrecy/ratchet protocol yet.
-
-## Project Structure
-
-- `electron/main.ts`: Electron main process and window lifecycle
-- `electron/preload.ts`: safe renderer bridge APIs
-- `src/App.tsx`: app shell, chat layout, compose/send flow, profile corner actions
-- `src/lib/api.ts`: backend HTTP client wrappers
-- `src/lib/crypto.ts`: libsodium crypto helpers
-- `src/stores/authStore.ts`: auth/session state
-- `src/stores/socketStore.ts`: socket lifecycle and inbound message events
-- `src/stores/messagesStore.ts`: conversation message cache
-- `src/stores/e2eeStore.ts`: device/conversation key lifecycle
-- `src/stores/profilesStore.ts`: user profile fetch/update/upload state
-- `src/components/ProfileSettings.tsx`: editable profile screen
-- `src/components/UserProfilePopover.tsx`: profile card overlay
-
-## Troubleshooting
-
-### Stuck on "Setting up encryption"
-
-- Ensure both users are on the latest desktop build.
-- Sign out/in once on both devices to refresh session + key registration.
-- Verify API and socket endpoints are reachable from both clients.
-
-### Build succeeds but app fails to connect
-
-- Confirm `.env` values match the running backend host.
-- Confirm backend CORS and websocket transport allow desktop client origin.
-
-### Profile image upload fails
-
-- Backend requires S3 configuration for avatar/banner upload endpoints.
-
-## License
-
-Private/internal project unless otherwise specified by repository owner.
+Orbit Chat is a desktop-first secure messaging client where DM content is encrypted on-device and decrypted on-device, with backend infrastructure focused on identity, routing, and encrypted data transport rather than plaintext access.
