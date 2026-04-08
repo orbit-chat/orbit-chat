@@ -1,154 +1,150 @@
-# Orbit Chat (Desktop)
+# Orbit Chat Desktop
 
-Orbit Chat is an Electron desktop client (React + TypeScript) that supports **end-to-end encrypted (E2EE) direct messages**.
+Orbit Chat is an Electron desktop client built with React and TypeScript.
 
-This README is intentionally security/architecture-first. It explains what is encrypted, what the server can and cannot see, and how the system fits together.
+It provides:
 
-## What “Encrypted” Means Here
+- encrypted direct messages (E2EE payloads)
+- realtime messaging over Socket.IO
+- profile popovers and profile settings
+- desktop packaging for macOS and Windows
 
-### Scope
+This repository is the client app. The backend lives in `../orbit-server`.
 
-- **Direct messages (DMs):** message content is E2EE.
-- **Group chats:** not currently E2EE.
-- **Metadata:** not E2EE (the server still sees who is talking to whom, message timestamps, and other operational metadata needed to deliver messages).
+## Current Features
 
-### Security goals
+- Login and signup with JWT session handling
+- DM conversation list + live incoming messages
+- User search with quick "Chat" action
+- User profile popover (from search results, message sender, and top-right profile chip)
+- Profile settings page (display name, bio, pronouns, timezone, presence, status, links, avatar, banner)
+- E2EE DM message encryption/decryption using libsodium
+- Electron desktop shell with secure preload bridge
 
-- A network attacker should not be able to read message contents.
-- The server should not be able to decrypt DM message contents.
-- Only devices that have the correct conversation key can decrypt messages.
+## Tech Stack
 
-### Threat model (practical)
+- Electron 34
+- Vite 6
+- React 18 + TypeScript 5
+- Tailwind CSS 3
+- Zustand state stores
+- Socket.IO client
+- libsodium-wrappers
 
-- Transport is assumed to be protected (HTTPS/WSS), but **transport encryption is not the same as E2EE**.
-- E2EE protects message content even if the server database is exposed.
-- This client is **not a formally audited cryptosystem** and should be treated as “security-conscious” rather than “security-certified.”
+## Quick Start
 
-## How DM E2EE Works
+### 1. Install dependencies
 
-Orbit Chat uses `libsodium-wrappers` (libsodium) primitives:
-
-- **Sealed boxes** (`crypto_box_seal` / `crypto_box_seal_open`) to encrypt (wrap) a per-conversation symmetric key to a user’s public key.
-- **Secretbox** (`crypto_secretbox_easy` / `crypto_secretbox_open_easy`) to encrypt/decrypt message bodies with that symmetric key.
-
-### Key types
-
-- **Device keypair (asymmetric):** each user has a device keypair. The public key is registered with the server; the private key stays on the device.
-- **Conversation key (symmetric):** each DM has a random symmetric key used to encrypt messages in that DM.
-
-### Key distribution
-
-When a DM is created (or when a DM is used and no key exists yet):
-
-1. The sender creates a random conversation key.
-2. The sender encrypts that conversation key separately to:
-   - their own public key
-   - the other user’s public key
-3. The server stores **only the encrypted conversation keys**, indexed by `(conversationId, userId)`.
-
-Each device decrypts its encrypted conversation key locally using its private key, and then uses the resulting symmetric key to decrypt messages.
-
-### Message encryption
-
-Each DM message is sent as:
-
-- `ciphertext`: secretbox-encrypted message text
-- `nonce`: unique per-message nonce
-- `keyVersion`: currently `1` (room for future rotation)
-
-The server forwards/stores `ciphertext` + `nonce` but cannot decrypt them without the conversation key.
-
-## System Architecture
-
-### Runtime components
-
-```text
-┌──────────────────────────────┐
-│ Electron Main Process         │
-│ - Creates BrowserWindow       │
-│ - Owns app-level privileges   │
-└───────────────┬──────────────┘
-                │
-                │ contextBridge (safe IPC surface)
-                ▼
-┌──────────────────────────────┐
-│ Preload Script                │
-│ - Exposes minimal APIs        │
-│ - Keeps Node out of renderer  │
-└───────────────┬──────────────┘
-                │
-                ▼
-┌──────────────────────────────┐
-│ React Renderer (UI)           │
-│ - Auth + session state        │
-│ - Socket connection           │
-│ - Encrypt/decrypt DM messages │
-└───────────────┬──────────────┘
-                │ HTTPS/WSS
-                ▼
-┌──────────────────────────────┐
-│ Orbit Server (separate repo)  │
-│ - Auth + user profiles        │
-│ - Conversation + message APIs │
-│ - Stores encrypted DM keys    │
-└──────────────────────────────┘
+```bash
+npm install
 ```
 
-### Data-flow: sending a DM
+### 2. Configure environment
 
-```mermaid
-sequenceDiagram
+Copy `.env.example` to `.env` and set values:
 
-  autonumber
-  participant A as Alice (this client)
-  participant S as Server
-  participant B as Bob (client)
-
-  A->>S: Fetch conversation (members)
-  A->>S: Fetch my encrypted conversation key (if exists)
-
-  alt missing key
-    A->>S: Fetch Bob public keys
-    A->>A: Generate random conversation key
-    A->>A: Seal key to Alice public key
-    A->>A: Seal key to Bob public key
-    A->>S: Store encrypted keys (per user)
-  end
-
-  A->>A: Encrypt message with secretbox
-  A->>S: Send {ciphertext, nonce, keyVersion}
-  S->>B: Forward ciphertext + nonce
-  B->>B: Decrypt using local conversation key
+```env
+VITE_API_URL=http://localhost:3000
+VITE_SOCKET_URL=http://localhost:3000
 ```
 
-## Where Things Live In This Repo
+### 3. Run in development
 
-- `electron/main.ts`: Electron main process bootstrap
-- `electron/preload.ts`: renderer-safe IPC bridge
-- `src/App.tsx`: chat UI and message send/decrypt wiring
-- `src/stores/e2eeStore.ts`: device key + conversation key management
-- `src/lib/crypto.ts`: libsodium helpers (sealed box + secretbox)
-- `src/stores/socketStore.ts`: Socket.io lifecycle
-- `src/stores/messagesStore.ts`: in-memory message store
+```bash
+npm run dev
+```
 
-## Security Notes & Limitations (Important)
+## Scripts
 
-- **Multi-device E2EE is partial:** users can register multiple public keys, but conversation key storage is currently **per user**, not per device. A new device may not be able to decrypt older DMs unless a key is re-shared/rotated.
-- **Key verification is not implemented:** there is no QR-code / fingerprint verification to detect MITM key-substitution by a malicious server.
-- **Forward secrecy is not implemented:** if a conversation key is compromised, historical messages for that DM could be decrypted.
-- **Local private key storage:** private keys are stored in the renderer’s storage (currently `localStorage`). This is convenient but not as strong as using OS keychain/secure storage.
-- **E2EE covers message body only:** usernames, membership, timestamps, and delivery metadata are not end-to-end encrypted.
+- `npm run dev`: start Vite + Electron dev workflow
+- `npm run typecheck`: TypeScript check only
+- `npm run build`: production build (`dist/` + `dist-electron/`)
+- `npm run check`: typecheck + build
+- `npm run dist`: package app for current platform with Electron Builder
+- `npm run dist:mac`: build macOS `dmg` + `zip`
+- `npm run dist:win`: build Windows NSIS installer (`.exe`)
+- `npm run release:publish`: upload build artifacts to GitHub Release and sync website downloads
 
-## Minimal Setup (Local)
+## Release Publishing
 
-This repo is the desktop client only; it requires a running backend.
+`npm run release:publish` runs `scripts/publish-release.mjs`.
 
-- Create a `.env` from `.env.example`
-- Set:
-  - `VITE_API_URL`
-  - `VITE_SOCKET_URL`
+It:
 
-If you do need to run it locally:
+1. reads version from `package.json`
+2. finds matching artifacts in `release/`
+3. creates or updates GitHub Release tag `v<version>`
+4. uploads artifacts using `gh release upload --clobber`
+5. copies installers into `../orbit-chat.github.io/downloads`
+6. updates download links in `../orbit-chat.github.io/index.html`
 
-- Install: `npm install --cache .npm-cache`
-- Start dev app: `npm run dev`
+Prerequisites:
+
+- GitHub CLI installed (`gh`)
+- authenticated (`gh auth login`)
+- release artifacts already generated (`npm run dist`, `npm run dist:mac`, or `npm run dist:win`)
+
+Dry run:
+
+```bash
+node scripts/publish-release.mjs --dry-run
+```
+
+## E2EE Model (Direct Messages)
+
+Orbit Chat encrypts DM message content client-side.
+
+- Message payloads use `crypto_secretbox_easy`.
+- Per-conversation symmetric keys are sealed with recipient public keys via `crypto_box_seal`.
+- Server stores encrypted conversation keys and ciphertext, but not plaintext messages.
+
+Current behavior in code:
+
+- Device private key is stored locally (per user) in `localStorage`.
+- Existing device public key is re-published once per session to improve key availability.
+- Conversation key bootstrap occurs when missing for a DM.
+- Receiver decrypt path attempts available key versions from newest to oldest.
+
+## Security Notes
+
+- E2EE currently applies to DM message body payloads, not metadata.
+- Group chats are not end-to-end encrypted yet.
+- Key verification UX (fingerprints/QR) is not implemented yet.
+- Private key storage uses renderer local storage, not OS keychain.
+- No forward secrecy/ratchet protocol yet.
+
+## Project Structure
+
+- `electron/main.ts`: Electron main process and window lifecycle
+- `electron/preload.ts`: safe renderer bridge APIs
+- `src/App.tsx`: app shell, chat layout, compose/send flow, profile corner actions
+- `src/lib/api.ts`: backend HTTP client wrappers
+- `src/lib/crypto.ts`: libsodium crypto helpers
+- `src/stores/authStore.ts`: auth/session state
+- `src/stores/socketStore.ts`: socket lifecycle and inbound message events
+- `src/stores/messagesStore.ts`: conversation message cache
+- `src/stores/e2eeStore.ts`: device/conversation key lifecycle
+- `src/stores/profilesStore.ts`: user profile fetch/update/upload state
+- `src/components/ProfileSettings.tsx`: editable profile screen
+- `src/components/UserProfilePopover.tsx`: profile card overlay
+
+## Troubleshooting
+
+### Stuck on "Setting up encryption"
+
+- Ensure both users are on the latest desktop build.
+- Sign out/in once on both devices to refresh session + key registration.
+- Verify API and socket endpoints are reachable from both clients.
+
+### Build succeeds but app fails to connect
+
+- Confirm `.env` values match the running backend host.
+- Confirm backend CORS and websocket transport allow desktop client origin.
+
+### Profile image upload fails
+
+- Backend requires S3 configuration for avatar/banner upload endpoints.
+
+## License
+
+Private/internal project unless otherwise specified by repository owner.
