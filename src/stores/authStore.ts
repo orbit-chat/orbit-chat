@@ -16,8 +16,8 @@ type AuthState = {
   error: string | null;
   setSession: (token: string, user: User, refreshToken?: string) => void;
   clearSession: () => void;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  signup: (username: string, password: string) => Promise<void>;
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -33,10 +33,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   clearSession: () =>
     set({ token: null, refreshToken: null, user: null, error: null }),
 
-  login: async (email, password) => {
+  login: async (username, password) => {
     set({ loading: true, error: null });
     try {
-      const res = await api.login({ email, password, deviceName: "Orbit Desktop" });
+      const res = await api.login({ username, password, deviceName: "Orbit Desktop" });
       // Ensure this device has a keypair for E2EE.
       // If missing, generate a new keypair and register its public key.
       const privateKeyStorageKey = `orbit:privateKey:${res.user.id}`;
@@ -57,12 +57,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  signup: async (email, username, password) => {
+  signup: async (username, password) => {
     set({ loading: true, error: null });
     try {
       const keypair = await generateKeypair();
       const res = await api.signup({
-        email,
         username,
         password,
         publicKey: keypair.publicKey,

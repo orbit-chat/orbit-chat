@@ -33,7 +33,6 @@ export type AuthResponse = {
 };
 
 export function signup(data: {
-  email: string;
   username: string;
   password: string;
   publicKey: string;
@@ -42,7 +41,7 @@ export function signup(data: {
   return request<AuthResponse>("/auth/signup", { method: "POST", body: data });
 }
 
-export function login(data: { email: string; password: string; deviceName: string }) {
+export function login(data: { username: string; password: string; deviceName: string }) {
   return request<AuthResponse>("/auth/login", { method: "POST", body: data });
 }
 
@@ -99,6 +98,30 @@ export type UpdateMyProfileInput = {
   links?: ProfileLink[] | null;
 };
 
+export type FriendSummary = {
+  id: string;
+  username: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  presence?: Presence | null;
+  statusText?: string | null;
+  statusEmoji?: string | null;
+};
+
+export type FriendListItem = {
+  id: string;
+  status: "pending" | "accepted";
+  createdAt: string;
+  updatedAt: string;
+  direction: "incoming" | "outgoing" | "friend";
+  user: FriendSummary;
+};
+
+export type FriendRequestsResponse = {
+  incoming: FriendListItem[];
+  outgoing: FriendListItem[];
+};
+
 export function searchUsers(query: string, token: string) {
   return request<UserProfile[]>(`/users/search?q=${encodeURIComponent(query)}`, { token });
 }
@@ -151,6 +174,50 @@ export function addMyPublicKey(publicKey: string, token: string) {
   return request<{ id: string; publicKey: string; createdAt: string }[]>(`/users/me/keys`, {
     method: "POST",
     body: { publicKey },
+    token,
+  });
+}
+
+export function getFriends(token: string) {
+  return request<FriendListItem[]>(`/users/friends`, { token });
+}
+
+export function getFriendRequests(token: string) {
+  return request<FriendRequestsResponse>(`/users/friends/requests`, { token });
+}
+
+export function sendFriendRequest(targetUserId: string, token: string) {
+  return request<FriendListItem>(`/users/friends/requests`, {
+    method: "POST",
+    body: { targetUserId },
+    token,
+  });
+}
+
+export function acceptFriendRequest(requestId: string, token: string) {
+  return request<FriendListItem>(`/users/friends/requests/${requestId}/accept`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function declineFriendRequest(requestId: string, token: string) {
+  return request<{ success: true }>(`/users/friends/requests/${requestId}/decline`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function cancelFriendRequest(requestId: string, token: string) {
+  return request<{ success: true }>(`/users/friends/requests/${requestId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export function removeFriend(friendUserId: string, token: string) {
+  return request<{ success: true }>(`/users/friends/${friendUserId}`, {
+    method: "DELETE",
     token,
   });
 }

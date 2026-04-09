@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { io, Socket } from "socket.io-client";
 import { useMessagesStore } from "./messagesStore";
+import { useAuthStore } from "./authStore";
 
 type SocketState = {
   socket: Socket | null;
@@ -39,6 +40,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       maxViews: number | null;
       createdAt: number;
     }) => {
+      const currentUserId = useAuthStore.getState().user?.id;
       useMessagesStore.getState().upsertMessage(data.conversationId, {
         id: data.id,
         senderId: data.senderId,
@@ -46,7 +48,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         cipherText: data.ciphertext,
         createdAt: data.createdAt,
         nonce: data.nonce,
-      });
+        keyVersion: data.keyVersion,
+      }, { currentUserId });
     });
 
     socket.on("message_delivered", (data: { messageId: string; userId: string }) => {

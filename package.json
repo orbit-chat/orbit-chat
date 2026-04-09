@@ -1,15 +1,15 @@
 {
-  "name": "orbit-chat-frontend",
-  "version": "0.2.0",
+  "name": "orbit-chat",
+  "version": "0.3.0",
   "private": true,
-  "description": "Orbit Chat desktop frontend",
+  "description": "Orbit Chat is a desktop-first secure messaging client where DM content is encrypted on-device and decrypted on-device, with backend infrastructure focused on identity, routing, and encrypted data transport rather than plaintext access.",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
-    "dist:mac": "npm run build && electron-builder --mac dmg zip",
+    "dist:mac": "npm run build && electron-builder --mac zip",
     "release:publish": "node scripts/publish-release.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build"
@@ -72,7 +72,6 @@
     "mac": {
       "category": "public.app-category.social-networking",
       "target": [
-        "dmg",
         "zip"
       ]
     }
