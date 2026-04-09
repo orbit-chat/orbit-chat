@@ -308,6 +308,12 @@ function App() {
     [conversations, selectedConvId]
   );
 
+  const selectedConversationLabel = useMemo(() => {
+    if (!selectedConversation || !user) return "Unknown";
+    if (selectedConversation.type !== "dm") return selectedConversation.name ?? "Group";
+    return selectedConversation.members.find((m) => m.user.id !== user.id)?.user.username ?? "Direct Message";
+  }, [selectedConversation, user]);
+
   const dmPartner = useMemo(() => {
     if (!selectedConversation || !user) return null;
     if (selectedConversation.type !== "dm") return null;
@@ -578,6 +584,15 @@ function App() {
     setMessageSendError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [selectedConvId]);
+
+  useEffect(() => {
+    if (!showChatSettings) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowChatSettings(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showChatSettings]);
 
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
@@ -1160,12 +1175,12 @@ function App() {
   /*  MAIN CHAT SCREEN                                    */
   /* ════════════════════════════════════════════════════ */
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt text-orbit-text">
-      <div className="grid h-full grid-cols-[74px_300px_1fr]">
+    <div className="orbit-shell">
+      <div className="grid h-full grid-cols-[72px_320px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-2.5">
-          <div className="mb-4 flex items-center justify-center rounded-2xl bg-orbit-accent/15 p-2.5">
-            <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover" />
+        <aside className="border-r border-white/10 bg-[#141822] p-2.5">
+          <div className="mb-4 flex items-center justify-center rounded-2xl bg-gradient-to-br from-orbit-accent/25 to-cyan-300/5 p-2.5 shadow-[0_10px_25px_rgba(18,201,180,0.15)]">
+            <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover ring-1 ring-white/20" />
           </div>
           <div className="space-y-2.5">
             {[
@@ -1206,11 +1221,7 @@ function App() {
               return (
                 <button
                   key={item.key}
-                  className={`group w-full rounded-2xl border px-2 py-2 text-[11px] font-semibold transition ${
-                    active
-                      ? "border-orbit-accent/60 bg-gradient-to-br from-orbit-accent/20 to-orbit-accent/5 text-orbit-text shadow-[0_0_0_1px_rgba(0,0,0,0.15)_inset]"
-                      : "border-white/10 bg-orbit-panel/80 text-orbit-muted hover:border-white/25 hover:bg-orbit-panel"
-                  }`}
+                  className={`group orbit-rail-btn ${active ? "orbit-rail-btn-active" : ""}`}
                   onClick={() => {
                     setNavTab(item.key);
                     if (item.key !== "dm") {
@@ -1241,10 +1252,10 @@ function App() {
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panel p-3.5">
+        <aside className="border-r border-white/10 bg-[#1a1e29] p-3.5">
           {navTab === "dm" && (
             <>
-              <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
+              <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
 
               <label className="mt-4 block">
@@ -1342,8 +1353,8 @@ function App() {
                       key={conv.id}
                       className={`w-full rounded-xl border p-3 text-left transition ${
                         isSelected
-                          ? "border-orbit-accent/60 bg-orbit-accent/10"
-                          : "border-white/5 bg-orbit-panelAlt hover:border-white/20"
+                          ? "border-orbit-accent/60 bg-orbit-accent/10 shadow-[0_8px_20px_rgba(18,201,180,0.15)]"
+                          : "border-white/5 bg-[#202533] hover:border-white/20"
                       }`}
                       onClick={() => {
                         setSelectedConvId(conv.id);
@@ -1571,17 +1582,26 @@ function App() {
             </>
           )}
 
-          <div className="orbit-card-solid mt-4 rounded-xl bg-orbit-panelAlt p-4 text-sm">
+          <div className="orbit-card-solid mt-4 rounded-xl bg-[#202533] p-4 text-sm">
             <p className="font-semibold">Build {appVersion}</p>
-            <p className={connected ? "text-emerald-400" : "text-rose-400"}>
-              Socket: {connected ? "Connected" : "Disconnected"}
+            <p className="mt-1 text-xs text-orbit-muted">Realtime session</p>
+            <p className={connected ? "mt-1 text-emerald-400" : "mt-1 text-rose-400"}>
+              {connected ? "Connected" : "Disconnected"}
             </p>
           </div>
         </aside>
 
         {/* ───── Main content area ───── */}
-        <main className="flex h-full flex-col overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
-          <header className="flex items-center justify-end gap-3 border-b border-white/10 bg-orbit-panel/40 px-4 py-3 backdrop-blur">
+        <main className="relative flex h-full flex-col overflow-hidden bg-gradient-to-b from-[#171b25] to-[#141822]">
+          <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#1b2030]/85 px-4 py-3 backdrop-blur">
+            <div className="flex items-center gap-3">
+              <img src="logo.png" alt="Orbit Chat logo" className="h-7 w-7 rounded-lg ring-1 ring-white/20" />
+              <div>
+                <p className="text-sm font-semibold text-orbit-text">Orbit Chat</p>
+                <p className="text-[11px] text-orbit-muted">Private by default</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
             <button
               className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text hover:border-white/20"
               onClick={(event) => openMyProfilePopover(event.currentTarget)}
@@ -1620,6 +1640,7 @@ function App() {
             >
               Sign Out
             </button>
+            </div>
           </header>
 
           <section className="min-h-0 flex-1 overflow-y-auto">
@@ -1802,7 +1823,7 @@ function App() {
               </div>
             ) : (
               <div className="flex h-full flex-col">
-            <header className="flex items-center justify-between border-b border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
+            <header className="flex items-center justify-between border-b border-white/10 bg-[#1b2030]/85 p-4 backdrop-blur">
               <div>
                 <button
                   className="text-left text-base font-semibold text-orbit-text hover:underline"
@@ -1846,120 +1867,6 @@ function App() {
               </div>
             </header>
 
-            {/* ════ Chat Settings Panel ════ */}
-            {showChatSettings && (
-              <div className="border-b border-white/10 bg-orbit-panel/80 p-4 backdrop-blur">
-                <div className="mx-auto max-w-md space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-orbit-text">Chat Settings</h3>
-                    <button
-                      className="text-xs text-orbit-muted hover:text-orbit-text"
-                      onClick={() => setShowChatSettings(false)}
-                    >
-                      Close
-                    </button>
-                  </div>
-
-                  {chatSettingsError && (
-                    <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
-                      {chatSettingsError}
-                    </div>
-                  )}
-
-                  {/* Passcode */}
-                  <div>
-                    <label className="orbit-label">New Passcode (leave blank to keep current)</label>
-                    <input
-                      className="orbit-input font-mono tracking-widest"
-                      value={chatSettingsPasscode}
-                      onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      placeholder="••••"
-                      maxLength={6}
-                    />
-                  </div>
-
-                  {/* Passcode length */}
-                  <div>
-                    <label className="orbit-label">Passcode Length (2-6 digits)</label>
-                    <input
-                      type="number"
-                      className="orbit-input"
-                      min={2}
-                      max={6}
-                      value={chatSettingsLength}
-                      onChange={(e) => setChatSettingsLength(Math.min(6, Math.max(2, Number(e.target.value))))}
-                    />
-                  </div>
-
-                  {/* Lock mode */}
-                  <div>
-                    <label className="orbit-label">Lock Mode</label>
-                    <select
-                      className="orbit-input"
-                      value={chatSettingsLockMode}
-                      onChange={(e) => setChatSettingsLockMode(e.target.value as api.ChatLockMode)}
-                    >
-                      <option value="on_leave">On Leave (lock when you switch away)</option>
-                      <option value="on_logout">On Logout (lock on sign out)</option>
-                      <option value="after_time">After Time (lock after fixed duration)</option>
-                      <option value="after_inactivity">After Inactivity (lock after idle period)</option>
-                    </select>
-                  </div>
-
-                  {/* Timeout (for time-based lock modes) */}
-                  {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
-                    <div>
-                      <label className="orbit-label">Lock Timeout (seconds)</label>
-                      <input
-                        type="number"
-                        className="orbit-input"
-                        min={10}
-                        value={chatSettingsTimeout}
-                        onChange={(e) => setChatSettingsTimeout(e.target.value)}
-                        placeholder="300"
-                      />
-                    </div>
-                  )}
-
-                  <button
-                    className="orbit-btn-primary w-full"
-                    disabled={chatSettingsSaving}
-                    onClick={async () => {
-                      if (!token) return;
-                      setChatSettingsSaving(true);
-                      setChatSettingsError(null);
-                      try {
-                        const data: Parameters<typeof api.updateChatSettings>[1] = {
-                          lockMode: chatSettingsLockMode,
-                          passcodeLength: chatSettingsLength,
-                        };
-                        if (chatSettingsPasscode) {
-                          data.passcode = chatSettingsPasscode;
-                        }
-                        if (chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") {
-                          data.lockTimeoutSeconds = Number(chatSettingsTimeout) || 300;
-                        }
-                        const updated = await api.updateChatSettings(selectedConversation.id, data, token);
-                        // Update local conversation state
-                        setConversations((prev) =>
-                          prev.map((c) => (c.id === updated.id ? updated : c))
-                        );
-                        // Re-unlock with new settings
-                        chatLock.unlock(updated.id, updated.lockMode, updated.lockTimeoutSeconds);
-                        setShowChatSettings(false);
-                      } catch (err: any) {
-                        setChatSettingsError(err?.message ?? "Failed to save settings");
-                      } finally {
-                        setChatSettingsSaving(false);
-                      }
-                    }}
-                  >
-                    {chatSettingsSaving ? "Saving..." : "Save Settings"}
-                  </button>
-                </div>
-              </div>
-            )}
-
             <section className="flex-1 space-y-3 overflow-y-auto p-4">
               {messages.length === 0 && (
                 <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
@@ -1971,8 +1878,8 @@ function App() {
                     key={msg.id}
                     className={`max-w-[80%] rounded-2xl border p-3 text-sm ${
                       mine
-                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15"
-                        : "border-white/10 bg-orbit-panel/90"
+                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
+                        : "border-white/10 bg-[#202533]"
                     }`}
                   >
                     <button
@@ -1996,7 +1903,7 @@ function App() {
               })}
             </section>
 
-            <footer className="border-t border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
+            <footer className="border-t border-white/10 bg-[#1b2030]/90 p-4 backdrop-blur">
               {(pendingFiles.length > 0 || pendingVideoLinks.length > 0) && (
                 <div className="mb-3 flex flex-wrap gap-2">
                   {pendingFiles.map((file, idx) => (
@@ -2074,6 +1981,140 @@ function App() {
               </div>
             )}
           </section>
+
+          {showChatSettings && selectedConversation && (
+            <div
+              className="orbit-modal-overlay"
+              onClick={() => {
+                if (!chatSettingsSaving) setShowChatSettings(false);
+              }}
+            >
+              <div
+                className="orbit-modal"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Chat settings"
+              >
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-orbit-text">Chat Settings</h3>
+                    <p className="mt-1 text-xs text-orbit-muted">Manage lock and passcode for @{selectedConversationLabel}</p>
+                  </div>
+                  <button
+                    className="orbit-btn px-3 py-2 text-xs"
+                    onClick={() => setShowChatSettings(false)}
+                    disabled={chatSettingsSaving}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {chatSettingsError && (
+                  <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                    {chatSettingsError}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <label className="block">
+                    <span className="orbit-label">New passcode (optional)</span>
+                    <input
+                      className="orbit-input font-mono tracking-[0.26em]"
+                      value={chatSettingsPasscode}
+                      onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder={"•".repeat(chatSettingsLength)}
+                      maxLength={6}
+                    />
+                    <span className="mt-1 block text-[11px] text-orbit-muted">Leave blank to keep the current passcode.</span>
+                  </label>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="orbit-label">Passcode length</span>
+                      <input
+                        type="number"
+                        className="orbit-input"
+                        min={2}
+                        max={6}
+                        value={chatSettingsLength}
+                        onChange={(e) => setChatSettingsLength(Math.min(6, Math.max(2, Number(e.target.value))))}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="orbit-label">Lock mode</span>
+                      <select
+                        className="orbit-select"
+                        value={chatSettingsLockMode}
+                        onChange={(e) => setChatSettingsLockMode(e.target.value as api.ChatLockMode)}
+                      >
+                        <option value="on_leave">On Leave</option>
+                        <option value="on_logout">On Logout</option>
+                        <option value="after_time">After Time</option>
+                        <option value="after_inactivity">After Inactivity</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
+                    <label className="block">
+                      <span className="orbit-label">Lock timeout in seconds</span>
+                      <input
+                        type="number"
+                        className="orbit-input"
+                        min={10}
+                        value={chatSettingsTimeout}
+                        onChange={(e) => setChatSettingsTimeout(e.target.value)}
+                        placeholder="300"
+                      />
+                    </label>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-1">
+                    <button
+                      className="orbit-btn px-4 py-2.5"
+                      onClick={() => setShowChatSettings(false)}
+                      disabled={chatSettingsSaving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="orbit-btn-primary px-5 py-2.5"
+                      disabled={chatSettingsSaving}
+                      onClick={async () => {
+                        if (!token) return;
+                        setChatSettingsSaving(true);
+                        setChatSettingsError(null);
+                        try {
+                          const data: Parameters<typeof api.updateChatSettings>[1] = {
+                            lockMode: chatSettingsLockMode,
+                            passcodeLength: chatSettingsLength,
+                          };
+                          if (chatSettingsPasscode) {
+                            data.passcode = chatSettingsPasscode;
+                          }
+                          if (chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") {
+                            data.lockTimeoutSeconds = Math.max(10, Number(chatSettingsTimeout) || 300);
+                          }
+                          const updated = await api.updateChatSettings(selectedConversation.id, data, token);
+                          setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                          chatLock.unlock(updated.id, updated.lockMode, updated.lockTimeoutSeconds);
+                          setShowChatSettings(false);
+                        } catch (err: any) {
+                          setChatSettingsError(err?.message ?? "Failed to save settings");
+                        } finally {
+                          setChatSettingsSaving(false);
+                        }
+                      }}
+                    >
+                      {chatSettingsSaving ? "Saving..." : "Save settings"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         <UserProfilePopover
