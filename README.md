@@ -13,6 +13,11 @@ Orbit Chat combines:
 - realtime delivery (websockets)
 - client-side cryptography (libsodium)
 - profile viewing and editing UI (popover + settings)
+- friend requests and friend list management
+- account recovery code login and bypass flows
+- per-chat passcode lock controls (on leave, on logout, timed, inactivity)
+- encrypted attachment handling for files and images
+- video link sharing (link-only, no direct video upload)
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
@@ -21,6 +26,10 @@ The desktop app talks to a separate backend service for identity, routing, persi
 Encrypted end-to-end:
 
 - direct message text payloads (DM content)
+- DM attachment metadata embedded in encrypted message envelopes
+- DM video links embedded in encrypted message envelopes
+- attachment file keys wrapped inside encrypted message envelopes
+- attachment file bytes uploaded as encrypted blobs
 
 Not encrypted end-to-end:
 
@@ -29,6 +38,7 @@ Not encrypted end-to-end:
 - message timestamps
 - delivery and seen metadata
 - profile data
+- media reservation metadata used for routing/storage (for example object key, lifecycle status, content type)
 
 In plain terms: the server can route messages and know chat structure, but should not be able to read encrypted DM text.
 
@@ -46,6 +56,9 @@ Core safety properties:
 - Message ciphertext is decrypted on recipient device.
 - Server stores encrypted conversation keys and encrypted messages.
 - Server does not perform plaintext decryption of DM payloads.
+- Attachment bytes are encrypted on sender device before upload.
+- Attachment bytes are decrypted on recipient device after download.
+- Video links are sent as encrypted message data, not as a server-parsed plaintext field.
 
 ## Cryptography Model (Plain English)
 
@@ -68,10 +81,20 @@ How a message is sent:
 3. Server relays/stores encrypted payload.
 4. Recipient decrypts locally with the same conversation key.
 
+How an attachment is sent:
+
+1. Sender generates a random per-file key.
+2. Sender encrypts file bytes in chunks using that file key.
+3. Sender uploads encrypted bytes to media storage using a signed upload URL.
+4. Sender encrypts the file key inside the DM envelope and sends media ID references with the message.
+5. Recipient decrypts the DM envelope, retrieves the wrapped file key, downloads encrypted bytes, and decrypts locally.
+
 Runtime behavior notes:
 
 - If a DM key is still being prepared on first receive, UI may briefly show encrypted fallback text, then decrypt once key material is available.
 - First-time inbound DM messages are delivered in realtime without requiring a re-login refresh.
+- Encrypted attachment delivery supports chunked encryption and in-session retry reuse for files already uploaded.
+- Video attachments are currently link-only by design.
 
 ## System Design
 
@@ -86,10 +109,14 @@ Desktop App (Electron + React)
 					v
 Orbit Backend (NestJS)
 	|- Auth + user profiles
+	|- Friend graph + friend request workflows
 	|- Conversation membership + message storage
 	|- Encrypted conversation key storage
+	|- Chat passcode verification + lock policy enforcement
+	|- Recovery-code assisted passcode bypass
+	|- Media reservation, signed upload/download URL issuance, and lifecycle cleanup
 	|- Realtime fanout (Socket.IO conversation + user room delivery)
-	|- Presence cache + optional media services
+	|- Presence cache + media services
 ```
 
 ## Architecture View
@@ -100,6 +127,8 @@ flowchart LR
 	B -->|Encrypted payload| C[Recipient Desktop Client]
 	A -->|Sealed conversation key for sender| B
 	A -->|Sealed conversation key for recipient| B
+	A -->|Encrypted attachment bytes| B
+	B -->|Encrypted attachment bytes| C
 	B -. cannot decrypt payload without private keys .- B
 ```
 
@@ -119,6 +148,30 @@ sequenceDiagram
 	R->>R: Render plaintext in UI
 ```
 
+## Media Encryption Flow
+
+```mermaid
+sequenceDiagram
+	participant S as Sender Client
+	participant API as Orbit Server
+	participant OBJ as Object Storage
+	participant R as Receiver Client
+
+	S->>S: Generate per-file symmetric key
+	S->>S: Encrypt file bytes in chunks
+	S->>API: Request media upload reservation
+	API-->>S: Return mediaId + signed upload URL
+	S->>OBJ: Upload encrypted blob bytes
+	S->>S: Wrap file key inside encrypted DM envelope
+	S->>API: Send encrypted message + mediaIds
+	API->>R: Realtime message event with ciphertext metadata
+	R->>R: Decrypt DM envelope, recover wrapped file key
+	R->>API: Request signed media download URL
+	API-->>R: Signed download URL (member-gated)
+	R->>OBJ: Download encrypted blob bytes
+	R->>R: Decrypt bytes locally and render attachment
+```
+
 ## Detailed Client Runtime Flow
 
 ```mermaid
@@ -127,6 +180,7 @@ flowchart TD
 	B --> C{Access token valid?}
 	C -- No --> D[Show auth UI / login]
 	C -- Yes --> E[Hydrate stores: auth, socket, messages, profiles, e2ee]
+	E --> E2[Load friend/request state + unread counters]
 	E --> F[Initialize libsodium + device key material]
 	F --> G[Open Socket.IO session with JWT]
 	G --> H[Join user room and active conversation rooms]
@@ -136,8 +190,11 @@ flowchart TD
 	K --> L[Decrypt ciphertext messages in memory]
 	L --> M[Render timeline]
 	M --> N[User sends message]
-	N --> O[Encrypt plaintext with conversation key and nonce]
-	O --> P[POST encrypted payload]
+	N --> O{Has attachment?}
+	O -- No --> P[Encrypt plaintext with conversation key and nonce]
+	O -- Yes --> P2[Encrypt attachment chunks + upload encrypted blob]
+	P2 --> P3[Embed wrapped file key and media IDs in encrypted envelope]
+	P3 --> P[POST encrypted payload]
 	P --> Q[Receive socket ack/new-message events]
 	Q --> R[Update local stores + reconcile optimistic UI]
 ```
@@ -152,11 +209,20 @@ sequenceDiagram
 	participant DB as Postgres (Prisma)
 	participant RC as Redis Cache/Presence
 	participant RT as Socket.IO Gateway
+	participant OBJ as Object Storage
+
+	C->>API: POST media/upload-url(conversationId, contentType, size)
+	API->>G: Validate token + conversation access
+	G-->>API: Authorized
+	API->>DB: Create pending media reservation
+	API-->>C: mediaId + signed upload URL
+	C->>OBJ: PUT encrypted media bytes
 
 	C->>API: HTTP sendMessage(ciphertext, nonce, conversationId)
 	API->>G: Validate token + conversation access
 	G-->>API: Authorized
 	API->>DB: Persist encrypted message row
+	API->>DB: Attach pending media rows by mediaId
 	API->>DB: Update conversation last activity
 	API->>RC: Update unread/presence counters (if enabled)
 	API->>RT: Emit message to conversation room
@@ -181,6 +247,8 @@ Server is trusted for:
 - access control and membership checks
 - storage durability
 - message routing/realtime delivery (including first-time DM recipient fanout)
+- media reservation and signed URL issuance
+- one-time media lifecycle cleanup
 
 Server is not trusted for:
 
@@ -193,6 +261,9 @@ Server is not trusted for:
 - Private keys are currently stored in local app storage, not OS keychain.
 - Fingerprint verification between users is not implemented.
 - Forward secrecy and ratcheting are not implemented yet.
+- Video files are intentionally disabled for direct upload (video links only).
+- Attachment reservation metadata is handled server-side for access control and lifecycle management.
+- Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
 
 ## Product Summary
 
