@@ -10,11 +10,20 @@ async function request<T = unknown>(path: string, opts: RequestOptions = {}): Pr
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: opts.method ?? "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: opts.method ?? "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch (err: any) {
+    const message = (err?.message ?? "").toLowerCase();
+    if (message.includes("failed to fetch") || message.includes("networkerror")) {
+      throw new Error(`Unable to reach Orbit server at ${API_BASE}. Ensure orbit-server is running and VITE_API_URL is correct.`);
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));

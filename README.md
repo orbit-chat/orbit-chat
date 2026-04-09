@@ -21,6 +21,8 @@ Orbit Chat combines:
 - encrypted attachment handling for files and images
 - video link sharing (link-only, no direct video upload)
 - client-side unread badge tracking that clears on active chat selection
+- chat display names editable in per-chat settings
+- DM fallback labels using `@username#chatId` when no custom chat name is set
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
@@ -102,6 +104,8 @@ Runtime behavior notes:
 - Encrypted attachment delivery supports chunked encryption and in-session retry reuse for files already uploaded.
 - Video attachments are currently link-only by design.
 - Unread counters are maintained client-side and reset immediately when a conversation becomes active.
+- Chat settings support custom display names and passcode/lock updates in one panel.
+- Locked/passcode prompts include the chat label so users can match the correct passcode to the correct DM instance.
 
 ## System Design
 
@@ -118,6 +122,7 @@ Orbit Backend (NestJS)
 	|- Auth + user profiles
 	|- Friend graph + friend request workflows
 	|- Conversation membership + message storage
+	|- Chat display-name updates with uniqueness validation per user
 	|- Encrypted conversation key storage
 	|- Chat passcode verification + lock policy enforcement
 	|- Recovery-code assisted passcode bypass
@@ -155,6 +160,7 @@ sequenceDiagram
 	API->>R: Emit to conversation room
 	API->>R: Emit to user room safety-net
 	R->>R: Decrypt locally using conversation key
+	R->>R: Resolve chat label (custom name or username#chatId)
 	R->>R: Render plaintext in UI
 ```
 
@@ -200,7 +206,8 @@ flowchart TD
 	J --> K[Unseal key locally with device private key]
 	K --> L[Decrypt ciphertext messages in memory]
 	L --> M[Render timeline]
-	M --> N[User sends message]
+	M --> M2[Resolve chat label custom name or username#chatId]
+	M2 --> N[User sends message]
 	N --> O{Has attachment?}
 	O -- No --> P[Encrypt plaintext with conversation key and nonce]
 	O -- Yes --> P2[Encrypt attachment chunks + upload encrypted blob]
@@ -236,6 +243,9 @@ sequenceDiagram
 	API->>DB: Attach pending media rows by mediaId
 	API->>DB: Update conversation last activity
 	API->>RC: Update unread/presence counters (if enabled)
+	C->>API: PUT conversations/:id/settings (name/passcode/lock updates)
+	API->>DB: Validate name uniqueness for request user scope
+	API->>DB: Persist updated chat display name and lock settings
 	API->>RT: Join online member sockets to conv room (first-message safety)
 	API->>RT: Emit message to conversation room
 	API->>RT: Emit same payload to each member user room
