@@ -28,7 +28,7 @@ Orbit Chat combines:
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
-For local development, set `VITE_API_URL` and `VITE_SOCKET_URL` in `.env` (from `.env.example`) so desktop traffic points to your intended backend.
+For local development, set `VITE_API_URL` and `VITE_SOCKET_URL` in `.env` (from `.env.example`) so desktop traffic points to your intended backend. GIF search defaults to Giphy via `VITE_GIF_PROVIDER=giphy` and `VITE_GIPHY_API_KEY`; if you already have Tenor access, you can switch to `VITE_GIF_PROVIDER=tenor` and set `VITE_TENOR_API_KEY` (optional `VITE_TENOR_CLIENT_KEY`).
 
 ## What Is Actually Encrypted
 

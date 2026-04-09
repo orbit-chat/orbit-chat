@@ -61,8 +61,10 @@ const VIDEO_ALLOWED_HOSTS = new Set([
   "www.loom.com",
 ]);
 
-const TENOR_API_KEY = import.meta.env.VITE_TENOR_API_KEY ?? "LIVDSRZULELA";
-const TENOR_CLIENT_KEY = "orbit_chat_desktop";
+const GIF_PROVIDER = (import.meta.env.VITE_GIF_PROVIDER ?? "giphy").trim().toLowerCase();
+const TENOR_API_KEY = (import.meta.env.VITE_TENOR_API_KEY ?? "").trim();
+const TENOR_CLIENT_KEY = (import.meta.env.VITE_TENOR_CLIENT_KEY ?? "orbit_chat_desktop").trim();
+const GIPHY_API_KEY = (import.meta.env.VITE_GIPHY_API_KEY ?? "dc6zaTOxFJmzC").trim();
 const TENOR_LIMIT = 18;
 
 const EMOJI_CATALOG: Array<{ value: string; tags: string[] }> = [
@@ -868,37 +870,96 @@ function App() {
       setGifLoading(true);
       setGifError(null);
       try {
-        const response = await fetch(
-          `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${encodeURIComponent(TENOR_API_KEY)}&client_key=${encodeURIComponent(TENOR_CLIENT_KEY)}&limit=${TENOR_LIMIT}&media_filter=minimal`,
-          { signal: controller.signal }
-        );
-        if (!response.ok) {
-          throw new Error(`GIF search failed (${response.status})`);
+        const usingTenor = GIF_PROVIDER === "tenor";
+        if (usingTenor) {
+          if (!TENOR_API_KEY) {
+            throw new Error("VITE_TENOR_API_KEY is missing. Set it in orbit-chat/.env or switch VITE_GIF_PROVIDER to giphy.");
+          }
+
+          const response = await fetch(
+            `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${encodeURIComponent(TENOR_API_KEY)}&client_key=${encodeURIComponent(TENOR_CLIENT_KEY)}&limit=${TENOR_LIMIT}&media_filter=minimal`,
+            { signal: controller.signal }
+          );
+          if (!response.ok) {
+            let reason = "";
+            try {
+              const errorPayload = await response.json() as { error?: { message?: string }, message?: string };
+              reason = errorPayload.error?.message ?? errorPayload.message ?? "";
+            } catch {
+              reason = "";
+            }
+
+            if (response.status === 400 && reason.toLowerCase().includes("api key")) {
+              throw new Error("Invalid Tenor API key. Update VITE_TENOR_API_KEY in orbit-chat/.env or switch VITE_GIF_PROVIDER to giphy.");
+            }
+            if (reason) {
+              throw new Error(`GIF search failed (${response.status}): ${reason}`);
+            }
+            throw new Error(`GIF search failed (${response.status})`);
+          }
+
+          const data = await response.json() as {
+            results?: Array<{
+              id?: string;
+              content_description?: string;
+              media_formats?: {
+                gif?: { url?: string };
+                tinygif?: { url?: string };
+              };
+            }>;
+          };
+          const parsed = (data.results ?? [])
+            .map((item) => {
+              const gifUrl = normalizeGifUrl(item.media_formats?.gif?.url ?? "");
+              const previewUrl = normalizeGifUrl(item.media_formats?.tinygif?.url ?? "") ?? gifUrl;
+              if (!gifUrl || !previewUrl || !item.id) return null;
+              return {
+                id: item.id,
+                title: item.content_description ?? "GIF",
+                gifUrl,
+                previewUrl,
+              } satisfies GifSearchResult;
+            })
+            .filter((item): item is GifSearchResult => Boolean(item));
+          setGifResults(parsed);
+        } else {
+          if (!GIPHY_API_KEY) {
+            throw new Error("VITE_GIPHY_API_KEY is missing. Set it in orbit-chat/.env.");
+          }
+
+          const response = await fetch(
+            `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(GIPHY_API_KEY)}&q=${encodeURIComponent(query)}&limit=${TENOR_LIMIT}&rating=pg-13&lang=en`,
+            { signal: controller.signal }
+          );
+          if (!response.ok) {
+            throw new Error(`GIF search failed (${response.status})`);
+          }
+
+          const data = await response.json() as {
+            data?: Array<{
+              id?: string;
+              title?: string;
+              images?: {
+                original?: { url?: string };
+                fixed_width_small?: { url?: string };
+              };
+            }>;
+          };
+          const parsed = (data.data ?? [])
+            .map((item) => {
+              const gifUrl = normalizeGifUrl(item.images?.original?.url ?? "");
+              const previewUrl = normalizeGifUrl(item.images?.fixed_width_small?.url ?? "") ?? gifUrl;
+              if (!gifUrl || !previewUrl || !item.id) return null;
+              return {
+                id: item.id,
+                title: item.title ?? "GIF",
+                gifUrl,
+                previewUrl,
+              } satisfies GifSearchResult;
+            })
+            .filter((item): item is GifSearchResult => Boolean(item));
+          setGifResults(parsed);
         }
-        const data = await response.json() as {
-          results?: Array<{
-            id?: string;
-            content_description?: string;
-            media_formats?: {
-              gif?: { url?: string };
-              tinygif?: { url?: string };
-            };
-          }>;
-        };
-        const parsed = (data.results ?? [])
-          .map((item) => {
-            const gifUrl = normalizeGifUrl(item.media_formats?.gif?.url ?? "");
-            const previewUrl = normalizeGifUrl(item.media_formats?.tinygif?.url ?? "") ?? gifUrl;
-            if (!gifUrl || !previewUrl || !item.id) return null;
-            return {
-              id: item.id,
-              title: item.content_description ?? "GIF",
-              gifUrl,
-              previewUrl,
-            } satisfies GifSearchResult;
-          })
-          .filter((item): item is GifSearchResult => Boolean(item));
-        setGifResults(parsed);
       } catch (err: any) {
         if (controller.signal.aborted) return;
         setGifResults([]);
