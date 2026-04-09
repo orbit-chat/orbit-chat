@@ -38,7 +38,10 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     const socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ["websocket", "polling"],
+      // Start with polling for reliability behind proxies/firewalls, then upgrade to websocket.
+      transports: ["polling", "websocket"],
+      upgrade: true,
+      rememberUpgrade: false,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 800,
@@ -53,8 +56,11 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     socket.on("connect_error", (err: Error) => {
       set({ connected: false, connectionState: "error", connectionError: err?.message ?? "Socket connection failed" });
     });
+    socket.io.on("reconnect_error", (err: Error) => {
+      set({ connected: false, connectionState: "error", connectionError: err?.message ?? "Socket reconnect failed" });
+    });
     socket.io.on("reconnect_attempt", () => {
-      set({ connectionState: "connecting", connectionError: null });
+      set((prev) => ({ connectionState: "connecting", connectionError: prev.connectionError }));
     });
 
     // Wire incoming messages into the messages store
