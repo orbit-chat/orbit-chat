@@ -48,7 +48,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       upgrade: true,
       rememberUpgrade: false,
       reconnection: true,
-      reconnectionAttempts: Infinity,
+      reconnectionAttempts: 10,
       reconnectionDelay: 800,
       reconnectionDelayMax: 5000,
       timeout: 10000,
@@ -95,10 +95,18 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     });
     socket.io.on("reconnect_attempt", () => {
       set((prev) => {
-        if (prev.connectionState === "error" && isAuthSocketError(prev.connectionError)) {
+        // Preserve visible errors instead of masking them as endless "connecting".
+        if (prev.connectionState === "error") {
           return prev;
         }
         return { connectionState: "connecting", connectionError: prev.connectionError };
+      });
+    });
+    socket.io.on("reconnect_failed", () => {
+      set({
+        connected: false,
+        connectionState: "error",
+        connectionError: "Unable to reconnect to realtime server. Check server status and VITE_SOCKET_URL.",
       });
     });
 
