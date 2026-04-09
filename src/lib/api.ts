@@ -1,4 +1,10 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://147.135.31.128:3000";
+function normalizeBaseUrl(rawUrl: string) {
+  const trimmed = rawUrl.trim();
+  const fixedPort = trimmed.replace(/\/:(\d+)/, ":$1");
+  return fixedPort.replace(/\/$/, "");
+}
+
+const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_URL ?? "http://147.135.31.128:3000");
 
 type RequestOptions = {
   method?: string;
@@ -10,11 +16,20 @@ async function request<T = unknown>(path: string, opts: RequestOptions = {}): Pr
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: opts.method ?? "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: opts.method ?? "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch (err: any) {
+    const message = (err?.message ?? "").toLowerCase();
+    if (message.includes("failed to fetch") || message.includes("networkerror")) {
+      throw new Error(`Unable to reach Orbit server at ${API_BASE}. Ensure orbit-server is running and VITE_API_URL is correct.`);
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
@@ -350,6 +365,7 @@ export function bypassPasscode(conversationId: string, recoveryCode: string, tok
 export function updateChatSettings(
   conversationId: string,
   data: {
+    name?: string;
     encryptedTitle?: string;
     titleNonce?: string;
     encryptedImageUrl?: string;
@@ -369,6 +385,67 @@ export function updateChatSettings(
   });
 }
 
+/* ───── Media ───── */
+
+export type MediaUploadReservation = {
+  mediaId: string;
+  uploadUrl: string;
+  storageKey: string;
+};
+
+export function requestMediaUploadUrl(
+  data: {
+    conversationId: string;
+    fileName: string;
+    contentType: string;
+    contentLength?: number;
+    sha256?: string;
+    isOneTime?: boolean;
+  },
+  token: string
+) {
+  return request<MediaUploadReservation>('/media/upload-url', {
+    method: 'POST',
+    body: data,
+    token,
+  });
+}
+
+export async function uploadEncryptedBlob(uploadUrl: string, blob: Blob) {
+  // Some S3-compatible providers are strict about signed headers and reject
+  // PUTs when Content-Type is set unexpectedly. Try without headers first,
+  // then retry with explicit octet-stream for older signatures.
+  let res = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: blob,
+  });
+
+  if (!res.ok) {
+    res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+      },
+      body: blob,
+    });
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const detail = body ? `: ${body.slice(0, 200)}` : '';
+    throw new Error(`Upload failed with status ${res.status}${detail}`);
+  }
+}
+
+export async function downloadEncryptedMedia(mediaId: string, token: string) {
+  const access = await request<{ downloadUrl: string }>(`/media/${mediaId}/access`, { token });
+  const res = await fetch(access.downloadUrl, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`Download failed with status ${res.status}`);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 /* ───── Messages ───── */
 
 export type ServerMessage = {
@@ -378,6 +455,7 @@ export type ServerMessage = {
   ciphertext: string;
   nonce: string;
   keyVersion: number;
+  mediaIds?: string[];
   type: string;
   expiresAt: string | null;
   maxViews: number | null;
@@ -392,7 +470,7 @@ export function getMessages(conversationId: string, token: string, cursor?: stri
 }
 
 export function sendMessage(
-  data: { conversationId: string; ciphertext: string; nonce: string; keyVersion?: number },
+  data: { conversationId: string; ciphertext: string; nonce: string; keyVersion?: number; mediaIds?: string[] },
   token: string
 ) {
   return request<ServerMessage>("/messages", { method: "POST", body: data, token });

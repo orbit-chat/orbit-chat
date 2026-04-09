@@ -7,9 +7,67 @@ import { useE2EEStore } from "./stores/e2eeStore";
 import { useChatLockStore } from "./stores/chatLockStore";
 import * as api from "./lib/api";
 import type { Conversation } from "./lib/api";
-import { decryptMessage, encryptMessage, generateSecretKey, sealToPublicKey } from "./lib/crypto";
+import {
+  decryptChunkedBytes,
+  decryptMessage,
+  encryptChunkedBytes,
+  encryptMessage,
+  generateSecretKey,
+  sealToPublicKey,
+  sha256Base64,
+} from "./lib/crypto";
 import { UserProfilePopover } from "./components/UserProfilePopover";
 import { ProfileSettings } from "./components/ProfileSettings";
+
+type UploadedAttachment = {
+  kind: "image" | "file";
+  mediaId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  fileKeyCiphertext: string;
+  fileKeyNonce: string;
+  chunkSize: number;
+  chunkCount: number;
+  encryptedSha256?: string;
+};
+
+type VideoLinkAttachment = {
+  kind: "video_link";
+  url: string;
+};
+
+type MessageAttachment = UploadedAttachment | VideoLinkAttachment;
+
+type MessageEnvelope = {
+  text?: string;
+  attachments?: MessageAttachment[];
+};
+
+const VIDEO_ALLOWED_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "youtu.be",
+  "vimeo.com",
+  "www.vimeo.com",
+  "loom.com",
+  "www.loom.com",
+]);
+
+function normalizeVideoUrl(input: string) {
+  try {
+    const url = new URL(input.trim());
+    if (url.protocol !== "https:") return null;
+    if (!VIDEO_ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function shortConversationId(conversationId: string) {
+  return conversationId.split("-")[0] ?? conversationId.slice(0, 8);
+}
 
 function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
   if (!keys.length) return null;
@@ -19,29 +77,130 @@ function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
     .publicKey;
 }
 
-function DecryptedMessageText(props: {
+function MediaAttachmentView(props: {
   conversationId: string;
+  keyVersion?: number;
+  token: string | null;
+  attachment: UploadedAttachment;
+}) {
+  const { conversationId, keyVersion, token, attachment } = props;
+  const secretKey = useE2EEStore((state) => state.getConversationSecretKeyForVersion(conversationId, keyVersion));
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+
+    const run = async () => {
+      if (!secretKey || !token) {
+        setBlobUrl(null);
+        return;
+      }
+
+      try {
+        const fileKey = await decryptMessage(attachment.fileKeyCiphertext, attachment.fileKeyNonce, secretKey);
+        const encryptedBytes = await api.downloadEncryptedMedia(attachment.mediaId, token);
+        if (attachment.encryptedSha256) {
+          const digest = await sha256Base64(encryptedBytes);
+          if (digest !== attachment.encryptedSha256) {
+            throw new Error("Attachment integrity check failed");
+          }
+        }
+        const plainBytes = await decryptChunkedBytes(encryptedBytes, fileKey);
+        const blob = new Blob([plainBytes], { type: attachment.mimeType || "application/octet-stream" });
+        createdUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setBlobUrl(createdUrl);
+          setError(null);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setError(err?.message ?? "Unable to open attachment");
+          setBlobUrl(null);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [attachment, secretKey, token]);
+
+  if (error) {
+    return <p className="mt-2 text-xs text-rose-300">{error}</p>;
+  }
+
+  if (!blobUrl) {
+    return <p className="mt-2 text-xs text-orbit-muted">Decrypting attachment...</p>;
+  }
+
+  if (attachment.kind === "image") {
+    return (
+      <a href={blobUrl} download={attachment.name} className="mt-2 block" target="_blank" rel="noreferrer">
+        <img src={blobUrl} alt={attachment.name} className="max-h-64 rounded-xl border border-white/10 object-contain" />
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={blobUrl}
+      download={attachment.name}
+      className="mt-2 inline-flex items-center rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-xs text-orbit-text hover:border-white/20"
+    >
+      Download {attachment.name}
+    </a>
+  );
+}
+
+function DecryptedMessageBody(props: {
+  conversationId: string;
+  token: string | null;
   cipherText: string;
   nonce?: string;
   keyVersion?: number;
 }) {
-  const { conversationId, cipherText, nonce, keyVersion } = props;
+  const { conversationId, token, cipherText, nonce, keyVersion } = props;
   const secretKey = useE2EEStore((state) => state.getConversationSecretKeyForVersion(conversationId, keyVersion));
-  const [plain, setPlain] = useState<string | null>(null);
+  const [legacyText, setLegacyText] = useState<string | null>(null);
+  const [envelope, setEnvelope] = useState<MessageEnvelope | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       if (!secretKey || !nonce) {
-        setPlain(null);
+        setLegacyText(null);
+        setEnvelope(null);
         return;
       }
 
       try {
         const text = await decryptMessage(cipherText, nonce, secretKey);
-        if (!cancelled) setPlain(text);
+        let parsed: MessageEnvelope | null = null;
+        try {
+          const value = JSON.parse(text) as MessageEnvelope;
+          if (value && typeof value === "object") parsed = value;
+        } catch {
+          parsed = null;
+        }
+
+        if (cancelled) return;
+        if (parsed) {
+          setEnvelope(parsed);
+          setLegacyText(null);
+          return;
+        }
+
+        setEnvelope(null);
+        setLegacyText(text);
       } catch {
-        if (!cancelled) setPlain(null);
+        if (!cancelled) {
+          setLegacyText(null);
+          setEnvelope(null);
+        }
       }
     };
 
@@ -51,7 +210,41 @@ function DecryptedMessageText(props: {
     };
   }, [cipherText, nonce, secretKey]);
 
-  return <p className="mt-1 break-words text-orbit-text">{plain ?? "Encrypted message (unable to decrypt on this device)."}</p>;
+  if (!envelope && !legacyText) {
+    return <p className="mt-1 break-words text-orbit-text">Encrypted message (unable to decrypt on this device).</p>;
+  }
+
+  return (
+    <div className="mt-1 space-y-2">
+      {(envelope?.text ?? legacyText) && <p className="break-words text-orbit-text">{envelope?.text ?? legacyText}</p>}
+      {(envelope?.attachments ?? []).map((attachment, idx) => {
+        if (attachment.kind === "video_link") {
+          const safeUrl = normalizeVideoUrl(attachment.url);
+          if (!safeUrl) return null;
+          return (
+            <a
+              key={`${safeUrl}:${idx}`}
+              href={safeUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="block rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-xs text-orbit-accent hover:border-orbit-accent/40"
+            >
+              Video link: {new URL(safeUrl).hostname}
+            </a>
+          );
+        }
+        return (
+          <MediaAttachmentView
+            key={`${attachment.mediaId}:${idx}`}
+            token={token}
+            conversationId={conversationId}
+            keyVersion={keyVersion}
+            attachment={attachment}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 function App() {
@@ -66,12 +259,18 @@ function App() {
   const [authValidationError, setAuthValidationError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [videoLinkDraft, setVideoLinkDraft] = useState("");
+  const [pendingVideoLinks, setPendingVideoLinks] = useState<string[]>([]);
+  const [messageSendError, setMessageSendError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
 
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
   const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
 
   /** Passcode for newly created chat (shown once) */
-  const [pendingChatPasscode, setPendingChatPasscode] = useState<{ conversationId: string; passcode: string } | null>(null);
+  const [pendingChatPasscode, setPendingChatPasscode] = useState<{ conversationId: string; passcode: string; label: string } | null>(null);
   /** When a locked chat is selected, show the unlock screen */
   const [passcodeInput, setPasscodeInput] = useState("");
   const [passcodeError, setPasscodeError] = useState<string | null>(null);
@@ -80,6 +279,7 @@ function App() {
   /** Chat settings panel */
   const [showChatSettings, setShowChatSettings] = useState(false);
   const [chatSettingsPasscode, setChatSettingsPasscode] = useState("");
+  const [chatSettingsName, setChatSettingsName] = useState("");
   const [chatSettingsLength, setChatSettingsLength] = useState(2);
   const [chatSettingsLockMode, setChatSettingsLockMode] = useState<api.ChatLockMode>("on_leave");
   const [chatSettingsTimeout, setChatSettingsTimeout] = useState("");
@@ -112,6 +312,16 @@ function App() {
     () => conversations.find((c) => c.id === selectedConvId) ?? null,
     [conversations, selectedConvId]
   );
+
+  const selectedConversationLabel = useMemo(() => {
+    if (!selectedConversation || !user) return "Unknown";
+    if (selectedConversation.type !== "dm") return selectedConversation.name ?? "Group";
+    if (selectedConversation.name?.trim()) {
+      return selectedConversation.name.trim();
+    }
+    const partnerUsername = selectedConversation.members.find((m) => m.user.id !== user.id)?.user.username ?? "dm";
+    return `${partnerUsername}#${shortConversationId(selectedConversation.id)}`;
+  }, [selectedConversation, user]);
 
   const dmPartner = useMemo(() => {
     if (!selectedConversation || !user) return null;
@@ -179,8 +389,12 @@ function App() {
   // Get the "other" user's name in a DM
   const dmPartnerName = useMemo(() => {
     if (!selectedConversation || !user) return null;
+    if (selectedConversation.name?.trim()) {
+      return selectedConversation.name.trim();
+    }
     const other = selectedConversation.members.find((m) => m.user.id !== user.id);
-    return other?.user.username ?? selectedConversation.name ?? "Chat";
+    const partnerUsername = other?.user.username ?? "Chat";
+    return `${partnerUsername}#${shortConversationId(selectedConversation.id)}`;
   }, [selectedConversation, user]);
 
   const friendStatusByUserId = useMemo(() => {
@@ -376,6 +590,23 @@ function App() {
     setActiveConversation(selectedConvId);
   }, [navTab, selectedConvId, setActiveConversation]);
 
+  useEffect(() => {
+    setPendingFiles([]);
+    setPendingVideoLinks([]);
+    setVideoLinkDraft("");
+    setMessageSendError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [selectedConvId]);
+
+  useEffect(() => {
+    if (!showChatSettings) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowChatSettings(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showChatSettings]);
+
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -403,6 +634,7 @@ function App() {
           cipherText: m.ciphertext,
           keyVersion: m.keyVersion,
           nonce: m.nonce,
+          mediaIds: m.mediaIds ?? [],
           createdAt: new Date(m.createdAt).getTime(),
         }, { currentUserId: user?.id, markAsRead: true });
       }
@@ -547,7 +779,11 @@ function App() {
 
       // Show the one-time passcode to the user
       if (conv.passcode) {
-        setPendingChatPasscode({ conversationId: conv.id, passcode: conv.passcode });
+        setPendingChatPasscode({
+          conversationId: conv.id,
+          passcode: conv.passcode,
+          label: conv.name?.trim() ? conv.name.trim() : `${targetUser.username}#${shortConversationId(conv.id)}`,
+        });
       }
 
       // Auto-unlock the newly created chat
@@ -559,37 +795,135 @@ function App() {
     }
   };
 
+  const handleAttachFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const accepted = Array.from(files).filter((file) => {
+      if (file.type.startsWith("video/")) return false;
+      return file.size <= 50 * 1024 * 1024;
+    });
+    if (!accepted.length) {
+      setMessageSendError("Only non-video files up to 50MB are supported.");
+      return;
+    }
+    setMessageSendError(null);
+    setPendingFiles((prev) => [...prev, ...accepted]);
+  };
+
+  const handleAddVideoLink = () => {
+    const safeUrl = normalizeVideoUrl(videoLinkDraft);
+    if (!safeUrl) {
+      setMessageSendError("Video links must be HTTPS and from an approved host (YouTube, Vimeo, Loom).");
+      return;
+    }
+    setMessageSendError(null);
+    setPendingVideoLinks((prev) => [...prev, safeUrl]);
+    setVideoLinkDraft("");
+  };
+
   /* ───── Send message over socket ───── */
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const draft = messageDraft.trim();
-    if (!draft || !selectedConvId || !user || !socket) return;
+    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0;
+    if (!selectedConvId || !user || !socket) return;
     if (!token) return;
+    if (!draft && !hasAttachments) return;
 
     if (!selectedConversation || selectedConversation.type !== "dm") return;
 
-    (async () => {
-      try {
-        const secretKey = await ensureConversationSecretKey({
-          conversation: selectedConversation,
-          token,
-          myUserId: user.id,
-        });
-        if (!secretKey) return;
+    try {
+      const secretKey = await ensureConversationSecretKey({
+        conversation: selectedConversation,
+        token,
+        myUserId: user.id,
+      });
+      if (!secretKey) return;
 
-        const { cipherText, nonce } = await encryptMessage(draft, secretKey);
+      const attachments: MessageAttachment[] = [];
+      const mediaIds: string[] = [];
+      const usedCacheKeys: string[] = [];
 
-        socket.emit("send_message", {
-          conversationId: selectedConvId,
-          ciphertext: cipherText,
-          nonce,
-          keyVersion: getConversationKeyVersion(selectedConvId) ?? 1,
-        });
+      for (const file of pendingFiles) {
+        const cacheKey = `${selectedConvId}:${file.name}:${file.size}:${file.lastModified}`;
+        const cachedAttachment = uploadedAttachmentCacheRef.current[cacheKey];
+        if (cachedAttachment) {
+          attachments.push(cachedAttachment);
+          mediaIds.push(cachedAttachment.mediaId);
+          usedCacheKeys.push(cacheKey);
+          continue;
+        }
 
-        setMessageDraft("");
-      } catch {
-        // ignore
+        const plainBytes = new Uint8Array(await file.arrayBuffer());
+        const fileKey = await generateSecretKey();
+        const preferredChunkSize = file.size > 10 * 1024 * 1024 ? 512 * 1024 : 256 * 1024;
+        const encrypted = await encryptChunkedBytes(plainBytes, fileKey, preferredChunkSize);
+        const encryptedSha256 = await sha256Base64(encrypted.encryptedBytes);
+
+        const reservation = await api.requestMediaUploadUrl(
+          {
+            conversationId: selectedConvId,
+            fileName: file.name,
+            contentType: file.type || "application/octet-stream",
+            contentLength: encrypted.encryptedBytes.length,
+            sha256: encryptedSha256,
+          },
+          token
+        );
+
+        await api.uploadEncryptedBlob(
+          reservation.uploadUrl,
+          new Blob([new Uint8Array(encrypted.encryptedBytes).buffer], { type: "application/octet-stream" })
+        );
+
+        const wrappedFileKey = await encryptMessage(fileKey, secretKey);
+        const attachment: UploadedAttachment = {
+          kind: file.type.startsWith("image/") ? "image" : "file",
+          mediaId: reservation.mediaId,
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          fileKeyCiphertext: wrappedFileKey.cipherText,
+          fileKeyNonce: wrappedFileKey.nonce,
+          chunkSize: encrypted.chunkSize,
+          chunkCount: encrypted.chunkCount,
+          encryptedSha256,
+        };
+        attachments.push(attachment);
+        mediaIds.push(reservation.mediaId);
+        uploadedAttachmentCacheRef.current[cacheKey] = attachment;
+        usedCacheKeys.push(cacheKey);
       }
-    })();
+
+      for (const url of pendingVideoLinks) {
+        attachments.push({ kind: "video_link", url });
+      }
+
+      const envelope: MessageEnvelope = {
+        text: draft || undefined,
+        attachments,
+      };
+
+      const { cipherText, nonce } = await encryptMessage(JSON.stringify(envelope), secretKey);
+
+      socket.emit("send_message", {
+        conversationId: selectedConvId,
+        ciphertext: cipherText,
+        nonce,
+        keyVersion: getConversationKeyVersion(selectedConvId) ?? 1,
+        mediaIds,
+        type: attachments.length ? "media" : "text",
+      });
+
+      setMessageDraft("");
+      setPendingFiles([]);
+      setPendingVideoLinks([]);
+      setMessageSendError(null);
+      for (const key of usedCacheKeys) {
+        delete uploadedAttachmentCacheRef.current[key];
+      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err: any) {
+      setMessageSendError(err?.message ?? "Failed to send message");
+    }
   };
 
   /* ════════════════════════════════════════════════════ */
@@ -597,7 +931,7 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (user && pendingChatPasscode) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-md rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
             <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -612,6 +946,7 @@ function App() {
               Save this passcode — you will not see it again.
             </span>
           </p>
+          <p className="mb-3 text-center text-xs text-orbit-muted">Chat: @{pendingChatPasscode.label}</p>
           <div className="flex items-center justify-center rounded-xl border border-white/10 bg-orbit-panelAlt p-6">
             <span className="font-mono text-4xl font-bold tracking-[0.3em] text-orbit-accent">
               {pendingChatPasscode.passcode}
@@ -644,7 +979,7 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (user && pendingRecoveryCodes && pendingRecoveryCodes.length > 0) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-lg rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
             <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -692,7 +1027,7 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (!user) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
             <div className="space-y-6">
@@ -858,12 +1193,12 @@ function App() {
   /*  MAIN CHAT SCREEN                                    */
   /* ════════════════════════════════════════════════════ */
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt text-orbit-text">
-      <div className="grid h-full grid-cols-[74px_300px_1fr]">
+    <div className="orbit-shell">
+      <div className="grid min-h-screen grid-cols-[72px_320px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panelAlt/60 p-2.5">
-          <div className="mb-4 flex items-center justify-center rounded-2xl bg-orbit-accent/15 p-2.5">
-            <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover" />
+        <aside className="overflow-y-auto border-r border-white/10 bg-[#141822] p-2.5">
+          <div className="mb-4 flex items-center justify-center rounded-2xl bg-gradient-to-br from-orbit-accent/25 to-cyan-300/5 p-2.5 shadow-[0_10px_25px_rgba(18,201,180,0.15)]">
+            <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover ring-1 ring-white/20" />
           </div>
           <div className="space-y-2.5">
             {[
@@ -904,11 +1239,7 @@ function App() {
               return (
                 <button
                   key={item.key}
-                  className={`group w-full rounded-2xl border px-2 py-2 text-[11px] font-semibold transition ${
-                    active
-                      ? "border-orbit-accent/60 bg-gradient-to-br from-orbit-accent/20 to-orbit-accent/5 text-orbit-text shadow-[0_0_0_1px_rgba(0,0,0,0.15)_inset]"
-                      : "border-white/10 bg-orbit-panel/80 text-orbit-muted hover:border-white/25 hover:bg-orbit-panel"
-                  }`}
+                  className={`group orbit-rail-btn ${active ? "orbit-rail-btn-active" : ""}`}
                   onClick={() => {
                     setNavTab(item.key);
                     if (item.key !== "dm") {
@@ -939,10 +1270,10 @@ function App() {
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="border-r border-white/10 bg-orbit-panel p-3.5">
+        <aside className="overflow-y-auto border-r border-white/10 bg-[#1a1e29] p-3.5">
           {navTab === "dm" && (
             <>
-              <h1 className="text-lg font-semibold">Orbit Direct Messages</h1>
+              <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
 
               <label className="mt-4 block">
@@ -1024,7 +1355,9 @@ function App() {
                   const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
                   const displayName =
                     conv.type === "dm"
-                      ? otherMember?.user.username ?? "DM"
+                      ? (conv.name?.trim()
+                        ? conv.name.trim()
+                        : `${otherMember?.user.username ?? "dm"}#${shortConversationId(conv.id)}`)
                       : conv.name ?? "Group";
                   const preview = lastMessage
                     ? `${lastMessage.sender === user.username ? "You" : lastMessage.sender}: Encrypted message`
@@ -1040,8 +1373,8 @@ function App() {
                       key={conv.id}
                       className={`w-full rounded-xl border p-3 text-left transition ${
                         isSelected
-                          ? "border-orbit-accent/60 bg-orbit-accent/10"
-                          : "border-white/5 bg-orbit-panelAlt hover:border-white/20"
+                          ? "border-orbit-accent/60 bg-orbit-accent/10 shadow-[0_8px_20px_rgba(18,201,180,0.15)]"
+                          : "border-white/5 bg-[#202533] hover:border-white/20"
                       }`}
                       onClick={() => {
                         setSelectedConvId(conv.id);
@@ -1269,17 +1602,26 @@ function App() {
             </>
           )}
 
-          <div className="orbit-card-solid mt-4 rounded-xl bg-orbit-panelAlt p-4 text-sm">
+          <div className="orbit-card-solid mt-4 rounded-xl bg-[#202533] p-4 text-sm">
             <p className="font-semibold">Build {appVersion}</p>
-            <p className={connected ? "text-emerald-400" : "text-rose-400"}>
-              Socket: {connected ? "Connected" : "Disconnected"}
+            <p className="mt-1 text-xs text-orbit-muted">Realtime session</p>
+            <p className={connected ? "mt-1 text-emerald-400" : "mt-1 text-rose-400"}>
+              {connected ? "Connected" : "Disconnected"}
             </p>
           </div>
         </aside>
 
         {/* ───── Main content area ───── */}
-        <main className="flex h-full flex-col overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
-          <header className="flex items-center justify-end gap-3 border-b border-white/10 bg-orbit-panel/40 px-4 py-3 backdrop-blur">
+        <main className="relative flex h-full flex-col overflow-hidden bg-gradient-to-b from-[#171b25] to-[#141822]">
+          <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#1b2030]/85 px-4 py-3 backdrop-blur">
+            <div className="flex items-center gap-3">
+              <img src="logo.png" alt="Orbit Chat logo" className="h-7 w-7 rounded-lg ring-1 ring-white/20" />
+              <div>
+                <p className="text-sm font-semibold text-orbit-text">Orbit Chat</p>
+                <p className="text-[11px] text-orbit-muted">Private by default</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
             <button
               className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text hover:border-white/20"
               onClick={(event) => openMyProfilePopover(event.currentTarget)}
@@ -1318,6 +1660,7 @@ function App() {
             >
               Sign Out
             </button>
+            </div>
           </header>
 
           <section className="min-h-0 flex-1 overflow-y-auto">
@@ -1390,6 +1733,7 @@ function App() {
                   <p className="mt-2 text-sm text-orbit-muted">
                     Enter the {selectedConversation.passcodeLength}-digit passcode to unlock this chat.
                   </p>
+                  <p className="mt-1 text-xs text-orbit-muted">Chat: @{selectedConversationLabel}</p>
 
                   {passcodeError && (
                     <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-400">
@@ -1500,7 +1844,7 @@ function App() {
               </div>
             ) : (
               <div className="flex h-full flex-col">
-            <header className="flex items-center justify-between border-b border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
+            <header className="flex items-center justify-between border-b border-white/10 bg-[#1b2030]/85 p-4 backdrop-blur">
               <div>
                 <button
                   className="text-left text-base font-semibold text-orbit-text hover:underline"
@@ -1526,6 +1870,7 @@ function App() {
                   onClick={() => {
                     setShowChatSettings(!showChatSettings);
                     if (!showChatSettings) {
+                      setChatSettingsName(selectedConversation.name ?? "");
                       setChatSettingsLength(selectedConversation.passcodeLength);
                       setChatSettingsLockMode(selectedConversation.lockMode);
                       setChatSettingsTimeout(selectedConversation.lockTimeoutSeconds?.toString() ?? "");
@@ -1544,120 +1889,6 @@ function App() {
               </div>
             </header>
 
-            {/* ════ Chat Settings Panel ════ */}
-            {showChatSettings && (
-              <div className="border-b border-white/10 bg-orbit-panel/80 p-4 backdrop-blur">
-                <div className="mx-auto max-w-md space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-orbit-text">Chat Settings</h3>
-                    <button
-                      className="text-xs text-orbit-muted hover:text-orbit-text"
-                      onClick={() => setShowChatSettings(false)}
-                    >
-                      Close
-                    </button>
-                  </div>
-
-                  {chatSettingsError && (
-                    <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
-                      {chatSettingsError}
-                    </div>
-                  )}
-
-                  {/* Passcode */}
-                  <div>
-                    <label className="orbit-label">New Passcode (leave blank to keep current)</label>
-                    <input
-                      className="orbit-input font-mono tracking-widest"
-                      value={chatSettingsPasscode}
-                      onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      placeholder="••••"
-                      maxLength={6}
-                    />
-                  </div>
-
-                  {/* Passcode length */}
-                  <div>
-                    <label className="orbit-label">Passcode Length (2-6 digits)</label>
-                    <input
-                      type="number"
-                      className="orbit-input"
-                      min={2}
-                      max={6}
-                      value={chatSettingsLength}
-                      onChange={(e) => setChatSettingsLength(Math.min(6, Math.max(2, Number(e.target.value))))}
-                    />
-                  </div>
-
-                  {/* Lock mode */}
-                  <div>
-                    <label className="orbit-label">Lock Mode</label>
-                    <select
-                      className="orbit-input"
-                      value={chatSettingsLockMode}
-                      onChange={(e) => setChatSettingsLockMode(e.target.value as api.ChatLockMode)}
-                    >
-                      <option value="on_leave">On Leave (lock when you switch away)</option>
-                      <option value="on_logout">On Logout (lock on sign out)</option>
-                      <option value="after_time">After Time (lock after fixed duration)</option>
-                      <option value="after_inactivity">After Inactivity (lock after idle period)</option>
-                    </select>
-                  </div>
-
-                  {/* Timeout (for time-based lock modes) */}
-                  {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
-                    <div>
-                      <label className="orbit-label">Lock Timeout (seconds)</label>
-                      <input
-                        type="number"
-                        className="orbit-input"
-                        min={10}
-                        value={chatSettingsTimeout}
-                        onChange={(e) => setChatSettingsTimeout(e.target.value)}
-                        placeholder="300"
-                      />
-                    </div>
-                  )}
-
-                  <button
-                    className="orbit-btn-primary w-full"
-                    disabled={chatSettingsSaving}
-                    onClick={async () => {
-                      if (!token) return;
-                      setChatSettingsSaving(true);
-                      setChatSettingsError(null);
-                      try {
-                        const data: Parameters<typeof api.updateChatSettings>[1] = {
-                          lockMode: chatSettingsLockMode,
-                          passcodeLength: chatSettingsLength,
-                        };
-                        if (chatSettingsPasscode) {
-                          data.passcode = chatSettingsPasscode;
-                        }
-                        if (chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") {
-                          data.lockTimeoutSeconds = Number(chatSettingsTimeout) || 300;
-                        }
-                        const updated = await api.updateChatSettings(selectedConversation.id, data, token);
-                        // Update local conversation state
-                        setConversations((prev) =>
-                          prev.map((c) => (c.id === updated.id ? updated : c))
-                        );
-                        // Re-unlock with new settings
-                        chatLock.unlock(updated.id, updated.lockMode, updated.lockTimeoutSeconds);
-                        setShowChatSettings(false);
-                      } catch (err: any) {
-                        setChatSettingsError(err?.message ?? "Failed to save settings");
-                      } finally {
-                        setChatSettingsSaving(false);
-                      }
-                    }}
-                  >
-                    {chatSettingsSaving ? "Saving..." : "Save Settings"}
-                  </button>
-                </div>
-              </div>
-            )}
-
             <section className="flex-1 space-y-3 overflow-y-auto p-4">
               {messages.length === 0 && (
                 <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
@@ -1669,8 +1900,8 @@ function App() {
                     key={msg.id}
                     className={`max-w-[80%] rounded-2xl border p-3 text-sm ${
                       mine
-                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15"
-                        : "border-white/10 bg-orbit-panel/90"
+                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
+                        : "border-white/10 bg-[#202533]"
                     }`}
                   >
                     <button
@@ -1679,8 +1910,9 @@ function App() {
                     >
                       {msg.sender}
                     </button>
-                    <DecryptedMessageText
+                    <DecryptedMessageBody
                       conversationId={selectedConversation.id}
+                      token={token}
                       cipherText={msg.cipherText}
                       nonce={msg.nonce}
                       keyVersion={msg.keyVersion}
@@ -1693,7 +1925,60 @@ function App() {
               })}
             </section>
 
-            <footer className="border-t border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
+            <footer className="border-t border-white/10 bg-[#1b2030]/90 p-4 backdrop-blur">
+              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0) && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {pendingFiles.map((file, idx) => (
+                    <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-text">
+                      {file.name}
+                      <button
+                        className="text-orbit-muted hover:text-orbit-text"
+                        onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                  {pendingVideoLinks.map((link, idx) => (
+                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-accent">
+                      {new URL(link).hostname}
+                      <button
+                        className="text-orbit-muted hover:text-orbit-text"
+                        onClick={() => setPendingVideoLinks((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="mb-3 flex gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => handleAttachFiles(event.target.files)}
+                />
+                <button className="orbit-btn px-3" onClick={() => fileInputRef.current?.click()}>
+                  Attach File
+                </button>
+                <input
+                  className="orbit-input flex-1 px-3"
+                  value={videoLinkDraft}
+                  onChange={(event) => setVideoLinkDraft(event.target.value)}
+                  placeholder="Paste video link (YouTube, Vimeo, Loom)"
+                />
+                <button className="orbit-btn px-3" onClick={handleAddVideoLink}>
+                  Add Link
+                </button>
+              </div>
+
+              {messageSendError && (
+                <p className="mb-2 text-xs text-rose-300">{messageSendError}</p>
+              )}
+
               <div className="flex gap-3">
                 <input
                   className="orbit-input flex-1 px-4"
@@ -1702,14 +1987,14 @@ function App() {
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
-                      handleSendMessage();
+                      void handleSendMessage();
                     }
                   }}
                   placeholder="Type message..."
                 />
                 <button
                   className="orbit-btn-primary px-5"
-                  onClick={handleSendMessage}
+                  onClick={() => void handleSendMessage()}
                 >
                   Send
                 </button>
@@ -1718,6 +2003,153 @@ function App() {
               </div>
             )}
           </section>
+
+          {showChatSettings && selectedConversation && (
+            <div
+              className="orbit-modal-overlay"
+              onClick={() => {
+                if (!chatSettingsSaving) setShowChatSettings(false);
+              }}
+            >
+              <div
+                className="orbit-modal"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Chat settings"
+              >
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-orbit-text">Chat Settings</h3>
+                    <p className="mt-1 text-xs text-orbit-muted">Manage lock and passcode for @{selectedConversationLabel}</p>
+                  </div>
+                  <button
+                    className="orbit-btn px-3 py-2 text-xs"
+                    onClick={() => setShowChatSettings(false)}
+                    disabled={chatSettingsSaving}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {chatSettingsError && (
+                  <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                    {chatSettingsError}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <label className="block">
+                    <span className="orbit-label">Chat display name (optional)</span>
+                    <input
+                      className="orbit-input"
+                      value={chatSettingsName}
+                      onChange={(e) => setChatSettingsName(e.target.value)}
+                      placeholder="Leave blank to use @username#chatId"
+                      maxLength={64}
+                    />
+                    <span className="mt-1 block text-[11px] text-orbit-muted">Use a unique name to avoid needing the fallback chat ID.</span>
+                  </label>
+
+                  <label className="block">
+                    <span className="orbit-label">New passcode (optional)</span>
+                    <input
+                      className="orbit-input font-mono tracking-[0.26em]"
+                      value={chatSettingsPasscode}
+                      onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder={"•".repeat(chatSettingsLength)}
+                      maxLength={6}
+                    />
+                    <span className="mt-1 block text-[11px] text-orbit-muted">Leave blank to keep the current passcode.</span>
+                  </label>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="orbit-label">Passcode length</span>
+                      <input
+                        type="number"
+                        className="orbit-input"
+                        min={2}
+                        max={6}
+                        value={chatSettingsLength}
+                        onChange={(e) => setChatSettingsLength(Math.min(6, Math.max(2, Number(e.target.value))))}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="orbit-label">Lock mode</span>
+                      <select
+                        className="orbit-select"
+                        value={chatSettingsLockMode}
+                        onChange={(e) => setChatSettingsLockMode(e.target.value as api.ChatLockMode)}
+                      >
+                        <option value="on_leave">On Leave</option>
+                        <option value="on_logout">On Logout</option>
+                        <option value="after_time">After Time</option>
+                        <option value="after_inactivity">After Inactivity</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
+                    <label className="block">
+                      <span className="orbit-label">Lock timeout in seconds</span>
+                      <input
+                        type="number"
+                        className="orbit-input"
+                        min={10}
+                        value={chatSettingsTimeout}
+                        onChange={(e) => setChatSettingsTimeout(e.target.value)}
+                        placeholder="300"
+                      />
+                    </label>
+                  )}
+
+                  <div className="flex justify-end gap-3 pt-1">
+                    <button
+                      className="orbit-btn px-4 py-2.5"
+                      onClick={() => setShowChatSettings(false)}
+                      disabled={chatSettingsSaving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="orbit-btn-primary px-5 py-2.5"
+                      disabled={chatSettingsSaving}
+                      onClick={async () => {
+                        if (!token) return;
+                        setChatSettingsSaving(true);
+                        setChatSettingsError(null);
+                        try {
+                          const data: Parameters<typeof api.updateChatSettings>[1] = {
+                            name: chatSettingsName,
+                            lockMode: chatSettingsLockMode,
+                            passcodeLength: chatSettingsLength,
+                          };
+                          if (chatSettingsPasscode) {
+                            data.passcode = chatSettingsPasscode;
+                          }
+                          if (chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") {
+                            data.lockTimeoutSeconds = Math.max(10, Number(chatSettingsTimeout) || 300);
+                          }
+                          const updated = await api.updateChatSettings(selectedConversation.id, data, token);
+                          setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                          chatLock.unlock(updated.id, updated.lockMode, updated.lockTimeoutSeconds);
+                          setShowChatSettings(false);
+                        } catch (err: any) {
+                          setChatSettingsError(err?.message ?? "Failed to save settings");
+                        } finally {
+                          setChatSettingsSaving(false);
+                        }
+                      }}
+                    >
+                      {chatSettingsSaving ? "Saving..." : "Save settings"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         <UserProfilePopover

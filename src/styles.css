@@ -4,11 +4,11 @@
 
 @layer components {
   .orbit-card {
-    @apply rounded-2xl border border-white/10 bg-orbit-panel/80 shadow-2xl backdrop-blur;
+    @apply rounded-2xl border border-white/10 bg-orbit-panel/85 shadow-[0_20px_65px_rgba(0,0,0,0.45)] backdrop-blur;
   }
 
   .orbit-card-solid {
-    @apply rounded-2xl border border-white/10 bg-orbit-panel;
+    @apply rounded-2xl border border-white/10 bg-orbit-panel shadow-[0_8px_25px_rgba(0,0,0,0.25)];
   }
 
   .orbit-label {
@@ -16,36 +16,57 @@
   }
 
   .orbit-input {
-    @apply w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition;
-    @apply focus:border-orbit-accent focus:ring-2 focus:ring-orbit-accent/20;
+    @apply w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition duration-150;
+    @apply focus:border-orbit-accent/80 focus:ring-2 focus:ring-orbit-accent/25;
     @apply disabled:opacity-60;
   }
 
   .orbit-select {
-    @apply w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text outline-none transition;
-    @apply focus:border-orbit-accent focus:ring-2 focus:ring-orbit-accent/20;
+    @apply w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text outline-none transition duration-150;
+    @apply focus:border-orbit-accent/80 focus:ring-2 focus:ring-orbit-accent/25;
     @apply disabled:opacity-60;
   }
 
   .orbit-textarea {
-    @apply min-h-[92px] w-full resize-y rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition;
-    @apply focus:border-orbit-accent focus:ring-2 focus:ring-orbit-accent/20;
+    @apply min-h-[92px] w-full resize-y rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition duration-150;
+    @apply focus:border-orbit-accent/80 focus:ring-2 focus:ring-orbit-accent/25;
     @apply disabled:opacity-60;
   }
 
   .orbit-btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text transition;
-    @apply hover:border-white/20 disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-semibold text-orbit-text transition duration-150;
+    @apply hover:-translate-y-[1px] hover:border-white/25 hover:bg-white/[0.1] active:translate-y-0 disabled:opacity-50;
   }
 
   .orbit-btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orbit-accent px-4 py-3 text-sm font-bold text-slate-950 transition;
-    @apply hover:brightness-110 disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orbit-accent px-4 py-3 text-sm font-bold text-slate-950 shadow-[0_6px_20px_rgba(18,201,180,0.35)] transition duration-150;
+    @apply hover:-translate-y-[1px] hover:brightness-110 active:translate-y-0 disabled:opacity-50;
   }
 
   .orbit-btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orbit-danger px-4 py-3 text-sm font-bold text-white transition;
-    @apply hover:brightness-110 disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orbit-danger px-4 py-3 text-sm font-bold text-white transition duration-150;
+    @apply hover:-translate-y-[1px] hover:brightness-110 active:translate-y-0 disabled:opacity-50;
+  }
+
+  .orbit-shell {
+    @apply min-h-screen overflow-auto bg-gradient-to-b from-[#11131a] via-[#121620] to-[#0f1218] text-orbit-text;
+  }
+
+  .orbit-rail-btn {
+    @apply relative w-full rounded-2xl border border-white/10 bg-orbit-panel/85 px-2 py-2 text-[11px] font-semibold text-orbit-muted transition duration-150;
+    @apply hover:border-white/30 hover:bg-orbit-panel hover:text-orbit-text;
+  }
+
+  .orbit-rail-btn-active {
+    @apply border-orbit-accent/60 bg-gradient-to-br from-orbit-accent/20 to-orbit-accent/5 text-orbit-text shadow-[0_0_0_1px_rgba(0,0,0,0.2)_inset];
+  }
+
+  .orbit-modal-overlay {
+    @apply fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:items-center;
+  }
+
+  .orbit-modal {
+    @apply orbit-card-solid my-4 max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-3xl border-white/15 bg-[#1d212b] p-6;
   }
 }
 
@@ -62,6 +83,13 @@ body,
 #root {
   margin: 0;
   height: 100%;
+}
+
+body {
+  background: #0f1218;
+  color: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #root {
