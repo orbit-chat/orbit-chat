@@ -35,6 +35,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       ciphertext: string;
       nonce: string;
       keyVersion: number;
+      mediaIds?: string[];
       type: string;
       expiresAt: string | null;
       maxViews: number | null;
@@ -49,6 +50,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         createdAt: data.createdAt,
         nonce: data.nonce,
         keyVersion: data.keyVersion,
+        mediaIds: data.mediaIds ?? [],
       }, { currentUserId });
     });
 

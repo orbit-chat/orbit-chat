@@ -7,9 +7,63 @@ import { useE2EEStore } from "./stores/e2eeStore";
 import { useChatLockStore } from "./stores/chatLockStore";
 import * as api from "./lib/api";
 import type { Conversation } from "./lib/api";
-import { decryptMessage, encryptMessage, generateSecretKey, sealToPublicKey } from "./lib/crypto";
+import {
+  decryptChunkedBytes,
+  decryptMessage,
+  encryptChunkedBytes,
+  encryptMessage,
+  generateSecretKey,
+  sealToPublicKey,
+  sha256Base64,
+} from "./lib/crypto";
 import { UserProfilePopover } from "./components/UserProfilePopover";
 import { ProfileSettings } from "./components/ProfileSettings";
+
+type UploadedAttachment = {
+  kind: "image" | "file";
+  mediaId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  fileKeyCiphertext: string;
+  fileKeyNonce: string;
+  chunkSize: number;
+  chunkCount: number;
+  encryptedSha256?: string;
+};
+
+type VideoLinkAttachment = {
+  kind: "video_link";
+  url: string;
+};
+
+type MessageAttachment = UploadedAttachment | VideoLinkAttachment;
+
+type MessageEnvelope = {
+  text?: string;
+  attachments?: MessageAttachment[];
+};
+
+const VIDEO_ALLOWED_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "youtu.be",
+  "vimeo.com",
+  "www.vimeo.com",
+  "loom.com",
+  "www.loom.com",
+]);
+
+function normalizeVideoUrl(input: string) {
+  try {
+    const url = new URL(input.trim());
+    if (url.protocol !== "https:") return null;
+    if (!VIDEO_ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
 
 function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
   if (!keys.length) return null;
@@ -19,29 +73,130 @@ function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
     .publicKey;
 }
 
-function DecryptedMessageText(props: {
+function MediaAttachmentView(props: {
   conversationId: string;
+  keyVersion?: number;
+  token: string | null;
+  attachment: UploadedAttachment;
+}) {
+  const { conversationId, keyVersion, token, attachment } = props;
+  const secretKey = useE2EEStore((state) => state.getConversationSecretKeyForVersion(conversationId, keyVersion));
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+
+    const run = async () => {
+      if (!secretKey || !token) {
+        setBlobUrl(null);
+        return;
+      }
+
+      try {
+        const fileKey = await decryptMessage(attachment.fileKeyCiphertext, attachment.fileKeyNonce, secretKey);
+        const encryptedBytes = await api.downloadEncryptedMedia(attachment.mediaId, token);
+        if (attachment.encryptedSha256) {
+          const digest = await sha256Base64(encryptedBytes);
+          if (digest !== attachment.encryptedSha256) {
+            throw new Error("Attachment integrity check failed");
+          }
+        }
+        const plainBytes = await decryptChunkedBytes(encryptedBytes, fileKey);
+        const blob = new Blob([plainBytes], { type: attachment.mimeType || "application/octet-stream" });
+        createdUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setBlobUrl(createdUrl);
+          setError(null);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setError(err?.message ?? "Unable to open attachment");
+          setBlobUrl(null);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [attachment, secretKey, token]);
+
+  if (error) {
+    return <p className="mt-2 text-xs text-rose-300">{error}</p>;
+  }
+
+  if (!blobUrl) {
+    return <p className="mt-2 text-xs text-orbit-muted">Decrypting attachment...</p>;
+  }
+
+  if (attachment.kind === "image") {
+    return (
+      <a href={blobUrl} download={attachment.name} className="mt-2 block" target="_blank" rel="noreferrer">
+        <img src={blobUrl} alt={attachment.name} className="max-h-64 rounded-xl border border-white/10 object-contain" />
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={blobUrl}
+      download={attachment.name}
+      className="mt-2 inline-flex items-center rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-xs text-orbit-text hover:border-white/20"
+    >
+      Download {attachment.name}
+    </a>
+  );
+}
+
+function DecryptedMessageBody(props: {
+  conversationId: string;
+  token: string | null;
   cipherText: string;
   nonce?: string;
   keyVersion?: number;
 }) {
-  const { conversationId, cipherText, nonce, keyVersion } = props;
+  const { conversationId, token, cipherText, nonce, keyVersion } = props;
   const secretKey = useE2EEStore((state) => state.getConversationSecretKeyForVersion(conversationId, keyVersion));
-  const [plain, setPlain] = useState<string | null>(null);
+  const [legacyText, setLegacyText] = useState<string | null>(null);
+  const [envelope, setEnvelope] = useState<MessageEnvelope | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       if (!secretKey || !nonce) {
-        setPlain(null);
+        setLegacyText(null);
+        setEnvelope(null);
         return;
       }
 
       try {
         const text = await decryptMessage(cipherText, nonce, secretKey);
-        if (!cancelled) setPlain(text);
+        let parsed: MessageEnvelope | null = null;
+        try {
+          const value = JSON.parse(text) as MessageEnvelope;
+          if (value && typeof value === "object") parsed = value;
+        } catch {
+          parsed = null;
+        }
+
+        if (cancelled) return;
+        if (parsed) {
+          setEnvelope(parsed);
+          setLegacyText(null);
+          return;
+        }
+
+        setEnvelope(null);
+        setLegacyText(text);
       } catch {
-        if (!cancelled) setPlain(null);
+        if (!cancelled) {
+          setLegacyText(null);
+          setEnvelope(null);
+        }
       }
     };
 
@@ -51,7 +206,41 @@ function DecryptedMessageText(props: {
     };
   }, [cipherText, nonce, secretKey]);
 
-  return <p className="mt-1 break-words text-orbit-text">{plain ?? "Encrypted message (unable to decrypt on this device)."}</p>;
+  if (!envelope && !legacyText) {
+    return <p className="mt-1 break-words text-orbit-text">Encrypted message (unable to decrypt on this device).</p>;
+  }
+
+  return (
+    <div className="mt-1 space-y-2">
+      {(envelope?.text ?? legacyText) && <p className="break-words text-orbit-text">{envelope?.text ?? legacyText}</p>}
+      {(envelope?.attachments ?? []).map((attachment, idx) => {
+        if (attachment.kind === "video_link") {
+          const safeUrl = normalizeVideoUrl(attachment.url);
+          if (!safeUrl) return null;
+          return (
+            <a
+              key={`${safeUrl}:${idx}`}
+              href={safeUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="block rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-xs text-orbit-accent hover:border-orbit-accent/40"
+            >
+              Video link: {new URL(safeUrl).hostname}
+            </a>
+          );
+        }
+        return (
+          <MediaAttachmentView
+            key={`${attachment.mediaId}:${idx}`}
+            token={token}
+            conversationId={conversationId}
+            keyVersion={keyVersion}
+            attachment={attachment}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 function App() {
@@ -66,6 +255,12 @@ function App() {
   const [authValidationError, setAuthValidationError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [videoLinkDraft, setVideoLinkDraft] = useState("");
+  const [pendingVideoLinks, setPendingVideoLinks] = useState<string[]>([]);
+  const [messageSendError, setMessageSendError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
 
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
   const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
@@ -376,6 +571,14 @@ function App() {
     setActiveConversation(selectedConvId);
   }, [navTab, selectedConvId, setActiveConversation]);
 
+  useEffect(() => {
+    setPendingFiles([]);
+    setPendingVideoLinks([]);
+    setVideoLinkDraft("");
+    setMessageSendError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [selectedConvId]);
+
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -403,6 +606,7 @@ function App() {
           cipherText: m.ciphertext,
           keyVersion: m.keyVersion,
           nonce: m.nonce,
+          mediaIds: m.mediaIds ?? [],
           createdAt: new Date(m.createdAt).getTime(),
         }, { currentUserId: user?.id, markAsRead: true });
       }
@@ -559,37 +763,135 @@ function App() {
     }
   };
 
+  const handleAttachFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const accepted = Array.from(files).filter((file) => {
+      if (file.type.startsWith("video/")) return false;
+      return file.size <= 50 * 1024 * 1024;
+    });
+    if (!accepted.length) {
+      setMessageSendError("Only non-video files up to 50MB are supported.");
+      return;
+    }
+    setMessageSendError(null);
+    setPendingFiles((prev) => [...prev, ...accepted]);
+  };
+
+  const handleAddVideoLink = () => {
+    const safeUrl = normalizeVideoUrl(videoLinkDraft);
+    if (!safeUrl) {
+      setMessageSendError("Video links must be HTTPS and from an approved host (YouTube, Vimeo, Loom).");
+      return;
+    }
+    setMessageSendError(null);
+    setPendingVideoLinks((prev) => [...prev, safeUrl]);
+    setVideoLinkDraft("");
+  };
+
   /* ───── Send message over socket ───── */
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const draft = messageDraft.trim();
-    if (!draft || !selectedConvId || !user || !socket) return;
+    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0;
+    if (!selectedConvId || !user || !socket) return;
     if (!token) return;
+    if (!draft && !hasAttachments) return;
 
     if (!selectedConversation || selectedConversation.type !== "dm") return;
 
-    (async () => {
-      try {
-        const secretKey = await ensureConversationSecretKey({
-          conversation: selectedConversation,
-          token,
-          myUserId: user.id,
-        });
-        if (!secretKey) return;
+    try {
+      const secretKey = await ensureConversationSecretKey({
+        conversation: selectedConversation,
+        token,
+        myUserId: user.id,
+      });
+      if (!secretKey) return;
 
-        const { cipherText, nonce } = await encryptMessage(draft, secretKey);
+      const attachments: MessageAttachment[] = [];
+      const mediaIds: string[] = [];
+      const usedCacheKeys: string[] = [];
 
-        socket.emit("send_message", {
-          conversationId: selectedConvId,
-          ciphertext: cipherText,
-          nonce,
-          keyVersion: getConversationKeyVersion(selectedConvId) ?? 1,
-        });
+      for (const file of pendingFiles) {
+        const cacheKey = `${selectedConvId}:${file.name}:${file.size}:${file.lastModified}`;
+        const cachedAttachment = uploadedAttachmentCacheRef.current[cacheKey];
+        if (cachedAttachment) {
+          attachments.push(cachedAttachment);
+          mediaIds.push(cachedAttachment.mediaId);
+          usedCacheKeys.push(cacheKey);
+          continue;
+        }
 
-        setMessageDraft("");
-      } catch {
-        // ignore
+        const plainBytes = new Uint8Array(await file.arrayBuffer());
+        const fileKey = await generateSecretKey();
+        const preferredChunkSize = file.size > 10 * 1024 * 1024 ? 512 * 1024 : 256 * 1024;
+        const encrypted = await encryptChunkedBytes(plainBytes, fileKey, preferredChunkSize);
+        const encryptedSha256 = await sha256Base64(encrypted.encryptedBytes);
+
+        const reservation = await api.requestMediaUploadUrl(
+          {
+            conversationId: selectedConvId,
+            fileName: file.name,
+            contentType: file.type || "application/octet-stream",
+            contentLength: encrypted.encryptedBytes.length,
+            sha256: encryptedSha256,
+          },
+          token
+        );
+
+        await api.uploadEncryptedBlob(
+          reservation.uploadUrl,
+          new Blob([new Uint8Array(encrypted.encryptedBytes).buffer], { type: "application/octet-stream" })
+        );
+
+        const wrappedFileKey = await encryptMessage(fileKey, secretKey);
+        const attachment: UploadedAttachment = {
+          kind: file.type.startsWith("image/") ? "image" : "file",
+          mediaId: reservation.mediaId,
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          fileKeyCiphertext: wrappedFileKey.cipherText,
+          fileKeyNonce: wrappedFileKey.nonce,
+          chunkSize: encrypted.chunkSize,
+          chunkCount: encrypted.chunkCount,
+          encryptedSha256,
+        };
+        attachments.push(attachment);
+        mediaIds.push(reservation.mediaId);
+        uploadedAttachmentCacheRef.current[cacheKey] = attachment;
+        usedCacheKeys.push(cacheKey);
       }
-    })();
+
+      for (const url of pendingVideoLinks) {
+        attachments.push({ kind: "video_link", url });
+      }
+
+      const envelope: MessageEnvelope = {
+        text: draft || undefined,
+        attachments,
+      };
+
+      const { cipherText, nonce } = await encryptMessage(JSON.stringify(envelope), secretKey);
+
+      socket.emit("send_message", {
+        conversationId: selectedConvId,
+        ciphertext: cipherText,
+        nonce,
+        keyVersion: getConversationKeyVersion(selectedConvId) ?? 1,
+        mediaIds,
+        type: attachments.length ? "media" : "text",
+      });
+
+      setMessageDraft("");
+      setPendingFiles([]);
+      setPendingVideoLinks([]);
+      setMessageSendError(null);
+      for (const key of usedCacheKeys) {
+        delete uploadedAttachmentCacheRef.current[key];
+      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err: any) {
+      setMessageSendError(err?.message ?? "Failed to send message");
+    }
   };
 
   /* ════════════════════════════════════════════════════ */
@@ -1679,8 +1981,9 @@ function App() {
                     >
                       {msg.sender}
                     </button>
-                    <DecryptedMessageText
+                    <DecryptedMessageBody
                       conversationId={selectedConversation.id}
+                      token={token}
                       cipherText={msg.cipherText}
                       nonce={msg.nonce}
                       keyVersion={msg.keyVersion}
@@ -1694,6 +1997,59 @@ function App() {
             </section>
 
             <footer className="border-t border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
+              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0) && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {pendingFiles.map((file, idx) => (
+                    <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-text">
+                      {file.name}
+                      <button
+                        className="text-orbit-muted hover:text-orbit-text"
+                        onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                  {pendingVideoLinks.map((link, idx) => (
+                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-accent">
+                      {new URL(link).hostname}
+                      <button
+                        className="text-orbit-muted hover:text-orbit-text"
+                        onClick={() => setPendingVideoLinks((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="mb-3 flex gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => handleAttachFiles(event.target.files)}
+                />
+                <button className="orbit-btn px-3" onClick={() => fileInputRef.current?.click()}>
+                  Attach File
+                </button>
+                <input
+                  className="orbit-input flex-1 px-3"
+                  value={videoLinkDraft}
+                  onChange={(event) => setVideoLinkDraft(event.target.value)}
+                  placeholder="Paste video link (YouTube, Vimeo, Loom)"
+                />
+                <button className="orbit-btn px-3" onClick={handleAddVideoLink}>
+                  Add Link
+                </button>
+              </div>
+
+              {messageSendError && (
+                <p className="mb-2 text-xs text-rose-300">{messageSendError}</p>
+              )}
+
               <div className="flex gap-3">
                 <input
                   className="orbit-input flex-1 px-4"
@@ -1702,14 +2058,14 @@ function App() {
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
-                      handleSendMessage();
+                      void handleSendMessage();
                     }
                   }}
                   placeholder="Type message..."
                 />
                 <button
                   className="orbit-btn-primary px-5"
-                  onClick={handleSendMessage}
+                  onClick={() => void handleSendMessage()}
                 >
                   Send
                 </button>

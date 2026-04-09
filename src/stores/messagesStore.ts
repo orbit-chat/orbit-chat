@@ -7,6 +7,7 @@ export type ChatMessage = {
   cipherText: string;
   nonce?: string;
   keyVersion?: number;
+  mediaIds?: string[];
   createdAt: number;
   ttlSeconds?: number;
 };

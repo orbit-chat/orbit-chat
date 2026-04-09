@@ -369,6 +369,55 @@ export function updateChatSettings(
   });
 }
 
+/* ───── Media ───── */
+
+export type MediaUploadReservation = {
+  mediaId: string;
+  uploadUrl: string;
+  storageKey: string;
+};
+
+export function requestMediaUploadUrl(
+  data: {
+    conversationId: string;
+    fileName: string;
+    contentType: string;
+    contentLength?: number;
+    sha256?: string;
+    isOneTime?: boolean;
+  },
+  token: string
+) {
+  return request<MediaUploadReservation>('/media/upload-url', {
+    method: 'POST',
+    body: data,
+    token,
+  });
+}
+
+export async function uploadEncryptedBlob(uploadUrl: string, blob: Blob) {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+    },
+    body: blob,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Upload failed with status ${res.status}`);
+  }
+}
+
+export async function downloadEncryptedMedia(mediaId: string, token: string) {
+  const access = await request<{ downloadUrl: string }>(`/media/${mediaId}/access`, { token });
+  const res = await fetch(access.downloadUrl, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`Download failed with status ${res.status}`);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 /* ───── Messages ───── */
 
 export type ServerMessage = {
@@ -378,6 +427,7 @@ export type ServerMessage = {
   ciphertext: string;
   nonce: string;
   keyVersion: number;
+  mediaIds?: string[];
   type: string;
   expiresAt: string | null;
   maxViews: number | null;
@@ -392,7 +442,7 @@ export function getMessages(conversationId: string, token: string, cursor?: stri
 }
 
 export function sendMessage(
-  data: { conversationId: string; ciphertext: string; nonce: string; keyVersion?: number },
+  data: { conversationId: string; ciphertext: string; nonce: string; keyVersion?: number; mediaIds?: string[] },
   token: string
 ) {
   return request<ServerMessage>("/messages", { method: "POST", body: data, token });
