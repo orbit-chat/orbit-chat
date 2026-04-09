@@ -23,6 +23,8 @@ Orbit Chat combines:
 - client-side unread badge tracking that clears on active chat selection
 - chat display names editable in per-chat settings
 - DM fallback labels using `@username#chatId` when no custom chat name is set
+- full-scene scroll handling for auth, lock, modal, and app-shell views
+- client URL normalization safeguards for malformed API/socket base URLs
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
@@ -106,6 +108,8 @@ Runtime behavior notes:
 - Unread counters are maintained client-side and reset immediately when a conversation becomes active.
 - Chat settings support custom display names and passcode/lock updates in one panel.
 - Locked/passcode prompts include the chat label so users can match the correct passcode to the correct DM instance.
+- Scene containers are scroll-safe on smaller viewports (auth, passcode, main shell columns, and settings modal).
+- API and socket base URLs are normalized client-side to reduce config mistakes (for example accidental `/:port` formatting).
 
 ## System Design
 
@@ -113,6 +117,7 @@ Runtime behavior notes:
 Desktop App (Electron + React)
 	|- Auth/session state
 	|- Realtime socket client
+	|- URL-normalized API/socket endpoint handling
 	|- E2EE key management
 	|- Encrypt/decrypt message content
 					|
@@ -200,7 +205,8 @@ flowchart TD
 	E --> F[Initialize libsodium + device key material]
 	F --> G[Open Socket.IO session with JWT]
 	G --> H[Join user room and active conversation rooms]
-	H --> H2[Listen for friendships_updated and realtime message events]
+	H --> H1[Normalize API/socket base URLs from env config]
+	H1 --> H2[Listen for friendships_updated and realtime message events]
 	H2 --> I[REST fetch: conversations + message history]
 	I --> J[For each DM: resolve sealed conversation key]
 	J --> K[Unseal key locally with device private key]
@@ -215,6 +221,7 @@ flowchart TD
 	P3 --> P[POST encrypted payload]
 	P --> Q[Receive socket ack/new-message events]
 	Q --> R[Update local stores + reconcile optimistic UI]
+	R --> S[Maintain scrollable scene containers and modal panels]
 ```
 
 ## Detailed Server Processing Flow
