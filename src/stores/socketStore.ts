@@ -10,7 +10,13 @@ type SocketState = {
   disconnect: () => void;
 };
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL ?? "http://147.135.31.128:3000";
+function normalizeBaseUrl(rawUrl: string) {
+  const trimmed = rawUrl.trim();
+  const fixedPort = trimmed.replace(/\/:(\d+)/, ":$1");
+  return fixedPort.replace(/\/$/, "");
+}
+
+const SOCKET_URL = normalizeBaseUrl(import.meta.env.VITE_SOCKET_URL ?? "http://147.135.31.128:3000");
 
 export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,

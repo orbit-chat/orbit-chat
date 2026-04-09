@@ -1,4 +1,10 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://147.135.31.128:3000";
+function normalizeBaseUrl(rawUrl: string) {
+  const trimmed = rawUrl.trim();
+  const fixedPort = trimmed.replace(/\/:(\d+)/, ":$1");
+  return fixedPort.replace(/\/$/, "");
+}
+
+const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_URL ?? "http://147.135.31.128:3000");
 
 type RequestOptions = {
   method?: string;
