@@ -61,11 +61,8 @@ const VIDEO_ALLOWED_HOSTS = new Set([
   "www.loom.com",
 ]);
 
-const GIF_PROVIDER = (import.meta.env.VITE_GIF_PROVIDER ?? "giphy").trim().toLowerCase();
-const TENOR_API_KEY = (import.meta.env.VITE_TENOR_API_KEY ?? "").trim();
-const TENOR_CLIENT_KEY = (import.meta.env.VITE_TENOR_CLIENT_KEY ?? "orbit_chat_desktop").trim();
 const GIPHY_API_KEY = (import.meta.env.VITE_GIPHY_API_KEY ?? "dc6zaTOxFJmzC").trim();
-const TENOR_LIMIT = 18;
+const GIF_SEARCH_LIMIT = 18;
 
 const EMOJI_CATALOG: Array<{ value: string; tags: string[] }> = [
   { value: "😀", tags: ["smile", "happy", "grin"] },
@@ -111,6 +108,100 @@ const EMOJI_CATALOG: Array<{ value: string; tags: string[] }> = [
   { value: "📷", tags: ["camera", "photo"] },
   { value: "🌙", tags: ["night", "moon"] },
   { value: "☀️", tags: ["sun", "day"] },
+  { value: "😁", tags: ["grin", "smile", "happy"] },
+  { value: "😇", tags: ["angel", "innocent", "good"] },
+  { value: "🥳", tags: ["party", "celebrate", "birthday"] },
+  { value: "🤩", tags: ["starstruck", "wow", "excited"] },
+  { value: "😋", tags: ["yum", "tasty", "tongue"] },
+  { value: "😜", tags: ["silly", "wink", "playful"] },
+  { value: "🤪", tags: ["goofy", "crazy", "funny"] },
+  { value: "😌", tags: ["calm", "relieved", "peaceful"] },
+  { value: "😔", tags: ["sad", "down", "disappointed"] },
+  { value: "😢", tags: ["cry", "sad", "tear"] },
+  { value: "😡", tags: ["angry", "mad", "rage"] },
+  { value: "🤬", tags: ["swear", "angry", "mad"] },
+  { value: "🥶", tags: ["cold", "freezing", "chill"] },
+  { value: "🥵", tags: ["hot", "heat", "sweat"] },
+  { value: "🤗", tags: ["hug", "support", "care"] },
+  { value: "🫶", tags: ["love", "heart", "hands"] },
+  { value: "💪", tags: ["strong", "workout", "muscle"] },
+  { value: "👌", tags: ["ok", "perfect", "fine"] },
+  { value: "🤌", tags: ["italian", "chef", "gesture"] },
+  { value: "✌️", tags: ["peace", "victory", "two"] },
+  { value: "🫰", tags: ["snap", "money", "finger"] },
+  { value: "👋", tags: ["wave", "hello", "bye"] },
+  { value: "🫵", tags: ["you", "point", "finger"] },
+  { value: "👏🏻", tags: ["clap", "applause", "nice"] },
+  { value: "🤞", tags: ["luck", "hope", "crossed"] },
+  { value: "🎊", tags: ["celebration", "confetti", "party"] },
+  { value: "🏆", tags: ["win", "trophy", "champion"] },
+  { value: "🥇", tags: ["gold", "first", "winner"] },
+  { value: "🎮", tags: ["game", "controller", "gaming"] },
+  { value: "🧩", tags: ["puzzle", "solve", "piece"] },
+  { value: "💻", tags: ["code", "computer", "dev"] },
+  { value: "⌨️", tags: ["keyboard", "typing", "code"] },
+  { value: "🖱️", tags: ["mouse", "click", "computer"] },
+  { value: "📱", tags: ["phone", "mobile", "app"] },
+  { value: "📞", tags: ["call", "phone", "ring"] },
+  { value: "📨", tags: ["message", "mail", "inbox"] },
+  { value: "✉️", tags: ["email", "message", "letter"] },
+  { value: "🧾", tags: ["receipt", "invoice", "bill"] },
+  { value: "📅", tags: ["calendar", "date", "schedule"] },
+  { value: "⏰", tags: ["alarm", "time", "clock"] },
+  { value: "📍", tags: ["location", "pin", "map"] },
+  { value: "🗺️", tags: ["map", "travel", "location"] },
+  { value: "🚗", tags: ["car", "drive", "travel"] },
+  { value: "✈️", tags: ["flight", "airplane", "travel"] },
+  { value: "🏠", tags: ["home", "house", "safe"] },
+  { value: "🏢", tags: ["office", "work", "building"] },
+  { value: "☕", tags: ["coffee", "break", "morning"] },
+  { value: "🍕", tags: ["pizza", "food", "eat"] },
+  { value: "🍔", tags: ["burger", "food", "eat"] },
+  { value: "🍜", tags: ["ramen", "noodles", "food"] },
+  { value: "🍣", tags: ["sushi", "food", "japan"] },
+  { value: "🍎", tags: ["apple", "fruit", "healthy"] },
+  { value: "🥤", tags: ["drink", "soda", "beverage"] },
+  { value: "🧋", tags: ["boba", "tea", "drink"] },
+  { value: "🧁", tags: ["cupcake", "dessert", "sweet"] },
+  { value: "🐶", tags: ["dog", "pet", "cute"] },
+  { value: "🐱", tags: ["cat", "pet", "cute"] },
+  { value: "🦊", tags: ["fox", "animal", "cute"] },
+  { value: "🐼", tags: ["panda", "animal", "cute"] },
+  { value: "🦄", tags: ["unicorn", "magic", "fun"] },
+  { value: "🌈", tags: ["rainbow", "color", "happy"] },
+  { value: "🌊", tags: ["ocean", "wave", "water"] },
+  { value: "🌧️", tags: ["rain", "weather", "storm"] },
+  { value: "❄️", tags: ["snow", "winter", "cold"] },
+  { value: "⚽", tags: ["soccer", "sports", "ball"] },
+  { value: "🏀", tags: ["basketball", "sports", "ball"] },
+  { value: "🎾", tags: ["tennis", "sports", "ball"] },
+  { value: "🏈", tags: ["football", "sports", "ball"] },
+  { value: "🎸", tags: ["guitar", "music", "instrument"] },
+  { value: "🎧", tags: ["headphones", "music", "listen"] },
+  { value: "🎬", tags: ["movie", "film", "video"] },
+  { value: "📚", tags: ["books", "read", "study"] },
+  { value: "✍️", tags: ["write", "notes", "author"] },
+  { value: "🔒", tags: ["lock", "secure", "private"] },
+  { value: "🔓", tags: ["unlock", "open", "access"] },
+  { value: "🛡️", tags: ["shield", "security", "protect"] },
+  { value: "🧪", tags: ["test", "experiment", "lab"] },
+  { value: "🐛", tags: ["bug", "issue", "debug"] },
+  { value: "🧰", tags: ["tools", "fix", "kit"] },
+  { value: "🛠️", tags: ["build", "repair", "tools"] },
+  { value: "📈", tags: ["growth", "analytics", "up"] },
+  { value: "📉", tags: ["down", "drop", "analytics"] },
+  { value: "🧭", tags: ["direction", "navigate", "compass"] },
+  { value: "🧨", tags: ["explosive", "hype", "boom"] },
+  { value: "🥲", tags: ["tears", "happy sad", "emotion"] },
+  { value: "🫠", tags: ["melting", "awkward", "heat"] },
+  { value: "🫣", tags: ["peek", "shy", "embarrassed"] },
+  { value: "🫤", tags: ["meh", "unsure", "neutral"] },
+  { value: "🫥", tags: ["invisible", "quiet", "hide"] },
+  { value: "🫨", tags: ["shaking", "shock", "wow"] },
+  { value: "🩷", tags: ["pink heart", "love", "heart"] },
+  { value: "🩵", tags: ["light blue heart", "love", "heart"] },
+  { value: "🩶", tags: ["grey heart", "love", "heart"] },
+  { value: "🫂", tags: ["hug", "support", "comfort"] },
 ];
 
 type GifSearchResult = {
@@ -523,6 +614,34 @@ function App() {
     });
   }, []);
 
+  const presenceLabel = useCallback((presence?: api.Presence | null) => {
+    switch (presence) {
+      case "online":
+        return "Online";
+      case "idle":
+        return "Idle";
+      case "dnd":
+        return "Do Not Disturb";
+      case "offline":
+      default:
+        return "Offline";
+    }
+  }, []);
+
+  const presenceDotClass = useCallback((presence?: api.Presence | null) => {
+    switch (presence) {
+      case "online":
+        return "bg-emerald-400";
+      case "idle":
+        return "bg-amber-400";
+      case "dnd":
+        return "bg-rose-400";
+      case "offline":
+      default:
+        return "bg-slate-500";
+    }
+  }, []);
+
   // Get the "other" user's name in a DM
   const dmPartnerName = useMemo(() => {
     if (!selectedConversation || !user) return null;
@@ -916,96 +1035,42 @@ function App() {
       setGifLoading(true);
       setGifError(null);
       try {
-        const usingTenor = GIF_PROVIDER === "tenor";
-        if (usingTenor) {
-          if (!TENOR_API_KEY) {
-            throw new Error("VITE_TENOR_API_KEY is missing. Set it in orbit-chat/.env or switch VITE_GIF_PROVIDER to giphy.");
-          }
-
-          const response = await fetch(
-            `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${encodeURIComponent(TENOR_API_KEY)}&client_key=${encodeURIComponent(TENOR_CLIENT_KEY)}&limit=${TENOR_LIMIT}&media_filter=minimal`,
-            { signal: controller.signal }
-          );
-          if (!response.ok) {
-            let reason = "";
-            try {
-              const errorPayload = await response.json() as { error?: { message?: string }, message?: string };
-              reason = errorPayload.error?.message ?? errorPayload.message ?? "";
-            } catch {
-              reason = "";
-            }
-
-            if (response.status === 400 && reason.toLowerCase().includes("api key")) {
-              throw new Error("Invalid Tenor API key. Update VITE_TENOR_API_KEY in orbit-chat/.env or switch VITE_GIF_PROVIDER to giphy.");
-            }
-            if (reason) {
-              throw new Error(`GIF search failed (${response.status}): ${reason}`);
-            }
-            throw new Error(`GIF search failed (${response.status})`);
-          }
-
-          const data = await response.json() as {
-            results?: Array<{
-              id?: string;
-              content_description?: string;
-              media_formats?: {
-                gif?: { url?: string };
-                tinygif?: { url?: string };
-              };
-            }>;
-          };
-          const parsed = (data.results ?? [])
-            .map((item) => {
-              const gifUrl = normalizeGifUrl(item.media_formats?.gif?.url ?? "");
-              const previewUrl = normalizeGifUrl(item.media_formats?.tinygif?.url ?? "") ?? gifUrl;
-              if (!gifUrl || !previewUrl || !item.id) return null;
-              return {
-                id: item.id,
-                title: item.content_description ?? "GIF",
-                gifUrl,
-                previewUrl,
-              } satisfies GifSearchResult;
-            })
-            .filter((item): item is GifSearchResult => Boolean(item));
-          setGifResults(parsed);
-        } else {
-          if (!GIPHY_API_KEY) {
-            throw new Error("VITE_GIPHY_API_KEY is missing. Set it in orbit-chat/.env.");
-          }
-
-          const response = await fetch(
-            `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(GIPHY_API_KEY)}&q=${encodeURIComponent(query)}&limit=${TENOR_LIMIT}&rating=pg-13&lang=en`,
-            { signal: controller.signal }
-          );
-          if (!response.ok) {
-            throw new Error(`GIF search failed (${response.status})`);
-          }
-
-          const data = await response.json() as {
-            data?: Array<{
-              id?: string;
-              title?: string;
-              images?: {
-                original?: { url?: string };
-                fixed_width_small?: { url?: string };
-              };
-            }>;
-          };
-          const parsed = (data.data ?? [])
-            .map((item) => {
-              const gifUrl = normalizeGifUrl(item.images?.original?.url ?? "");
-              const previewUrl = normalizeGifUrl(item.images?.fixed_width_small?.url ?? "") ?? gifUrl;
-              if (!gifUrl || !previewUrl || !item.id) return null;
-              return {
-                id: item.id,
-                title: item.title ?? "GIF",
-                gifUrl,
-                previewUrl,
-              } satisfies GifSearchResult;
-            })
-            .filter((item): item is GifSearchResult => Boolean(item));
-          setGifResults(parsed);
+        if (!GIPHY_API_KEY) {
+          throw new Error("VITE_GIPHY_API_KEY is missing. Set it in orbit-chat/.env.");
         }
+
+        const response = await fetch(
+          `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(GIPHY_API_KEY)}&q=${encodeURIComponent(query)}&limit=${GIF_SEARCH_LIMIT}&rating=pg-13&lang=en`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          throw new Error(`GIF search failed (${response.status})`);
+        }
+
+        const data = await response.json() as {
+          data?: Array<{
+            id?: string;
+            title?: string;
+            images?: {
+              original?: { url?: string };
+              fixed_width_small?: { url?: string };
+            };
+          }>;
+        };
+        const parsed = (data.data ?? [])
+          .map((item) => {
+            const gifUrl = normalizeGifUrl(item.images?.original?.url ?? "");
+            const previewUrl = normalizeGifUrl(item.images?.fixed_width_small?.url ?? "") ?? gifUrl;
+            if (!gifUrl || !previewUrl || !item.id) return null;
+            return {
+              id: item.id,
+              title: item.title ?? "GIF",
+              gifUrl,
+              previewUrl,
+            } satisfies GifSearchResult;
+          })
+          .filter((item): item is GifSearchResult => Boolean(item));
+        setGifResults(parsed);
       } catch (err: any) {
         if (controller.signal.aborted) return;
         setGifResults([]);
@@ -1998,11 +2063,12 @@ function App() {
                           <p className="truncate text-sm font-semibold">@{friend.user.username}</p>
                           <p className="truncate text-xs text-orbit-muted">
                             {friend.user.statusEmoji ? `${friend.user.statusEmoji} ` : ""}
-                            {friend.user.statusText || friend.user.presence || "Available"}
+                            {presenceLabel(friend.user.presence)}
+                            {friend.user.statusText ? ` • ${friend.user.statusText}` : ""}
                           </p>
                         </button>
                       </div>
-                      <span className={`h-2.5 w-2.5 rounded-full ${friend.user.presence === "online" ? "bg-emerald-400" : friend.user.presence === "idle" ? "bg-amber-400" : friend.user.presence === "dnd" ? "bg-rose-400" : "bg-slate-500"}`} />
+                      <span className={`h-2.5 w-2.5 rounded-full ${presenceDotClass(friend.user.presence)}`} />
                     </div>
                     <div className="mt-2 flex gap-2">
                       <button
