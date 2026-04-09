@@ -4,6 +4,7 @@ import { useMessagesStore } from "./stores/messagesStore";
 import { useSocketStore } from "./stores/socketStore";
 import { useProfilesStore } from "./stores/profilesStore";
 import { useE2EEStore } from "./stores/e2eeStore";
+import { useChatLockStore } from "./stores/chatLockStore";
 import * as api from "./lib/api";
 import type { Conversation } from "./lib/api";
 import { decryptMessage, encryptMessage, generateSecretKey, sealToPublicKey } from "./lib/crypto";
@@ -55,7 +56,8 @@ function DecryptedMessageText(props: {
 
 function App() {
   const [appVersion, setAppVersion] = useState("-");
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authMode, setAuthMode] = useState<"login" | "signup" | "recovery">("login");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
   const [navTab, setNavTab] = useState<"dm" | "friends" | "archive">("dm");
   const [username, setUsername] = useState("");
@@ -68,6 +70,22 @@ function App() {
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
   const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
 
+  /** Passcode for newly created chat (shown once) */
+  const [pendingChatPasscode, setPendingChatPasscode] = useState<{ conversationId: string; passcode: string } | null>(null);
+  /** When a locked chat is selected, show the unlock screen */
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [passcodeError, setPasscodeError] = useState<string | null>(null);
+  const [bypassRecoveryCode, setBypassRecoveryCode] = useState("");
+  const [showBypassInput, setShowBypassInput] = useState(false);
+  /** Chat settings panel */
+  const [showChatSettings, setShowChatSettings] = useState(false);
+  const [chatSettingsPasscode, setChatSettingsPasscode] = useState("");
+  const [chatSettingsLength, setChatSettingsLength] = useState(2);
+  const [chatSettingsLockMode, setChatSettingsLockMode] = useState<api.ChatLockMode>("on_leave");
+  const [chatSettingsTimeout, setChatSettingsTimeout] = useState("");
+  const [chatSettingsError, setChatSettingsError] = useState<string | null>(null);
+  const [chatSettingsSaving, setChatSettingsSaving] = useState(false);
+
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -78,7 +96,7 @@ function App() {
   const [friendActionLoading, setFriendActionLoading] = useState<Record<string, boolean>>({});
   const conversationsRef = useRef<Conversation[]>([]);
 
-  const { user, clearSession, token, loading, error, login, signup } = useAuthStore();
+  const { user, clearSession, token, loading, error, login, signup, loginWithRecoveryCode, pendingRecoveryCodes, clearPendingRecoveryCodes } = useAuthStore();
   const { connected, connect, disconnect, socket } = useSocketStore();
   const { byConversation, unreadCountByConversation, upsertMessage, setActiveConversation } = useMessagesStore();
   const profiles = useProfilesStore();
@@ -87,6 +105,8 @@ function App() {
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
   const getConversationKeyVersion = useE2EEStore((state) => state.getConversationKeyVersion);
   const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
+
+  const chatLock = useChatLockStore();
 
   const selectedConversation = useMemo(
     () => conversations.find((c) => c.id === selectedConvId) ?? null,
@@ -359,6 +379,21 @@ function App() {
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
+
+    // Lock the previously selected conversation when navigating away
+    return () => {
+      if (selectedConvId) {
+        chatLock.onLeave(selectedConvId);
+      }
+    };
+  }, [selectedConvId]);
+
+  useEffect(() => {
+    if (!selectedConvId || !token) return;
+    // Only load messages if the conversation is unlocked or doesn't need a passcode
+    const conv = conversations.find((c) => c.id === selectedConvId);
+    if (conv?.passcodeEnabled && !chatLock.isUnlocked(selectedConvId)) return;
+
     api.getMessages(selectedConvId, token).then((msgs) => {
       for (const m of msgs) {
         upsertMessage(selectedConvId, {
@@ -401,6 +436,24 @@ function App() {
     ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
   }, [token, user?.id, selectedConversation, ensureConversationSecretKey]);
 
+  /* ───── Reset inactivity timer on user interactions ───── */
+  useEffect(() => {
+    if (!selectedConvId) return;
+    const conv = conversations.find((c) => c.id === selectedConvId);
+    if (!conv || conv.lockMode !== "after_inactivity") return;
+    if (!chatLock.isUnlocked(selectedConvId)) return;
+
+    const handleActivity = () => chatLock.resetInactivity(selectedConvId);
+    window.addEventListener("keydown", handleActivity);
+    window.addEventListener("pointermove", handleActivity);
+    window.addEventListener("pointerdown", handleActivity);
+    return () => {
+      window.removeEventListener("keydown", handleActivity);
+      window.removeEventListener("pointermove", handleActivity);
+      window.removeEventListener("pointerdown", handleActivity);
+    };
+  }, [selectedConvId, conversations, chatLock]);
+
   /* ───── Search users ───── */
   useEffect(() => {
     const query = search.trim();
@@ -425,6 +478,18 @@ function App() {
       return;
     }
 
+    if (authMode === "recovery") {
+      if (!recoveryCode.trim()) {
+        setAuthValidationError("Recovery code is required.");
+        return;
+      }
+      setAuthValidationError(null);
+      await loginWithRecoveryCode(trimmedUsername, recoveryCode.trim());
+      setRecoveryCode("");
+      setPassword("");
+      return;
+    }
+
     if (authMode === "signup") {
       if (password !== confirmPassword) {
         setAuthValidationError("Passwords do not match.");
@@ -446,44 +511,14 @@ function App() {
     setConfirmPassword("");
   };
 
-  /* ───── Start DM with a searched user ───── */
+  /* ───── Start DM with a searched user (always creates a new chat) ───── */
   const startDM = async (targetUser: { id: string; username: string }) => {
     if (!token) return;
     if (!user) return;
 
     setMainView("chat");
 
-    // Check if a DM already exists with this user
-    let existing = conversations.find(
-      (c) =>
-        c.type === "dm" &&
-        c.members.some((m) => m.user.id === targetUser.id)
-    );
-
-    // If not found in local state, fetch latest conversations once to avoid duplicate DMs.
-    if (!existing) {
-      try {
-        const latestConversations = await api.getConversations(token);
-        setConversations(latestConversations);
-        existing = latestConversations.find(
-          (c) =>
-            c.type === "dm" &&
-            c.members.some((m) => m.user.id === targetUser.id)
-        );
-      } catch {
-        // Ignore and proceed with create flow.
-      }
-    }
-
-    if (existing) {
-      setSelectedConvId(existing.id);
-      setSearch("");
-      setSearchResults([]);
-      await ensureConversationSecretKey({ conversation: existing, token, myUserId: user.id });
-      return;
-    }
-
-    // Create a new DM conversation
+    // Always create a new DM conversation (multiple chats per person allowed)
     try {
       const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
       const otherKeys = await api.getUserKeys(targetUser.id, token);
@@ -500,6 +535,7 @@ function App() {
         { type: "dm", memberIds: [targetUser.id], encryptedKeys },
         token
       );
+
       setConversations((prev) => {
         const withoutDup = prev.filter((existingConv) => existingConv.id !== conv.id);
         return [conv, ...withoutDup];
@@ -508,6 +544,14 @@ function App() {
       setMainView("chat");
       setSearch("");
       setSearchResults([]);
+
+      // Show the one-time passcode to the user
+      if (conv.passcode) {
+        setPendingChatPasscode({ conversationId: conv.id, passcode: conv.passcode });
+      }
+
+      // Auto-unlock the newly created chat
+      chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
 
       await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
     } catch {
@@ -549,6 +593,101 @@ function App() {
   };
 
   /* ════════════════════════════════════════════════════ */
+  /*  NEW CHAT PASSCODE DISPLAY (shown once on creation)  */
+  /* ════════════════════════════════════════════════════ */
+  if (user && pendingChatPasscode) {
+    return (
+      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+        <section className="orbit-card relative z-10 w-full max-w-md rounded-3xl p-8">
+          <div className="mb-2 flex items-center gap-2">
+            <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <h2 className="text-xl font-bold text-orbit-text">Chat Passcode</h2>
+          </div>
+          <p className="mb-4 text-sm text-orbit-muted">
+            This chat has been secured with a passcode. You'll need to enter it every time you open this chat.
+            <span className="mt-1 block font-semibold text-amber-300">
+              Save this passcode — you will not see it again.
+            </span>
+          </p>
+          <div className="flex items-center justify-center rounded-xl border border-white/10 bg-orbit-panelAlt p-6">
+            <span className="font-mono text-4xl font-bold tracking-[0.3em] text-orbit-accent">
+              {pendingChatPasscode.passcode}
+            </span>
+          </div>
+          <p className="mt-3 text-center text-xs text-orbit-muted">
+            You can use an account recovery code to bypass this passcode if you forget it.
+          </p>
+          <div className="mt-4 flex gap-3">
+            <button
+              className="orbit-btn flex-1"
+              onClick={() => void navigator.clipboard.writeText(pendingChatPasscode.passcode)}
+            >
+              Copy
+            </button>
+            <button
+              className="orbit-btn-primary flex-1"
+              onClick={() => setPendingChatPasscode(null)}
+            >
+              I've saved it
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  /* ════════════════════════════════════════════════════ */
+  /*  RECOVERY CODES DISPLAY (shown once after signup)    */
+  /* ════════════════════════════════════════════════════ */
+  if (user && pendingRecoveryCodes && pendingRecoveryCodes.length > 0) {
+    return (
+      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+        <section className="orbit-card relative z-10 w-full max-w-lg rounded-3xl p-8">
+          <div className="mb-2 flex items-center gap-2">
+            <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <h2 className="text-xl font-bold text-orbit-text">Your Recovery Codes</h2>
+          </div>
+          <p className="mb-4 text-sm text-orbit-muted">
+            Save these codes somewhere safe. Each code can only be used once to log in if you forget your password.
+            <span className="mt-1 block font-semibold text-amber-300">
+              You will not see these codes again after leaving this screen.
+            </span>
+          </p>
+          <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-4">
+            {pendingRecoveryCodes.map((code, idx) => (
+              <div key={idx} className="rounded-lg border border-white/10 bg-orbit-panel px-3 py-2 text-center font-mono text-sm tracking-wider text-orbit-text">
+                {code}
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex gap-3">
+            <button
+              className="orbit-btn flex-1"
+              onClick={() => {
+                void navigator.clipboard.writeText(pendingRecoveryCodes.join("\n"));
+              }}
+            >
+              Copy to Clipboard
+            </button>
+            <button
+              className="orbit-btn-primary flex-1"
+              onClick={clearPendingRecoveryCodes}
+            >
+              I've saved my codes
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  /* ════════════════════════════════════════════════════ */
   /*  AUTH SCREEN                                         */
   /* ════════════════════════════════════════════════════ */
   if (!user) {
@@ -577,7 +716,7 @@ function App() {
             <div className="rounded-2xl border border-white/10 bg-orbit-panel p-6">
               <div className="mb-6 flex rounded-xl border border-white/10 bg-orbit-panelAlt p-1">
                 <button
-                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  className={`w-1/3 rounded-lg px-2 py-2 text-sm font-semibold transition ${
                     authMode === "login" ? "bg-orbit-accent text-slate-950" : "text-slate-300"
                   }`}
                   onClick={() => {
@@ -588,7 +727,7 @@ function App() {
                   Login
                 </button>
                 <button
-                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  className={`w-1/3 rounded-lg px-2 py-2 text-sm font-semibold transition ${
                     authMode === "signup" ? "bg-orbit-accent text-slate-950" : "text-slate-300"
                   }`}
                   onClick={() => {
@@ -597,6 +736,17 @@ function App() {
                   }}
                 >
                   Sign Up
+                </button>
+                <button
+                  className={`w-1/3 rounded-lg px-2 py-2 text-sm font-semibold transition ${
+                    authMode === "recovery" ? "bg-orbit-accent text-slate-950" : "text-slate-300"
+                  }`}
+                  onClick={() => {
+                    setAuthMode("recovery");
+                    setAuthValidationError(null);
+                  }}
+                >
+                  Recovery
                 </button>
               </div>
 
@@ -626,46 +776,75 @@ function App() {
                     autoComplete="username"
                   />
                 </label>
-                <label className="block">
-                  <span className="orbit-label">Password</span>
-                  <input
-                    className="orbit-input"
-                    value={password}
-                    onChange={(event) => {
-                      setPassword(event.target.value);
-                      if (authValidationError) setAuthValidationError(null);
-                    }}
-                    placeholder="********"
-                    type="password"
-                    autoComplete={authMode === "login" ? "current-password" : "new-password"}
-                  />
-                </label>
-                {authMode === "signup" && (
+                {authMode === "recovery" ? (
                   <>
                     <label className="block">
-                      <span className="orbit-label">Confirm Password</span>
+                      <span className="orbit-label">Recovery Code</span>
+                      <input
+                        className="orbit-input font-mono tracking-wider"
+                        value={recoveryCode}
+                        onChange={(event) => {
+                          setRecoveryCode(event.target.value);
+                          if (authValidationError) setAuthValidationError(null);
+                        }}
+                        placeholder="xxxx-xxxx"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <p className="text-xs text-orbit-muted">
+                      Enter one of your recovery codes to log in without a password. Each code can only be used once.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <label className="block">
+                      <span className="orbit-label">Password</span>
                       <input
                         className="orbit-input"
-                        value={confirmPassword}
+                        value={password}
                         onChange={(event) => {
-                          setConfirmPassword(event.target.value);
+                          setPassword(event.target.value);
                           if (authValidationError) setAuthValidationError(null);
                         }}
                         placeholder="********"
                         type="password"
-                        autoComplete="new-password"
+                        autoComplete={authMode === "login" ? "current-password" : "new-password"}
                       />
                     </label>
-                    <p className="text-xs text-orbit-muted">
-                      Password must be at least 8 characters and include a number and special character.
-                    </p>
+                    {authMode === "signup" && (
+                      <>
+                        <label className="block">
+                          <span className="orbit-label">Confirm Password</span>
+                          <input
+                            className="orbit-input"
+                            value={confirmPassword}
+                            onChange={(event) => {
+                              setConfirmPassword(event.target.value);
+                              if (authValidationError) setAuthValidationError(null);
+                            }}
+                            placeholder="********"
+                            type="password"
+                            autoComplete="new-password"
+                          />
+                        </label>
+                        <p className="text-xs text-orbit-muted">
+                          Password must be at least 8 characters and include a number and special character.
+                        </p>
+                      </>
+                    )}
                   </>
                 )}
                 <button
                   disabled={loading}
                   className="orbit-btn-primary w-full"
                 >
-                  {loading ? "Please wait..." : authMode === "login" ? "Login" : "Create Account"}
+                  {loading
+                    ? "Please wait..."
+                    : authMode === "login"
+                      ? "Login"
+                      : authMode === "signup"
+                        ? "Create Account"
+                        : "Login with Recovery Code"}
                 </button>
               </form>
             </div>
@@ -735,6 +914,10 @@ function App() {
                     if (item.key !== "dm") {
                       setSelectedConvId(null);
                     }
+                    setShowChatSettings(false);
+                    setPasscodeInput("");
+                    setPasscodeError(null);
+                    setShowBypassInput(false);
                   }}
                   aria-pressed={active}
                 >
@@ -860,10 +1043,24 @@ function App() {
                           ? "border-orbit-accent/60 bg-orbit-accent/10"
                           : "border-white/5 bg-orbit-panelAlt hover:border-white/20"
                       }`}
-                      onClick={() => setSelectedConvId(conv.id)}
+                      onClick={() => {
+                        setSelectedConvId(conv.id);
+                        setPasscodeInput("");
+                        setPasscodeError(null);
+                        setShowBypassInput(false);
+                        setShowChatSettings(false);
+                      }}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-semibold">@{displayName}</p>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          {conv.passcodeEnabled && !chatLock.isUnlocked(conv.id) && (
+                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-orbit-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                            </svg>
+                          )}
+                          <p className="truncate text-sm font-semibold">@{displayName}</p>
+                        </div>
                         <div className="flex items-center gap-2">
                           {unreadCount > 0 && (
                             <span className="inline-flex min-w-[1.3rem] items-center justify-center rounded-full bg-orbit-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
@@ -1081,7 +1278,7 @@ function App() {
         </aside>
 
         {/* ───── Main content area ───── */}
-        <main className="flex h-full flex-col bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
+        <main className="flex h-full flex-col overflow-hidden bg-gradient-to-b from-orbit-bg to-orbit-panelAlt">
           <header className="flex items-center justify-end gap-3 border-b border-white/10 bg-orbit-panel/40 px-4 py-3 backdrop-blur">
             <button
               className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-orbit-text hover:border-white/20"
@@ -1107,6 +1304,7 @@ function App() {
             <button
               className="orbit-btn-danger px-4 py-2 text-xs"
               onClick={() => {
+                chatLock.onLogout();
                 clearSession();
                 setSelectedConvId(null);
                 setSearch("");
@@ -1122,7 +1320,7 @@ function App() {
             </button>
           </header>
 
-          <section className="min-h-0 flex-1">
+          <section className="min-h-0 flex-1 overflow-y-auto">
             {mainView === "profile-settings" && token && user ? (
               <ProfileSettings
                 token={token}
@@ -1178,6 +1376,128 @@ function App() {
                   </div>
                 </div>
               </div>
+            ) : selectedConversation.passcodeEnabled && !chatLock.isUnlocked(selectedConversation.id) ? (
+              /* ════ LOCKED CHAT – passcode entry ════ */
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="orbit-card w-full max-w-sm rounded-3xl p-8 text-center">
+                  <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-orbit-panelAlt">
+                    <svg viewBox="0 0 24 24" className="h-7 w-7 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                  </div>
+                  <h2 className="text-xl font-bold">Chat Locked</h2>
+                  <p className="mt-2 text-sm text-orbit-muted">
+                    Enter the {selectedConversation.passcodeLength}-digit passcode to unlock this chat.
+                  </p>
+
+                  {passcodeError && (
+                    <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-400">
+                      {passcodeError}
+                    </div>
+                  )}
+
+                  {!showBypassInput ? (
+                    <>
+                      <input
+                        className="orbit-input mt-4 text-center font-mono text-2xl tracking-[0.3em]"
+                        value={passcodeInput}
+                        onChange={(e) => {
+                          setPasscodeInput(e.target.value.replace(/\D/g, "").slice(0, 6));
+                          setPasscodeError(null);
+                        }}
+                        placeholder={"•".repeat(selectedConversation.passcodeLength)}
+                        maxLength={6}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (!token || !passcodeInput) return;
+                            api.verifyPasscode(selectedConversation.id, passcodeInput, token)
+                              .then(() => {
+                                chatLock.unlock(selectedConversation.id, selectedConversation.lockMode, selectedConversation.lockTimeoutSeconds);
+                                setPasscodeInput("");
+                                setPasscodeError(null);
+                              })
+                              .catch((err: any) => setPasscodeError(err?.message ?? "Invalid passcode"));
+                          }
+                        }}
+                      />
+                      <button
+                        className="orbit-btn-primary mt-4 w-full"
+                        onClick={() => {
+                          if (!token || !passcodeInput) return;
+                          api.verifyPasscode(selectedConversation.id, passcodeInput, token)
+                            .then(() => {
+                              chatLock.unlock(selectedConversation.id, selectedConversation.lockMode, selectedConversation.lockTimeoutSeconds);
+                              setPasscodeInput("");
+                              setPasscodeError(null);
+                            })
+                            .catch((err: any) => setPasscodeError(err?.message ?? "Invalid passcode"));
+                        }}
+                      >
+                        Unlock
+                      </button>
+                      <button
+                        className="mt-3 text-xs text-orbit-muted hover:text-orbit-text"
+                        onClick={() => {
+                          setShowBypassInput(true);
+                          setPasscodeError(null);
+                        }}
+                      >
+                        Forgot passcode? Use a recovery code
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-4 text-left text-xs text-orbit-muted">
+                        Enter an account recovery code to bypass this chat's passcode.
+                        <span className="block font-semibold text-amber-300">This will disable the passcode on this chat and consume the recovery code.</span>
+                      </p>
+                      <input
+                        className="orbit-input mt-3 font-mono tracking-wider"
+                        value={bypassRecoveryCode}
+                        onChange={(e) => {
+                          setBypassRecoveryCode(e.target.value);
+                          setPasscodeError(null);
+                        }}
+                        placeholder="xxxx-xxxx"
+                        autoFocus
+                      />
+                      <div className="mt-4 flex gap-3">
+                        <button
+                          className="orbit-btn flex-1"
+                          onClick={() => {
+                            setShowBypassInput(false);
+                            setBypassRecoveryCode("");
+                            setPasscodeError(null);
+                          }}
+                        >
+                          Back
+                        </button>
+                        <button
+                          className="orbit-btn-primary flex-1"
+                          onClick={() => {
+                            if (!token || !bypassRecoveryCode.trim()) return;
+                            api.bypassPasscode(selectedConversation.id, bypassRecoveryCode.trim(), token)
+                              .then(() => {
+                                chatLock.unlock(selectedConversation.id, selectedConversation.lockMode, selectedConversation.lockTimeoutSeconds);
+                                setBypassRecoveryCode("");
+                                setShowBypassInput(false);
+                                setPasscodeError(null);
+                                // Refresh conversations to get updated passcodeEnabled state
+                                void loadConversations();
+                              })
+                              .catch((err: any) => setPasscodeError(err?.message ?? "Bypass failed"));
+                          }}
+                        >
+                          Bypass
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
             ) : (
               <div className="flex h-full flex-col">
             <header className="flex items-center justify-between border-b border-white/10 bg-orbit-panel/40 p-4 backdrop-blur">
@@ -1193,14 +1513,150 @@ function App() {
                 </button>
                 <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
               </div>
-              {getConversationSecretKey(selectedConversation.id) ? (
-                <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
-              ) : loadingByConversationId[selectedConversation.id] ? (
-                <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-orbit-muted">Setting up encryption…</span>
-              ) : (
-                <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
-              )}
+              <div className="flex items-center gap-2">
+                {getConversationSecretKey(selectedConversation.id) ? (
+                  <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
+                ) : loadingByConversationId[selectedConversation.id] ? (
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-orbit-muted">Setting up encryption…</span>
+                ) : (
+                  <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
+                )}
+                <button
+                  className="orbit-btn h-9 w-9 p-0"
+                  onClick={() => {
+                    setShowChatSettings(!showChatSettings);
+                    if (!showChatSettings) {
+                      setChatSettingsLength(selectedConversation.passcodeLength);
+                      setChatSettingsLockMode(selectedConversation.lockMode);
+                      setChatSettingsTimeout(selectedConversation.lockTimeoutSeconds?.toString() ?? "");
+                      setChatSettingsPasscode("");
+                      setChatSettingsError(null);
+                    }
+                  }}
+                  aria-label="Chat settings"
+                  title="Chat settings"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3.5" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c0 .38.13.74.36 1.03.23.29.56.49.92.56H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1 .33 1.65 1.65 0 0 0-.6 1z" />
+                  </svg>
+                </button>
+              </div>
             </header>
+
+            {/* ════ Chat Settings Panel ════ */}
+            {showChatSettings && (
+              <div className="border-b border-white/10 bg-orbit-panel/80 p-4 backdrop-blur">
+                <div className="mx-auto max-w-md space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-orbit-text">Chat Settings</h3>
+                    <button
+                      className="text-xs text-orbit-muted hover:text-orbit-text"
+                      onClick={() => setShowChatSettings(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  {chatSettingsError && (
+                    <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
+                      {chatSettingsError}
+                    </div>
+                  )}
+
+                  {/* Passcode */}
+                  <div>
+                    <label className="orbit-label">New Passcode (leave blank to keep current)</label>
+                    <input
+                      className="orbit-input font-mono tracking-widest"
+                      value={chatSettingsPasscode}
+                      onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="••••"
+                      maxLength={6}
+                    />
+                  </div>
+
+                  {/* Passcode length */}
+                  <div>
+                    <label className="orbit-label">Passcode Length (2-6 digits)</label>
+                    <input
+                      type="number"
+                      className="orbit-input"
+                      min={2}
+                      max={6}
+                      value={chatSettingsLength}
+                      onChange={(e) => setChatSettingsLength(Math.min(6, Math.max(2, Number(e.target.value))))}
+                    />
+                  </div>
+
+                  {/* Lock mode */}
+                  <div>
+                    <label className="orbit-label">Lock Mode</label>
+                    <select
+                      className="orbit-input"
+                      value={chatSettingsLockMode}
+                      onChange={(e) => setChatSettingsLockMode(e.target.value as api.ChatLockMode)}
+                    >
+                      <option value="on_leave">On Leave (lock when you switch away)</option>
+                      <option value="on_logout">On Logout (lock on sign out)</option>
+                      <option value="after_time">After Time (lock after fixed duration)</option>
+                      <option value="after_inactivity">After Inactivity (lock after idle period)</option>
+                    </select>
+                  </div>
+
+                  {/* Timeout (for time-based lock modes) */}
+                  {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
+                    <div>
+                      <label className="orbit-label">Lock Timeout (seconds)</label>
+                      <input
+                        type="number"
+                        className="orbit-input"
+                        min={10}
+                        value={chatSettingsTimeout}
+                        onChange={(e) => setChatSettingsTimeout(e.target.value)}
+                        placeholder="300"
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    className="orbit-btn-primary w-full"
+                    disabled={chatSettingsSaving}
+                    onClick={async () => {
+                      if (!token) return;
+                      setChatSettingsSaving(true);
+                      setChatSettingsError(null);
+                      try {
+                        const data: Parameters<typeof api.updateChatSettings>[1] = {
+                          lockMode: chatSettingsLockMode,
+                          passcodeLength: chatSettingsLength,
+                        };
+                        if (chatSettingsPasscode) {
+                          data.passcode = chatSettingsPasscode;
+                        }
+                        if (chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") {
+                          data.lockTimeoutSeconds = Number(chatSettingsTimeout) || 300;
+                        }
+                        const updated = await api.updateChatSettings(selectedConversation.id, data, token);
+                        // Update local conversation state
+                        setConversations((prev) =>
+                          prev.map((c) => (c.id === updated.id ? updated : c))
+                        );
+                        // Re-unlock with new settings
+                        chatLock.unlock(updated.id, updated.lockMode, updated.lockTimeoutSeconds);
+                        setShowChatSettings(false);
+                      } catch (err: any) {
+                        setChatSettingsError(err?.message ?? "Failed to save settings");
+                      } finally {
+                        setChatSettingsSaving(false);
+                      }
+                    }}
+                  >
+                    {chatSettingsSaving ? "Saving..." : "Save Settings"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <section className="flex-1 space-y-3 overflow-y-auto p-4">
               {messages.length === 0 && (
