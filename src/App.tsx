@@ -409,7 +409,7 @@ function App() {
   const conversationsRef = useRef<Conversation[]>([]);
 
   const { user, clearSession, token, loading, error, login, signup, loginWithRecoveryCode, pendingRecoveryCodes, clearPendingRecoveryCodes } = useAuthStore();
-  const { connected, connect, disconnect, socket } = useSocketStore();
+  const { connected, connectionState, connectionError, connect, disconnect, socket } = useSocketStore();
   const { byConversation, unreadCountByConversation, upsertMessage, setActiveConversation } = useMessagesStore();
   const profiles = useProfilesStore();
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
@@ -464,6 +464,31 @@ function App() {
       return (unreadCountByConversation[conv.id] ?? 0) > 0;
     });
   }, [conversations, unreadCountByConversation]);
+
+  const realtimeBadge = useMemo(() => {
+    if (connected || connectionState === "connected") {
+      return {
+        label: "Realtime connected",
+        className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
+      };
+    }
+    if (connectionState === "connecting") {
+      return {
+        label: "Realtime connecting...",
+        className: "border-amber-300/30 bg-amber-300/10 text-amber-200",
+      };
+    }
+    if (connectionState === "error") {
+      return {
+        label: connectionError ? `Realtime error: ${connectionError}` : "Realtime error",
+        className: "border-rose-400/30 bg-rose-400/10 text-rose-300",
+      };
+    }
+    return {
+      label: "Realtime disconnected",
+      className: "border-rose-400/30 bg-rose-400/10 text-rose-300",
+    };
+  }, [connected, connectionError, connectionState]);
 
   const formatRecentTimestamp = useCallback((timestampMs: number) => {
     const now = Date.now();
@@ -2026,8 +2051,8 @@ function App() {
               </div>
               <div className="ml-2 hidden items-center gap-2 md:flex">
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-orbit-muted">Build {appVersion}</span>
-                <span className={`rounded-full border px-2 py-1 text-[11px] ${connected ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-rose-400/30 bg-rose-400/10 text-rose-300"}`}>
-                  {connected ? "Realtime connected" : "Realtime disconnected"}
+                <span className={`max-w-[340px] truncate rounded-full border px-2 py-1 text-[11px] ${realtimeBadge.className}`} title={realtimeBadge.label}>
+                  {realtimeBadge.label}
                 </span>
               </div>
             </div>

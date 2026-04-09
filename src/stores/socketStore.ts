@@ -6,6 +6,8 @@ import { useAuthStore } from "./authStore";
 type SocketState = {
   socket: Socket | null;
   connected: boolean;
+  connectionState: "idle" | "connecting" | "connected" | "disconnected" | "error";
+  connectionError: string | null;
   connect: (token: string) => void;
   disconnect: () => void;
 };
@@ -21,16 +23,39 @@ const SOCKET_URL = normalizeBaseUrl(import.meta.env.VITE_SOCKET_URL ?? "http://1
 export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,
   connected: false,
+  connectionState: "idle",
+  connectionError: null,
   connect: (token) => {
-    if (get().socket) return;
+    const existing = get().socket;
+    if (existing) {
+      existing.auth = { token };
+      if (!existing.connected) {
+        set({ connectionState: "connecting", connectionError: null });
+        existing.connect();
+      }
+      return;
+    }
 
     const socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ["websocket", "polling"]
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
 
-    socket.on("connect", () => set({ connected: true }));
-    socket.on("disconnect", () => set({ connected: false }));
+    set({ connectionState: "connecting", connectionError: null });
+
+    socket.on("connect", () => set({ connected: true, connectionState: "connected", connectionError: null }));
+    socket.on("disconnect", () => set({ connected: false, connectionState: "disconnected" }));
+    socket.on("connect_error", (err: Error) => {
+      set({ connected: false, connectionState: "error", connectionError: err?.message ?? "Socket connection failed" });
+    });
+    socket.io.on("reconnect_attempt", () => {
+      set({ connectionState: "connecting", connectionError: null });
+    });
 
     // Wire incoming messages into the messages store
     socket.on("new_message", (data: {
@@ -74,6 +99,6 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     const socket = get().socket;
     if (!socket) return;
     socket.disconnect();
-    set({ socket: null, connected: false });
+    set({ socket: null, connected: false, connectionState: "idle", connectionError: null });
   }
 }));
