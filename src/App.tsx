@@ -366,8 +366,14 @@ function App() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiQuery, setEmojiQuery] = useState("");
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  const [gifActiveIndex, setGifActiveIndex] = useState(0);
+  const [emojiActiveIndex, setEmojiActiveIndex] = useState(0);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const gifPickerRef = useRef<HTMLDivElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const gifButtonRef = useRef<HTMLButtonElement | null>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
 
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
@@ -705,6 +711,8 @@ function App() {
     setGifError(null);
     setShowEmojiPicker(false);
     setEmojiQuery("");
+    setGifActiveIndex(0);
+    setEmojiActiveIndex(0);
     setMessageSendError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [selectedConvId]);
@@ -730,6 +738,35 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showChatSettings]);
+
+  useEffect(() => {
+    if (!showGifPicker && !showEmojiPicker) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+
+      const clickedInsideGif = Boolean(gifPickerRef.current?.contains(target) || gifButtonRef.current?.contains(target));
+      const clickedInsideEmoji = Boolean(emojiPickerRef.current?.contains(target) || emojiButtonRef.current?.contains(target));
+
+      if (!clickedInsideGif) setShowGifPicker(false);
+      if (!clickedInsideEmoji) setShowEmojiPicker(false);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowGifPicker(false);
+        setShowEmojiPicker(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showEmojiPicker, showGifPicker]);
 
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
@@ -912,6 +949,20 @@ function App() {
     if (!query) return EMOJI_CATALOG.slice(0, 40);
     return EMOJI_CATALOG.filter((item) => item.tags.some((tag) => tag.includes(query))).slice(0, 40);
   }, [emojiQuery]);
+
+  useEffect(() => {
+    setGifActiveIndex((prev) => {
+      if (!gifResults.length) return 0;
+      return Math.min(prev, gifResults.length - 1);
+    });
+  }, [gifResults]);
+
+  useEffect(() => {
+    setEmojiActiveIndex((prev) => {
+      if (!filteredEmojis.length) return 0;
+      return Math.min(prev, filteredEmojis.length - 1);
+    });
+  }, [filteredEmojis]);
 
   /* ───── Auth submit ───── */
   const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -2203,19 +2254,23 @@ function App() {
                   Attach File
                 </button>
                 <button
+                  ref={gifButtonRef}
                   className={`orbit-btn px-3 ${showGifPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
                   onClick={() => {
                     setShowGifPicker((prev) => !prev);
                     setShowEmojiPicker(false);
+                    setGifActiveIndex(0);
                   }}
                 >
                   GIF
                 </button>
                 <button
+                  ref={emojiButtonRef}
                   className={`orbit-btn px-3 ${showEmojiPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
                   onClick={() => {
                     setShowEmojiPicker((prev) => !prev);
                     setShowGifPicker(false);
+                    setEmojiActiveIndex(0);
                   }}
                 >
                   Emoji
@@ -2232,12 +2287,28 @@ function App() {
               </div>
 
               {showGifPicker && (
-                <div className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+                <div ref={gifPickerRef} className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
                   <div className="mb-2 flex gap-2">
                     <input
                       className="orbit-input flex-1 px-3"
                       value={gifQuery}
                       onChange={(event) => setGifQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (!gifResults.length) return;
+                        if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                          event.preventDefault();
+                          setGifActiveIndex((prev) => Math.min(prev + 1, gifResults.length - 1));
+                        } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setGifActiveIndex((prev) => Math.max(prev - 1, 0));
+                        } else if (event.key === "Enter") {
+                          event.preventDefault();
+                          const candidate = gifResults[gifActiveIndex];
+                          if (candidate) {
+                            handleAddGif(candidate);
+                          }
+                        }
+                      }}
                       placeholder="Search GIFs"
                     />
                     <button className="orbit-btn px-3" onClick={() => setShowGifPicker(false)}>
@@ -2252,8 +2323,12 @@ function App() {
                       {gifResults.map((gif) => (
                         <button
                           key={gif.id}
-                          className="overflow-hidden rounded-lg border border-white/10 hover:border-orbit-accent/40"
+                          className={`overflow-hidden rounded-lg border hover:border-orbit-accent/40 ${gifResults[gifActiveIndex]?.id === gif.id ? "border-orbit-accent/70 ring-1 ring-orbit-accent/40" : "border-white/10"}`}
                           onClick={() => handleAddGif(gif)}
+                          onFocus={() => {
+                            const index = gifResults.findIndex((item) => item.id === gif.id);
+                            if (index >= 0) setGifActiveIndex(index);
+                          }}
                           title={gif.title || "GIF"}
                         >
                           <img src={gif.previewUrl} alt={gif.title || "GIF"} className="h-20 w-full object-cover" loading="lazy" />
@@ -2268,12 +2343,28 @@ function App() {
               )}
 
               {showEmojiPicker && (
-                <div className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+                <div ref={emojiPickerRef} className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
                   <div className="mb-2 flex gap-2">
                     <input
                       className="orbit-input flex-1 px-3"
                       value={emojiQuery}
                       onChange={(event) => setEmojiQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (!filteredEmojis.length) return;
+                        if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                          event.preventDefault();
+                          setEmojiActiveIndex((prev) => Math.min(prev + 1, filteredEmojis.length - 1));
+                        } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setEmojiActiveIndex((prev) => Math.max(prev - 1, 0));
+                        } else if (event.key === "Enter") {
+                          event.preventDefault();
+                          const candidate = filteredEmojis[emojiActiveIndex];
+                          if (candidate) {
+                            handleInsertEmoji(candidate.value);
+                          }
+                        }
+                      }}
                       placeholder="Search emoji"
                     />
                     <button className="orbit-btn px-3" onClick={() => setShowEmojiPicker(false)}>
@@ -2297,8 +2388,12 @@ function App() {
                     {filteredEmojis.map((item) => (
                       <button
                         key={item.value}
-                        className="rounded-md border border-white/10 px-2 py-1 text-lg hover:border-orbit-accent/40"
+                        className={`rounded-md border px-2 py-1 text-lg hover:border-orbit-accent/40 ${filteredEmojis[emojiActiveIndex]?.value === item.value ? "border-orbit-accent/70 ring-1 ring-orbit-accent/40" : "border-white/10"}`}
                         onClick={() => handleInsertEmoji(item.value)}
+                        onFocus={() => {
+                          const index = filteredEmojis.findIndex((entry) => entry.value === item.value);
+                          if (index >= 0) setEmojiActiveIndex(index);
+                        }}
                         title={item.tags.join(", ")}
                       >
                         {item.value}
