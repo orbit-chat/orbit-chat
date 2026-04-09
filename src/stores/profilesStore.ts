@@ -20,9 +20,6 @@ export const useProfilesStore = create<ProfilesState>((set, get) => ({
   errorById: {},
 
   fetchProfile: async (userId, token) => {
-    const cached = get().byId[userId];
-    if (cached) return cached;
-
     set({
       loadingById: { ...get().loadingById, [userId]: true },
       errorById: { ...get().errorById, [userId]: null },
