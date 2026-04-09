@@ -37,7 +37,14 @@ type VideoLinkAttachment = {
   url: string;
 };
 
-type MessageAttachment = UploadedAttachment | VideoLinkAttachment;
+type GifLinkAttachment = {
+  kind: "gif_link";
+  url: string;
+  previewUrl?: string;
+  title?: string;
+};
+
+type MessageAttachment = UploadedAttachment | VideoLinkAttachment | GifLinkAttachment;
 
 type MessageEnvelope = {
   text?: string;
@@ -54,11 +61,78 @@ const VIDEO_ALLOWED_HOSTS = new Set([
   "www.loom.com",
 ]);
 
+const TENOR_API_KEY = import.meta.env.VITE_TENOR_API_KEY ?? "LIVDSRZULELA";
+const TENOR_CLIENT_KEY = "orbit_chat_desktop";
+const TENOR_LIMIT = 18;
+
+const EMOJI_CATALOG: Array<{ value: string; tags: string[] }> = [
+  { value: "😀", tags: ["smile", "happy", "grin"] },
+  { value: "😄", tags: ["smile", "joy", "happy"] },
+  { value: "😂", tags: ["laugh", "funny", "tears"] },
+  { value: "🤣", tags: ["rofl", "laugh", "funny"] },
+  { value: "🙂", tags: ["smile", "nice"] },
+  { value: "😊", tags: ["smile", "warm", "happy"] },
+  { value: "😉", tags: ["wink", "playful"] },
+  { value: "😍", tags: ["love", "heart", "eyes"] },
+  { value: "😘", tags: ["kiss", "love"] },
+  { value: "😎", tags: ["cool", "sunglasses"] },
+  { value: "🤔", tags: ["think", "hmm"] },
+  { value: "🫡", tags: ["salute", "respect"] },
+  { value: "👍", tags: ["thumbs", "yes", "ok"] },
+  { value: "👏", tags: ["clap", "nice"] },
+  { value: "🙌", tags: ["celebrate", "yay"] },
+  { value: "🔥", tags: ["fire", "hot", "lit"] },
+  { value: "✨", tags: ["sparkles", "shine"] },
+  { value: "💯", tags: ["hundred", "perfect"] },
+  { value: "🎉", tags: ["party", "celebrate"] },
+  { value: "🚀", tags: ["rocket", "launch"] },
+  { value: "❤️", tags: ["heart", "love"] },
+  { value: "🤍", tags: ["heart", "love"] },
+  { value: "🖤", tags: ["heart", "love"] },
+  { value: "🤝", tags: ["deal", "together"] },
+  { value: "🙏", tags: ["thanks", "please"] },
+  { value: "😅", tags: ["sweat", "relief"] },
+  { value: "😭", tags: ["cry", "sad"] },
+  { value: "😤", tags: ["frustrated", "angry"] },
+  { value: "😴", tags: ["sleep", "tired"] },
+  { value: "🤯", tags: ["mindblown", "wow"] },
+  { value: "👀", tags: ["eyes", "look"] },
+  { value: "🎯", tags: ["target", "focus"] },
+  { value: "✅", tags: ["done", "check"] },
+  { value: "❌", tags: ["no", "x"] },
+  { value: "⚡", tags: ["fast", "energy"] },
+  { value: "💡", tags: ["idea", "lightbulb"] },
+  { value: "📌", tags: ["pin", "important"] },
+  { value: "🧠", tags: ["brain", "smart"] },
+  { value: "🎵", tags: ["music", "song"] },
+  { value: "🕹️", tags: ["game", "gaming"] },
+  { value: "📷", tags: ["camera", "photo"] },
+  { value: "🌙", tags: ["night", "moon"] },
+  { value: "☀️", tags: ["sun", "day"] },
+];
+
+type GifSearchResult = {
+  id: string;
+  title: string;
+  gifUrl: string;
+  previewUrl: string;
+};
+
 function normalizeVideoUrl(input: string) {
   try {
     const url = new URL(input.trim());
     if (url.protocol !== "https:") return null;
     if (!VIDEO_ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGifUrl(input: string) {
+  try {
+    const url = new URL(input.trim());
+    if (url.protocol !== "https:") return null;
     return url.toString();
   } catch {
     return null;
@@ -233,6 +307,27 @@ function DecryptedMessageBody(props: {
             </a>
           );
         }
+        if (attachment.kind === "gif_link") {
+          const safeUrl = normalizeGifUrl(attachment.url);
+          if (!safeUrl) return null;
+          return (
+            <a
+              key={`${safeUrl}:${idx}`}
+              href={safeUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="block overflow-hidden rounded-xl border border-white/10 bg-orbit-panelAlt"
+            >
+              <img
+                src={attachment.previewUrl || safeUrl}
+                alt={attachment.title || "GIF attachment"}
+                className="max-h-72 w-full object-cover"
+                loading="lazy"
+              />
+              <p className="px-3 py-2 text-xs text-orbit-muted">GIF attachment</p>
+            </a>
+          );
+        }
         return (
           <MediaAttachmentView
             key={`${attachment.mediaId}:${idx}`}
@@ -262,6 +357,15 @@ function App() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [videoLinkDraft, setVideoLinkDraft] = useState("");
   const [pendingVideoLinks, setPendingVideoLinks] = useState<string[]>([]);
+  const [pendingGifs, setPendingGifs] = useState<GifLinkAttachment[]>([]);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [gifQuery, setGifQuery] = useState("");
+  const [gifResults, setGifResults] = useState<GifSearchResult[]>([]);
+  const [gifLoading, setGifLoading] = useState(false);
+  const [gifError, setGifError] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiQuery, setEmojiQuery] = useState("");
+  const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
@@ -593,10 +697,30 @@ function App() {
   useEffect(() => {
     setPendingFiles([]);
     setPendingVideoLinks([]);
+    setPendingGifs([]);
     setVideoLinkDraft("");
+    setShowGifPicker(false);
+    setGifQuery("");
+    setGifResults([]);
+    setGifError(null);
+    setShowEmojiPicker(false);
+    setEmojiQuery("");
     setMessageSendError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [selectedConvId]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("orbit_recent_emojis");
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as string[];
+      if (Array.isArray(parsed)) {
+        setRecentEmojis(parsed.filter((item) => typeof item === "string").slice(0, 16));
+      }
+    } catch {
+      // Ignore malformed local cache.
+    }
+  }, []);
 
   useEffect(() => {
     if (!showChatSettings) return;
@@ -698,6 +822,96 @@ function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search, token]);
+
+  useEffect(() => {
+    if (!showGifPicker) return;
+    const query = gifQuery.trim() || "trending";
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setGifLoading(true);
+      setGifError(null);
+      try {
+        const response = await fetch(
+          `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${encodeURIComponent(TENOR_API_KEY)}&client_key=${encodeURIComponent(TENOR_CLIENT_KEY)}&limit=${TENOR_LIMIT}&media_filter=minimal`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          throw new Error(`GIF search failed (${response.status})`);
+        }
+        const data = await response.json() as {
+          results?: Array<{
+            id?: string;
+            content_description?: string;
+            media_formats?: {
+              gif?: { url?: string };
+              tinygif?: { url?: string };
+            };
+          }>;
+        };
+        const parsed = (data.results ?? [])
+          .map((item) => {
+            const gifUrl = normalizeGifUrl(item.media_formats?.gif?.url ?? "");
+            const previewUrl = normalizeGifUrl(item.media_formats?.tinygif?.url ?? "") ?? gifUrl;
+            if (!gifUrl || !previewUrl || !item.id) return null;
+            return {
+              id: item.id,
+              title: item.content_description ?? "GIF",
+              gifUrl,
+              previewUrl,
+            } satisfies GifSearchResult;
+          })
+          .filter((item): item is GifSearchResult => Boolean(item));
+        setGifResults(parsed);
+      } catch (err: any) {
+        if (controller.signal.aborted) return;
+        setGifResults([]);
+        setGifError(err?.message ?? "Unable to search GIFs right now.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setGifLoading(false);
+        }
+      }
+    }, 220);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [gifQuery, showGifPicker]);
+
+  const handleAddGif = useCallback((gif: GifSearchResult) => {
+    setPendingGifs((prev) => [
+      ...prev,
+      {
+        kind: "gif_link",
+        url: gif.gifUrl,
+        previewUrl: gif.previewUrl,
+        title: gif.title,
+      },
+    ]);
+    setMessageSendError(null);
+    setShowGifPicker(false);
+  }, []);
+
+  const handleInsertEmoji = useCallback((emoji: string) => {
+    setMessageDraft((prev) => `${prev}${emoji}`);
+    setRecentEmojis((prev) => {
+      const next = [emoji, ...prev.filter((value) => value !== emoji)].slice(0, 16);
+      try {
+        localStorage.setItem("orbit_recent_emojis", JSON.stringify(next));
+      } catch {
+        // Ignore quota/storage access errors.
+      }
+      return next;
+    });
+    setShowEmojiPicker(false);
+  }, []);
+
+  const filteredEmojis = useMemo(() => {
+    const query = emojiQuery.trim().toLowerCase();
+    if (!query) return EMOJI_CATALOG.slice(0, 40);
+    return EMOJI_CATALOG.filter((item) => item.tags.some((tag) => tag.includes(query))).slice(0, 40);
+  }, [emojiQuery]);
 
   /* ───── Auth submit ───── */
   const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -823,7 +1037,7 @@ function App() {
   /* ───── Send message over socket ───── */
   const handleSendMessage = async () => {
     const draft = messageDraft.trim();
-    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0;
+    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0;
     if (!selectedConvId || !user || !socket) return;
     if (!token) return;
     if (!draft && !hasAttachments) return;
@@ -897,6 +1111,18 @@ function App() {
         attachments.push({ kind: "video_link", url });
       }
 
+      for (const gif of pendingGifs) {
+        const safeUrl = normalizeGifUrl(gif.url);
+        const safePreview = gif.previewUrl ? (normalizeGifUrl(gif.previewUrl) ?? undefined) : undefined;
+        if (!safeUrl) continue;
+        attachments.push({
+          kind: "gif_link",
+          url: safeUrl,
+          previewUrl: safePreview,
+          title: gif.title,
+        });
+      }
+
       const envelope: MessageEnvelope = {
         text: draft || undefined,
         attachments,
@@ -916,6 +1142,7 @@ function App() {
       setMessageDraft("");
       setPendingFiles([]);
       setPendingVideoLinks([]);
+      setPendingGifs([]);
       setMessageSendError(null);
       for (const key of usedCacheKeys) {
         delete uploadedAttachmentCacheRef.current[key];
@@ -1926,7 +2153,7 @@ function App() {
             </section>
 
             <footer className="border-t border-white/10 bg-[#1b2030]/90 p-4 backdrop-blur">
-              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0) && (
+              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0) && (
                 <div className="mb-3 flex flex-wrap gap-2">
                   {pendingFiles.map((file, idx) => (
                     <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-text">
@@ -1950,6 +2177,17 @@ function App() {
                       </button>
                     </span>
                   ))}
+                  {pendingGifs.map((gif, idx) => (
+                    <span key={`${gif.url}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-accent">
+                      GIF
+                      <button
+                        className="text-orbit-muted hover:text-orbit-text"
+                        onClick={() => setPendingGifs((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
                 </div>
               )}
 
@@ -1964,6 +2202,24 @@ function App() {
                 <button className="orbit-btn px-3" onClick={() => fileInputRef.current?.click()}>
                   Attach File
                 </button>
+                <button
+                  className={`orbit-btn px-3 ${showGifPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  onClick={() => {
+                    setShowGifPicker((prev) => !prev);
+                    setShowEmojiPicker(false);
+                  }}
+                >
+                  GIF
+                </button>
+                <button
+                  className={`orbit-btn px-3 ${showEmojiPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  onClick={() => {
+                    setShowEmojiPicker((prev) => !prev);
+                    setShowGifPicker(false);
+                  }}
+                >
+                  Emoji
+                </button>
                 <input
                   className="orbit-input flex-1 px-3"
                   value={videoLinkDraft}
@@ -1974,6 +2230,86 @@ function App() {
                   Add Link
                 </button>
               </div>
+
+              {showGifPicker && (
+                <div className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+                  <div className="mb-2 flex gap-2">
+                    <input
+                      className="orbit-input flex-1 px-3"
+                      value={gifQuery}
+                      onChange={(event) => setGifQuery(event.target.value)}
+                      placeholder="Search GIFs"
+                    />
+                    <button className="orbit-btn px-3" onClick={() => setShowGifPicker(false)}>
+                      Close
+                    </button>
+                  </div>
+                  {gifError && <p className="mb-2 text-xs text-rose-300">{gifError}</p>}
+                  {gifLoading ? (
+                    <p className="text-xs text-orbit-muted">Loading GIFs...</p>
+                  ) : (
+                    <div className="grid max-h-44 grid-cols-3 gap-2 overflow-y-auto pr-1">
+                      {gifResults.map((gif) => (
+                        <button
+                          key={gif.id}
+                          className="overflow-hidden rounded-lg border border-white/10 hover:border-orbit-accent/40"
+                          onClick={() => handleAddGif(gif)}
+                          title={gif.title || "GIF"}
+                        >
+                          <img src={gif.previewUrl} alt={gif.title || "GIF"} className="h-20 w-full object-cover" loading="lazy" />
+                        </button>
+                      ))}
+                      {!gifResults.length && (
+                        <p className="col-span-3 text-xs text-orbit-muted">No GIFs found for that search.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showEmojiPicker && (
+                <div className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+                  <div className="mb-2 flex gap-2">
+                    <input
+                      className="orbit-input flex-1 px-3"
+                      value={emojiQuery}
+                      onChange={(event) => setEmojiQuery(event.target.value)}
+                      placeholder="Search emoji"
+                    />
+                    <button className="orbit-btn px-3" onClick={() => setShowEmojiPicker(false)}>
+                      Close
+                    </button>
+                  </div>
+                  {recentEmojis.length > 0 && !emojiQuery.trim() && (
+                    <div className="mb-2 flex flex-wrap gap-1">
+                      {recentEmojis.slice(0, 10).map((emoji) => (
+                        <button
+                          key={`recent:${emoji}`}
+                          className="rounded-md border border-white/10 px-2 py-1 text-lg hover:border-orbit-accent/40"
+                          onClick={() => handleInsertEmoji(emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid max-h-44 grid-cols-8 gap-1 overflow-y-auto pr-1">
+                    {filteredEmojis.map((item) => (
+                      <button
+                        key={item.value}
+                        className="rounded-md border border-white/10 px-2 py-1 text-lg hover:border-orbit-accent/40"
+                        onClick={() => handleInsertEmoji(item.value)}
+                        title={item.tags.join(", ")}
+                      >
+                        {item.value}
+                      </button>
+                    ))}
+                    {!filteredEmojis.length && (
+                      <p className="col-span-8 text-xs text-orbit-muted">No emoji matched that search.</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {messageSendError && (
                 <p className="mb-2 text-xs text-rose-300">{messageSendError}</p>
