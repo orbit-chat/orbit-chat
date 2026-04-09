@@ -20,6 +20,11 @@ function normalizeBaseUrl(rawUrl: string) {
 
 const SOCKET_URL = normalizeBaseUrl(import.meta.env.VITE_SOCKET_URL ?? "http://147.135.31.128:3000");
 
+function isAuthSocketError(message?: string | null) {
+  if (!message) return false;
+  return /(unauthor|forbidden|jwt|token|auth)/i.test(message);
+}
+
 export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,
   connected: false,
@@ -54,13 +59,47 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     socket.on("connect", () => set({ connected: true, connectionState: "connected", connectionError: null }));
     socket.on("disconnect", () => set({ connected: false, connectionState: "disconnected" }));
     socket.on("connect_error", (err: Error) => {
-      set({ connected: false, connectionState: "error", connectionError: err?.message ?? "Socket connection failed" });
+      const message = err?.message ?? "Socket connection failed";
+      if (isAuthSocketError(message)) {
+        // Avoid infinite reconnect loops on invalid/expired auth.
+        socket.io.opts.reconnection = false;
+        socket.disconnect();
+        useAuthStore.getState().clearSession();
+        set({
+          socket: null,
+          connected: false,
+          connectionState: "error",
+          connectionError: "Session expired or invalid. Please sign in again.",
+        });
+        return;
+      }
+
+      set({ connected: false, connectionState: "error", connectionError: message });
     });
     socket.io.on("reconnect_error", (err: Error) => {
-      set({ connected: false, connectionState: "error", connectionError: err?.message ?? "Socket reconnect failed" });
+      const message = err?.message ?? "Socket reconnect failed";
+      if (isAuthSocketError(message)) {
+        socket.io.opts.reconnection = false;
+        socket.disconnect();
+        useAuthStore.getState().clearSession();
+        set({
+          socket: null,
+          connected: false,
+          connectionState: "error",
+          connectionError: "Session expired or invalid. Please sign in again.",
+        });
+        return;
+      }
+
+      set({ connected: false, connectionState: "error", connectionError: message });
     });
     socket.io.on("reconnect_attempt", () => {
-      set((prev) => ({ connectionState: "connecting", connectionError: prev.connectionError }));
+      set((prev) => {
+        if (prev.connectionState === "error" && isAuthSocketError(prev.connectionError)) {
+          return prev;
+        }
+        return { connectionState: "connecting", connectionError: prev.connectionError };
+      });
     });
 
     // Wire incoming messages into the messages store
