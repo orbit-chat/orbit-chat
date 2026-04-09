@@ -85,7 +85,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
   };
 
   return (
-    <div className="mx-auto max-w-5xl p-4">
+    <div className="mx-auto h-full max-w-5xl overflow-y-auto p-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-orbit-text">Profile Settings</h2>
