@@ -49,7 +49,7 @@
   }
 
   .orbit-shell {
-    @apply h-screen overflow-hidden bg-gradient-to-b from-[#11131a] via-[#121620] to-[#0f1218] text-orbit-text;
+    @apply min-h-screen overflow-auto bg-gradient-to-b from-[#11131a] via-[#121620] to-[#0f1218] text-orbit-text;
   }
 
   .orbit-rail-btn {
@@ -62,11 +62,11 @@
   }
 
   .orbit-modal-overlay {
-    @apply fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm;
+    @apply fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:items-center;
   }
 
   .orbit-modal {
-    @apply orbit-card-solid w-full max-w-xl rounded-3xl border-white/15 bg-[#1d212b] p-6;
+    @apply orbit-card-solid my-4 max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-3xl border-white/15 bg-[#1d212b] p-6;
   }
 }
 
@@ -83,6 +83,13 @@ body,
 #root {
   margin: 0;
   height: 100%;
+}
+
+body {
+  background: #0f1218;
+  color: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #root {

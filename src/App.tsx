@@ -931,7 +931,7 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (user && pendingChatPasscode) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-md rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
             <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -979,7 +979,7 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (user && pendingRecoveryCodes && pendingRecoveryCodes.length > 0) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-lg rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
             <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1027,7 +1027,7 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (!user) {
     return (
-      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text">
+      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
             <div className="space-y-6">
@@ -1194,9 +1194,9 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   return (
     <div className="orbit-shell">
-      <div className="grid h-full grid-cols-[72px_320px_1fr]">
+      <div className="grid min-h-screen grid-cols-[72px_320px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="border-r border-white/10 bg-[#141822] p-2.5">
+        <aside className="overflow-y-auto border-r border-white/10 bg-[#141822] p-2.5">
           <div className="mb-4 flex items-center justify-center rounded-2xl bg-gradient-to-br from-orbit-accent/25 to-cyan-300/5 p-2.5 shadow-[0_10px_25px_rgba(18,201,180,0.15)]">
             <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover ring-1 ring-white/20" />
           </div>
@@ -1270,7 +1270,7 @@ function App() {
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="border-r border-white/10 bg-[#1a1e29] p-3.5">
+        <aside className="overflow-y-auto border-r border-white/10 bg-[#1a1e29] p-3.5">
           {navTab === "dm" && (
             <>
               <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
