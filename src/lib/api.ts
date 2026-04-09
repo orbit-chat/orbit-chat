@@ -396,16 +396,28 @@ export function requestMediaUploadUrl(
 }
 
 export async function uploadEncryptedBlob(uploadUrl: string, blob: Blob) {
-  const res = await fetch(uploadUrl, {
+  // Some S3-compatible providers are strict about signed headers and reject
+  // PUTs when Content-Type is set unexpectedly. Try without headers first,
+  // then retry with explicit octet-stream for older signatures.
+  let res = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-    },
     body: blob,
   });
 
   if (!res.ok) {
-    throw new Error(`Upload failed with status ${res.status}`);
+    res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+      },
+      body: blob,
+    });
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const detail = body ? `: ${body.slice(0, 200)}` : '';
+    throw new Error(`Upload failed with status ${res.status}${detail}`);
   }
 }
 
