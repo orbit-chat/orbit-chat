@@ -2,6 +2,8 @@
 
 Orbit Chat is a desktop direct-messaging app focused on private communication.
 
+Current desktop package version: `0.5.0`.
+
 This app is designed so message text in one-to-one chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
 ## What This Is
@@ -18,8 +20,11 @@ Orbit Chat combines:
 - per-chat passcode lock controls (on leave, on logout, timed, inactivity)
 - encrypted attachment handling for files and images
 - video link sharing (link-only, no direct video upload)
+- client-side unread badge tracking that clears on active chat selection
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
+
+For local development, set `VITE_API_URL` and `VITE_SOCKET_URL` in `.env` (from `.env.example`) so desktop traffic points to your intended backend.
 
 ## What Is Actually Encrypted
 
@@ -93,8 +98,10 @@ Runtime behavior notes:
 
 - If a DM key is still being prepared on first receive, UI may briefly show encrypted fallback text, then decrypt once key material is available.
 - First-time inbound DM messages are delivered in realtime without requiring a re-login refresh.
+- Realtime duplicate safety delivery can arrive through both conversation and user rooms; client message upsert is id-based to prevent duplicate rows.
 - Encrypted attachment delivery supports chunked encryption and in-session retry reuse for files already uploaded.
 - Video attachments are currently link-only by design.
+- Unread counters are maintained client-side and reset immediately when a conversation becomes active.
 
 ## System Design
 
@@ -115,7 +122,8 @@ Orbit Backend (NestJS)
 	|- Chat passcode verification + lock policy enforcement
 	|- Recovery-code assisted passcode bypass
 	|- Media reservation, signed upload/download URL issuance, and lifecycle cleanup
-	|- Realtime fanout (Socket.IO conversation + user room delivery)
+	|- Realtime fanout (Socket.IO conversation room + user room safety net)
+	|- Friend list refresh events (`friendships_updated`)
 	|- Presence cache + media services
 ```
 
@@ -125,6 +133,7 @@ Orbit Backend (NestJS)
 flowchart LR
 	A[Sender Desktop Client] -->|Encrypted payload| B[Orbit Server]
 	B -->|Encrypted payload| C[Recipient Desktop Client]
+	B -->|Safety-net emit to user room| C
 	A -->|Sealed conversation key for sender| B
 	A -->|Sealed conversation key for recipient| B
 	A -->|Encrypted attachment bytes| B
@@ -143,7 +152,8 @@ sequenceDiagram
 	S->>S: Ensure conversation key exists
 	S->>S: Encrypt plaintext -> ciphertext + nonce
 	S->>API: Send encrypted message payload
-	API->>R: Emit realtime encrypted message event
+	API->>R: Emit to conversation room
+	API->>R: Emit to user room safety-net
 	R->>R: Decrypt locally using conversation key
 	R->>R: Render plaintext in UI
 ```
@@ -184,7 +194,8 @@ flowchart TD
 	E --> F[Initialize libsodium + device key material]
 	F --> G[Open Socket.IO session with JWT]
 	G --> H[Join user room and active conversation rooms]
-	H --> I[REST fetch: conversations + message history]
+	H --> H2[Listen for friendships_updated and realtime message events]
+	H2 --> I[REST fetch: conversations + message history]
 	I --> J[For each DM: resolve sealed conversation key]
 	J --> K[Unseal key locally with device private key]
 	K --> L[Decrypt ciphertext messages in memory]
@@ -225,7 +236,9 @@ sequenceDiagram
 	API->>DB: Attach pending media rows by mediaId
 	API->>DB: Update conversation last activity
 	API->>RC: Update unread/presence counters (if enabled)
+	API->>RT: Join online member sockets to conv room (first-message safety)
 	API->>RT: Emit message to conversation room
+	API->>RT: Emit same payload to each member user room
 	RT-->>C: Sender ack + fanout to online recipients
 	API-->>C: HTTP response with stored message metadata
 
@@ -264,6 +277,7 @@ Server is not trusted for:
 - Video files are intentionally disabled for direct upload (video links only).
 - Attachment reservation metadata is handled server-side for access control and lifecycle management.
 - Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
+- Current build config forces `libsodium-wrappers` to its CommonJS entry due to an upstream ESM packaging issue.
 
 ## Product Summary
 

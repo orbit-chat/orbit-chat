@@ -65,6 +65,10 @@ function normalizeVideoUrl(input: string) {
   }
 }
 
+function shortConversationId(conversationId: string) {
+  return conversationId.split("-")[0] ?? conversationId.slice(0, 8);
+}
+
 function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
   if (!keys.length) return null;
   return keys
@@ -266,7 +270,7 @@ function App() {
   const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
 
   /** Passcode for newly created chat (shown once) */
-  const [pendingChatPasscode, setPendingChatPasscode] = useState<{ conversationId: string; passcode: string } | null>(null);
+  const [pendingChatPasscode, setPendingChatPasscode] = useState<{ conversationId: string; passcode: string; label: string } | null>(null);
   /** When a locked chat is selected, show the unlock screen */
   const [passcodeInput, setPasscodeInput] = useState("");
   const [passcodeError, setPasscodeError] = useState<string | null>(null);
@@ -275,6 +279,7 @@ function App() {
   /** Chat settings panel */
   const [showChatSettings, setShowChatSettings] = useState(false);
   const [chatSettingsPasscode, setChatSettingsPasscode] = useState("");
+  const [chatSettingsName, setChatSettingsName] = useState("");
   const [chatSettingsLength, setChatSettingsLength] = useState(2);
   const [chatSettingsLockMode, setChatSettingsLockMode] = useState<api.ChatLockMode>("on_leave");
   const [chatSettingsTimeout, setChatSettingsTimeout] = useState("");
@@ -311,7 +316,11 @@ function App() {
   const selectedConversationLabel = useMemo(() => {
     if (!selectedConversation || !user) return "Unknown";
     if (selectedConversation.type !== "dm") return selectedConversation.name ?? "Group";
-    return selectedConversation.members.find((m) => m.user.id !== user.id)?.user.username ?? "Direct Message";
+    if (selectedConversation.name?.trim()) {
+      return selectedConversation.name.trim();
+    }
+    const partnerUsername = selectedConversation.members.find((m) => m.user.id !== user.id)?.user.username ?? "dm";
+    return `${partnerUsername}#${shortConversationId(selectedConversation.id)}`;
   }, [selectedConversation, user]);
 
   const dmPartner = useMemo(() => {
@@ -380,8 +389,12 @@ function App() {
   // Get the "other" user's name in a DM
   const dmPartnerName = useMemo(() => {
     if (!selectedConversation || !user) return null;
+    if (selectedConversation.name?.trim()) {
+      return selectedConversation.name.trim();
+    }
     const other = selectedConversation.members.find((m) => m.user.id !== user.id);
-    return other?.user.username ?? selectedConversation.name ?? "Chat";
+    const partnerUsername = other?.user.username ?? "Chat";
+    return `${partnerUsername}#${shortConversationId(selectedConversation.id)}`;
   }, [selectedConversation, user]);
 
   const friendStatusByUserId = useMemo(() => {
@@ -766,7 +779,11 @@ function App() {
 
       // Show the one-time passcode to the user
       if (conv.passcode) {
-        setPendingChatPasscode({ conversationId: conv.id, passcode: conv.passcode });
+        setPendingChatPasscode({
+          conversationId: conv.id,
+          passcode: conv.passcode,
+          label: conv.name?.trim() ? conv.name.trim() : `${targetUser.username}#${shortConversationId(conv.id)}`,
+        });
       }
 
       // Auto-unlock the newly created chat
@@ -929,6 +946,7 @@ function App() {
               Save this passcode — you will not see it again.
             </span>
           </p>
+          <p className="mb-3 text-center text-xs text-orbit-muted">Chat: @{pendingChatPasscode.label}</p>
           <div className="flex items-center justify-center rounded-xl border border-white/10 bg-orbit-panelAlt p-6">
             <span className="font-mono text-4xl font-bold tracking-[0.3em] text-orbit-accent">
               {pendingChatPasscode.passcode}
@@ -1337,7 +1355,9 @@ function App() {
                   const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
                   const displayName =
                     conv.type === "dm"
-                      ? otherMember?.user.username ?? "DM"
+                      ? (conv.name?.trim()
+                        ? conv.name.trim()
+                        : `${otherMember?.user.username ?? "dm"}#${shortConversationId(conv.id)}`)
                       : conv.name ?? "Group";
                   const preview = lastMessage
                     ? `${lastMessage.sender === user.username ? "You" : lastMessage.sender}: Encrypted message`
@@ -1713,6 +1733,7 @@ function App() {
                   <p className="mt-2 text-sm text-orbit-muted">
                     Enter the {selectedConversation.passcodeLength}-digit passcode to unlock this chat.
                   </p>
+                  <p className="mt-1 text-xs text-orbit-muted">Chat: @{selectedConversationLabel}</p>
 
                   {passcodeError && (
                     <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-400">
@@ -1849,6 +1870,7 @@ function App() {
                   onClick={() => {
                     setShowChatSettings(!showChatSettings);
                     if (!showChatSettings) {
+                      setChatSettingsName(selectedConversation.name ?? "");
                       setChatSettingsLength(selectedConversation.passcodeLength);
                       setChatSettingsLockMode(selectedConversation.lockMode);
                       setChatSettingsTimeout(selectedConversation.lockTimeoutSeconds?.toString() ?? "");
@@ -2018,6 +2040,18 @@ function App() {
 
                 <div className="space-y-4">
                   <label className="block">
+                    <span className="orbit-label">Chat display name (optional)</span>
+                    <input
+                      className="orbit-input"
+                      value={chatSettingsName}
+                      onChange={(e) => setChatSettingsName(e.target.value)}
+                      placeholder="Leave blank to use @username#chatId"
+                      maxLength={64}
+                    />
+                    <span className="mt-1 block text-[11px] text-orbit-muted">Use a unique name to avoid needing the fallback chat ID.</span>
+                  </label>
+
+                  <label className="block">
                     <span className="orbit-label">New passcode (optional)</span>
                     <input
                       className="orbit-input font-mono tracking-[0.26em]"
@@ -2088,6 +2122,7 @@ function App() {
                         setChatSettingsError(null);
                         try {
                           const data: Parameters<typeof api.updateChatSettings>[1] = {
+                            name: chatSettingsName,
                             lockMode: chatSettingsLockMode,
                             passcodeLength: chatSettingsLength,
                           };

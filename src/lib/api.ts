@@ -350,6 +350,7 @@ export function bypassPasscode(conversationId: string, recoveryCode: string, tok
 export function updateChatSettings(
   conversationId: string,
   data: {
+    name?: string;
     encryptedTitle?: string;
     titleNonce?: string;
     encryptedImageUrl?: string;
