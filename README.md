@@ -119,6 +119,54 @@ sequenceDiagram
 	R->>R: Render plaintext in UI
 ```
 
+## Detailed Client Runtime Flow
+
+```mermaid
+flowchart TD
+	A[App Boot: Electron window + React mount] --> B[Load persisted auth + profile cache]
+	B --> C{Access token valid?}
+	C -- No --> D[Show auth UI / login]
+	C -- Yes --> E[Hydrate stores: auth, socket, messages, profiles, e2ee]
+	E --> F[Initialize libsodium + device key material]
+	F --> G[Open Socket.IO session with JWT]
+	G --> H[Join user room and active conversation rooms]
+	H --> I[REST fetch: conversations + message history]
+	I --> J[For each DM: resolve sealed conversation key]
+	J --> K[Unseal key locally with device private key]
+	K --> L[Decrypt ciphertext messages in memory]
+	L --> M[Render timeline]
+	M --> N[User sends message]
+	N --> O[Encrypt plaintext with conversation key and nonce]
+	O --> P[POST encrypted payload]
+	P --> Q[Receive socket ack/new-message events]
+	Q --> R[Update local stores + reconcile optimistic UI]
+```
+
+## Detailed Server Processing Flow
+
+```mermaid
+sequenceDiagram
+	participant C as Client (Desktop)
+	participant G as Guards (JWT + membership)
+	participant API as NestJS Controllers/Services
+	participant DB as Postgres (Prisma)
+	participant RC as Redis Cache/Presence
+	participant RT as Socket.IO Gateway
+
+	C->>API: HTTP sendMessage(ciphertext, nonce, conversationId)
+	API->>G: Validate token + conversation access
+	G-->>API: Authorized
+	API->>DB: Persist encrypted message row
+	API->>DB: Update conversation last activity
+	API->>RC: Update unread/presence counters (if enabled)
+	API->>RT: Emit message to conversation room
+	RT-->>C: Sender ack + fanout to online recipients
+	API-->>C: HTTP response with stored message metadata
+
+	Note over API,DB: Conversation keys are stored sealed per user/device
+	Note over API: Server routes ciphertext and metadata, not plaintext DM content
+```
+
 ## Trust Boundaries
 
 Client is trusted for:
