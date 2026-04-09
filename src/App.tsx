@@ -1533,13 +1533,13 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   return (
     <div className="orbit-shell">
-      <div className="grid min-h-screen grid-cols-[72px_320px_1fr]">
+      <div className="grid h-full grid-cols-[68px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="overflow-y-auto border-r border-white/10 bg-[#141822] p-2.5">
+        <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#141822] p-2">
           <div className="mb-4 flex items-center justify-center rounded-2xl bg-gradient-to-br from-orbit-accent/25 to-cyan-300/5 p-2.5 shadow-[0_10px_25px_rgba(18,201,180,0.15)]">
             <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover ring-1 ring-white/20" />
           </div>
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {[
               {
                 key: "dm" as const,
@@ -1609,7 +1609,7 @@ function App() {
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="overflow-y-auto border-r border-white/10 bg-[#1a1e29] p-3.5">
+        <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#1a1e29] p-3">
           {navTab === "dm" && (
             <>
               <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
@@ -1686,7 +1686,7 @@ function App() {
                 <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
               </div>
 
-              <div className="mt-2 space-y-2 overflow-y-auto pr-1">
+              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
                 {sortedConversations.map((conv) => {
                   const isSelected = conv.id === selectedConvId;
                   const otherMember = conv.members.find((m) => m.user.id !== user.id);
@@ -1891,7 +1891,7 @@ function App() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">All Friends</p>
                 <span className="text-xs text-orbit-muted">{friends.length}</span>
               </div>
-              <div className="mt-2 max-h-[240px] space-y-2 overflow-y-auto pr-1">
+              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
                 {friends.map((friend) => (
                   <div key={friend.id} className="rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
                     <div className="flex items-center justify-between gap-2">
@@ -1941,23 +1941,22 @@ function App() {
             </>
           )}
 
-          <div className="orbit-card-solid mt-4 rounded-xl bg-[#202533] p-4 text-sm">
-            <p className="font-semibold">Build {appVersion}</p>
-            <p className="mt-1 text-xs text-orbit-muted">Realtime session</p>
-            <p className={connected ? "mt-1 text-emerald-400" : "mt-1 text-rose-400"}>
-              {connected ? "Connected" : "Disconnected"}
-            </p>
-          </div>
         </aside>
 
         {/* ───── Main content area ───── */}
-        <main className="relative flex h-full flex-col overflow-hidden bg-gradient-to-b from-[#171b25] to-[#141822]">
-          <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#1b2030]/85 px-4 py-3 backdrop-blur">
+        <main className="relative flex h-full min-h-0 flex-col overflow-hidden bg-gradient-to-b from-[#171b25] to-[#141822]">
+          <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#1b2030]/85 px-3 py-2 backdrop-blur">
             <div className="flex items-center gap-3">
               <img src="logo.png" alt="Orbit Chat logo" className="h-7 w-7 rounded-lg ring-1 ring-white/20" />
               <div>
                 <p className="text-sm font-semibold text-orbit-text">Orbit Chat</p>
                 <p className="text-[11px] text-orbit-muted">Private by default</p>
+              </div>
+              <div className="ml-2 hidden items-center gap-2 md:flex">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-orbit-muted">Build {appVersion}</span>
+                <span className={`rounded-full border px-2 py-1 text-[11px] ${connected ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-rose-400/30 bg-rose-400/10 text-rose-300"}`}>
+                  {connected ? "Realtime connected" : "Realtime disconnected"}
+                </span>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -2002,7 +2001,7 @@ function App() {
             </div>
           </header>
 
-          <section className="min-h-0 flex-1 overflow-y-auto">
+          <section className="min-h-0 flex-1 overflow-hidden">
             {mainView === "profile-settings" && token && user ? (
               <ProfileSettings
                 token={token}
@@ -2182,8 +2181,8 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="flex h-full flex-col">
-            <header className="flex items-center justify-between border-b border-white/10 bg-[#1b2030]/85 p-4 backdrop-blur">
+              <div className="flex h-full min-h-0 flex-col">
+            <header className="flex items-center justify-between border-b border-white/10 bg-[#1b2030]/85 px-4 py-2.5 backdrop-blur">
               <div>
                 <button
                   className="text-left text-base font-semibold text-orbit-text hover:underline"
@@ -2228,7 +2227,7 @@ function App() {
               </div>
             </header>
 
-            <section className="flex-1 space-y-3 overflow-y-auto p-4">
+            <section className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
               {messages.length === 0 && (
                 <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
               )}
@@ -2237,7 +2236,7 @@ function App() {
                 return (
                   <article
                     key={msg.id}
-                    className={`max-w-[80%] rounded-2xl border p-3 text-sm ${
+                    className={`max-w-[78%] rounded-xl border px-2.5 py-2 text-[13px] leading-snug ${
                       mine
                         ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
                         : "border-white/10 bg-[#202533]"
@@ -2264,12 +2263,12 @@ function App() {
               })}
             </section>
 
-            <footer className="border-t border-white/10 bg-[#1b2030]/90 p-4 backdrop-blur">
+            <footer className="border-t border-white/10 bg-[#1b2030]/90 px-3 py-2 backdrop-blur">
               {(pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0) && (
-                <div className="mb-3 flex flex-wrap gap-2">
+                <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, idx) => (
-                    <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-text">
-                      {file.name}
+                    <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-text">
+                      📎 {file.name}
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
                         onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
@@ -2279,8 +2278,8 @@ function App() {
                     </span>
                   ))}
                   {pendingVideoLinks.map((link, idx) => (
-                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-accent">
-                      {new URL(link).hostname}
+                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
+                      🎬 {new URL(link).hostname}
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
                         onClick={() => setPendingVideoLinks((prev) => prev.filter((_, i) => i !== idx))}
@@ -2290,7 +2289,7 @@ function App() {
                     </span>
                   ))}
                   {pendingGifs.map((gif, idx) => (
-                    <span key={`${gif.url}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-accent">
+                    <span key={`${gif.url}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
                       GIF
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
@@ -2303,7 +2302,7 @@ function App() {
                 </div>
               )}
 
-              <div className="mb-3 flex gap-2">
+              <div className="mb-2 flex gap-1.5">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -2311,47 +2310,49 @@ function App() {
                   className="hidden"
                   onChange={(event) => handleAttachFiles(event.target.files)}
                 />
-                <button className="orbit-btn px-3" onClick={() => fileInputRef.current?.click()}>
-                  Attach File
+                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Attach file">
+                  📎
                 </button>
                 <button
                   ref={gifButtonRef}
-                  className={`orbit-btn px-3 ${showGifPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  className={`orbit-btn h-8 px-2.5 text-xs ${showGifPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
                   onClick={() => {
                     setShowGifPicker((prev) => !prev);
                     setShowEmojiPicker(false);
                     setGifActiveIndex(0);
                   }}
+                  title="GIFs"
                 >
                   GIF
                 </button>
                 <button
                   ref={emojiButtonRef}
-                  className={`orbit-btn px-3 ${showEmojiPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  className={`orbit-btn h-8 px-2.5 text-xs ${showEmojiPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
                   onClick={() => {
                     setShowEmojiPicker((prev) => !prev);
                     setShowGifPicker(false);
                     setEmojiActiveIndex(0);
                   }}
+                  title="Emoji"
                 >
-                  Emoji
+                  🙂
                 </button>
                 <input
-                  className="orbit-input flex-1 px-3"
+                  className="orbit-input h-8 flex-1 px-2.5 text-xs"
                   value={videoLinkDraft}
                   onChange={(event) => setVideoLinkDraft(event.target.value)}
-                  placeholder="Paste video link (YouTube, Vimeo, Loom)"
+                  placeholder="Video link"
                 />
-                <button className="orbit-btn px-3" onClick={handleAddVideoLink}>
-                  Add Link
+                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={handleAddVideoLink} title="Add video link">
+                  🎬
                 </button>
               </div>
 
               {showGifPicker && (
-                <div ref={gifPickerRef} className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
-                  <div className="mb-2 flex gap-2">
+                <div ref={gifPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  <div className="mb-2 flex gap-1.5">
                     <input
-                      className="orbit-input flex-1 px-3"
+                      className="orbit-input h-8 flex-1 px-2.5 text-xs"
                       value={gifQuery}
                       onChange={(event) => setGifQuery(event.target.value)}
                       onKeyDown={(event) => {
@@ -2372,7 +2373,7 @@ function App() {
                       }}
                       placeholder="Search GIFs"
                     />
-                    <button className="orbit-btn px-3" onClick={() => setShowGifPicker(false)}>
+                    <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => setShowGifPicker(false)}>
                       Close
                     </button>
                   </div>
@@ -2380,7 +2381,7 @@ function App() {
                   {gifLoading ? (
                     <p className="text-xs text-orbit-muted">Loading GIFs...</p>
                   ) : (
-                    <div className="grid max-h-44 grid-cols-3 gap-2 overflow-y-auto pr-1">
+                    <div className="grid max-h-36 grid-cols-4 gap-1.5 overflow-y-auto pr-1">
                       {gifResults.map((gif) => (
                         <button
                           key={gif.id}
@@ -2392,7 +2393,7 @@ function App() {
                           }}
                           title={gif.title || "GIF"}
                         >
-                          <img src={gif.previewUrl} alt={gif.title || "GIF"} className="h-20 w-full object-cover" loading="lazy" />
+                          <img src={gif.previewUrl} alt={gif.title || "GIF"} className="h-16 w-full object-cover" loading="lazy" />
                         </button>
                       ))}
                       {!gifResults.length && (
@@ -2404,10 +2405,10 @@ function App() {
               )}
 
               {showEmojiPicker && (
-                <div ref={emojiPickerRef} className="mb-3 rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
-                  <div className="mb-2 flex gap-2">
+                <div ref={emojiPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  <div className="mb-2 flex gap-1.5">
                     <input
-                      className="orbit-input flex-1 px-3"
+                      className="orbit-input h-8 flex-1 px-2.5 text-xs"
                       value={emojiQuery}
                       onChange={(event) => setEmojiQuery(event.target.value)}
                       onKeyDown={(event) => {
@@ -2428,7 +2429,7 @@ function App() {
                       }}
                       placeholder="Search emoji"
                     />
-                    <button className="orbit-btn px-3" onClick={() => setShowEmojiPicker(false)}>
+                    <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => setShowEmojiPicker(false)}>
                       Close
                     </button>
                   </div>
@@ -2445,7 +2446,7 @@ function App() {
                       ))}
                     </div>
                   )}
-                  <div className="grid max-h-44 grid-cols-8 gap-1 overflow-y-auto pr-1">
+                  <div className="grid max-h-36 grid-cols-10 gap-1 overflow-y-auto pr-1">
                     {filteredEmojis.map((item) => (
                       <button
                         key={item.value}
@@ -2471,9 +2472,9 @@ function App() {
                 <p className="mb-2 text-xs text-rose-300">{messageSendError}</p>
               )}
 
-              <div className="flex gap-3">
+              <div className="flex gap-1.5">
                 <input
-                  className="orbit-input flex-1 px-4"
+                  className="orbit-input h-9 flex-1 px-3 text-sm"
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -2485,7 +2486,7 @@ function App() {
                   placeholder="Type message..."
                 />
                 <button
-                  className="orbit-btn-primary px-5"
+                  className="orbit-btn-primary h-9 px-3 text-xs"
                   onClick={() => void handleSendMessage()}
                 >
                   Send
@@ -2510,13 +2511,13 @@ function App() {
                 aria-modal="true"
                 aria-label="Chat settings"
               >
-                <div className="mb-4 flex items-start justify-between gap-4">
+                <div className="mb-3 flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-lg font-bold text-orbit-text">Chat Settings</h3>
-                    <p className="mt-1 text-xs text-orbit-muted">Manage lock and passcode for @{selectedConversationLabel}</p>
+                    <h3 className="text-base font-bold text-orbit-text">Chat Settings</h3>
+                    <p className="mt-1 text-xs text-orbit-muted">Customize this chat: display name, lock mode, and passcode.</p>
                   </div>
                   <button
-                    className="orbit-btn px-3 py-2 text-xs"
+                    className="orbit-btn px-2.5 py-1.5 text-xs"
                     onClick={() => setShowChatSettings(false)}
                     disabled={chatSettingsSaving}
                   >
@@ -2530,32 +2531,37 @@ function App() {
                   </div>
                 )}
 
-                <div className="space-y-4">
-                  <label className="block">
-                    <span className="orbit-label">Chat display name (optional)</span>
-                    <input
-                      className="orbit-input"
-                      value={chatSettingsName}
-                      onChange={(e) => setChatSettingsName(e.target.value)}
-                      placeholder="Leave blank to use @username#chatId"
-                      maxLength={64}
-                    />
-                    <span className="mt-1 block text-[11px] text-orbit-muted">Use a unique name to avoid needing the fallback chat ID.</span>
-                  </label>
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Identity</p>
+                    <label className="block">
+                      <span className="orbit-label">Chat display name (optional)</span>
+                      <input
+                        className="orbit-input"
+                        value={chatSettingsName}
+                        onChange={(e) => setChatSettingsName(e.target.value)}
+                        placeholder="Leave blank to use @username#chatId"
+                        maxLength={64}
+                      />
+                      <span className="mt-1 block text-[11px] text-orbit-muted">Use a unique name for easier chat switching.</span>
+                    </label>
+                  </div>
 
-                  <label className="block">
-                    <span className="orbit-label">New passcode (optional)</span>
-                    <input
-                      className="orbit-input font-mono tracking-[0.26em]"
-                      value={chatSettingsPasscode}
-                      onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      placeholder={"•".repeat(chatSettingsLength)}
-                      maxLength={6}
-                    />
-                    <span className="mt-1 block text-[11px] text-orbit-muted">Leave blank to keep the current passcode.</span>
-                  </label>
+                  <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Lock and Passcode</p>
+                    <label className="block">
+                      <span className="orbit-label">New passcode (optional)</span>
+                      <input
+                        className="orbit-input font-mono tracking-[0.24em]"
+                        value={chatSettingsPasscode}
+                        onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        placeholder={"•".repeat(chatSettingsLength)}
+                        maxLength={6}
+                      />
+                      <span className="mt-1 block text-[11px] text-orbit-muted">Leave blank to keep current passcode.</span>
+                    </label>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <label className="block">
                       <span className="orbit-label">Passcode length</span>
                       <input
@@ -2584,29 +2590,44 @@ function App() {
                   </div>
 
                   {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
-                    <label className="block">
-                      <span className="orbit-label">Lock timeout in seconds</span>
-                      <input
-                        type="number"
-                        className="orbit-input"
-                        min={10}
-                        value={chatSettingsTimeout}
-                        onChange={(e) => setChatSettingsTimeout(e.target.value)}
-                        placeholder="300"
-                      />
-                    </label>
+                    <div className="mt-3 space-y-2">
+                      <label className="block">
+                        <span className="orbit-label">Lock timeout in seconds</span>
+                        <input
+                          type="number"
+                          className="orbit-input"
+                          min={10}
+                          value={chatSettingsTimeout}
+                          onChange={(e) => setChatSettingsTimeout(e.target.value)}
+                          placeholder="300"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[30, 60, 300, 900].map((seconds) => (
+                          <button
+                            key={seconds}
+                            type="button"
+                            className="orbit-btn px-2 py-1 text-[11px]"
+                            onClick={() => setChatSettingsTimeout(String(seconds))}
+                          >
+                            {seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
+                  </div>
 
-                  <div className="flex justify-end gap-3 pt-1">
+                  <div className="flex justify-end gap-2 pt-1">
                     <button
-                      className="orbit-btn px-4 py-2.5"
+                      className="orbit-btn px-3 py-2"
                       onClick={() => setShowChatSettings(false)}
                       disabled={chatSettingsSaving}
                     >
                       Cancel
                     </button>
                     <button
-                      className="orbit-btn-primary px-5 py-2.5"
+                      className="orbit-btn-primary px-4 py-2"
                       disabled={chatSettingsSaving}
                       onClick={async () => {
                         if (!token) return;
