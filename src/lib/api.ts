@@ -27,9 +27,10 @@ async function request<T = unknown>(path: string, opts: RequestOptions = {}): Pr
 /* ───── Auth ───── */
 
 export type AuthResponse = {
-  user: { id: string; username: string; email: string };
+  user: { id: string; username: string };
   accessToken: string;
   refreshToken: string;
+  recoveryCodes?: string[];
 };
 
 export function signup(data: {
@@ -45,10 +46,46 @@ export function login(data: { username: string; password: string; deviceName: st
   return request<AuthResponse>("/auth/login", { method: "POST", body: data });
 }
 
+export function loginWithRecoveryCode(data: {
+  username: string;
+  recoveryCode: string;
+  deviceName: string;
+}) {
+  return request<AuthResponse>("/auth/login/recovery", { method: "POST", body: data });
+}
+
 export function refreshToken(rt: string) {
   return request<{ accessToken: string; refreshToken: string }>("/auth/refresh", {
     method: "POST",
     body: { refreshToken: rt },
+  });
+}
+
+/* ───── Recovery Codes ───── */
+
+export type RecoveryCodeStatus = {
+  active: boolean;
+  total: number;
+  remaining: number;
+};
+
+export function getRecoveryCodeStatus(token: string) {
+  return request<RecoveryCodeStatus>("/auth/recovery-codes/status", { token });
+}
+
+export function disableRecoveryCodes(codes: string[], token: string) {
+  return request<{ success: true; message: string }>("/auth/recovery-codes/disable", {
+    method: "POST",
+    body: { codes },
+    token,
+  });
+}
+
+export function refreshRecoveryCodes(codes: string[], token: string) {
+  return request<{ recoveryCodes: string[] }>("/auth/recovery-codes/refresh", {
+    method: "POST",
+    body: { codes },
+    token,
   });
 }
 
@@ -252,13 +289,25 @@ export function storeConversationKey(
 
 /* ───── Conversations ───── */
 
+export type ChatLockMode = "on_leave" | "on_logout" | "after_time" | "after_inactivity";
+
 export type Conversation = {
   id: string;
   type: "dm" | "group";
   name: string | null;
   createdBy: string | null;
   createdAt: string;
+  encryptedTitle: string | null;
+  titleNonce: string | null;
+  encryptedImageUrl: string | null;
+  imageUrlNonce: string | null;
+  passcodeEnabled: boolean;
+  passcodeLength: number;
+  lockMode: ChatLockMode;
+  lockTimeoutSeconds: number | null;
   members: { id: string; userId: string; role: string; user: { id: string; username: string } }[];
+  /** Only present once at creation time */
+  passcode?: string;
 };
 
 export function getConversations(token: string) {
@@ -266,10 +315,58 @@ export function getConversations(token: string) {
 }
 
 export function createConversation(
-  data: { type: "dm" | "group"; name?: string; memberIds: string[]; encryptedKeys?: Record<string, string> },
+  data: {
+    type: "dm" | "group";
+    name?: string;
+    memberIds: string[];
+    encryptedKeys?: Record<string, string>;
+    encryptedTitle?: string;
+    titleNonce?: string;
+    encryptedImageUrl?: string;
+    imageUrlNonce?: string;
+    passcode?: string;
+  },
   token: string
 ) {
   return request<Conversation>("/conversations", { method: "POST", body: data, token });
+}
+
+export function verifyPasscode(conversationId: string, passcode: string, token: string) {
+  return request<{ success: true }>(`/conversations/${conversationId}/verify-passcode`, {
+    method: "POST",
+    body: { passcode },
+    token,
+  });
+}
+
+export function bypassPasscode(conversationId: string, recoveryCode: string, token: string) {
+  return request<{ success: true; message: string }>(`/conversations/${conversationId}/bypass-passcode`, {
+    method: "POST",
+    body: { recoveryCode },
+    token,
+  });
+}
+
+export function updateChatSettings(
+  conversationId: string,
+  data: {
+    encryptedTitle?: string;
+    titleNonce?: string;
+    encryptedImageUrl?: string;
+    imageUrlNonce?: string;
+    passcode?: string;
+    passcodeEnabled?: boolean;
+    passcodeLength?: number;
+    lockMode?: ChatLockMode;
+    lockTimeoutSeconds?: number;
+  },
+  token: string
+) {
+  return request<Conversation>(`/conversations/${conversationId}/settings`, {
+    method: "PUT",
+    body: data,
+    token,
+  });
 }
 
 /* ───── Messages ───── */
