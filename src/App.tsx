@@ -528,6 +528,21 @@ function App() {
     error: null,
   });
 
+  // Add members to group modal
+  const [addMembersModal, setAddMembersModal] = useState<{
+    open: boolean;
+    conversationId: string | null;
+    selectedMemberIds: Set<string>;
+    loading: boolean;
+    error: string | null;
+  }>({
+    open: false,
+    conversationId: null,
+    selectedMemberIds: new Set(),
+    loading: false,
+    error: null,
+  });
+
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -550,6 +565,7 @@ function App() {
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
   const getConversationKeyVersion = useE2EEStore((state) => state.getConversationKeyVersion);
+  const setConversationSecretKeyVersion = useE2EEStore((state) => state.setConversationSecretKeyVersion);
   const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
 
   const chatLock = useChatLockStore();
@@ -579,6 +595,11 @@ function App() {
     () => (selectedConvId ? byConversation[selectedConvId] ?? [] : []),
     [byConversation, selectedConvId]
   );
+
+  const myMinReadableKeyVersion = useMemo(() => {
+    if (!selectedConversation || !user) return 1;
+    return selectedConversation.members.find((m) => m.userId === user.id)?.minReadableKeyVersion ?? 1;
+  }, [selectedConversation, user]);
 
   const sortedConversations = useMemo(() => {
     const getConversationLastActivity = (conversation: Conversation) => {
@@ -1086,10 +1107,23 @@ function App() {
   useEffect(() => {
     if (!socket || !token) return;
 
-    const handleNewMessage = (data: { conversationId: string }) => {
-      const exists = conversationsRef.current.some((conv) => conv.id === data.conversationId);
-      if (!exists) {
+    const handleNewMessage = (data: { conversationId: string; keyVersion?: number }) => {
+      const existingConv = conversationsRef.current.find((conv) => conv.id === data.conversationId);
+      if (!existingConv) {
         void loadConversations();
+        return;
+      }
+
+      if (typeof data.keyVersion === "number") {
+        const currentVersion = getConversationKeyVersion(data.conversationId) ?? 1;
+        if (data.keyVersion > currentVersion && user) {
+          void ensureConversationSecretKey({
+            conversation: existingConv,
+            token,
+            myUserId: user.id,
+            forceRefresh: true,
+          });
+        }
       }
     };
 
@@ -1097,7 +1131,7 @@ function App() {
     return () => {
       socket.off("new_message", handleNewMessage);
     };
-  }, [socket, token, loadConversations]);
+  }, [socket, token, loadConversations, ensureConversationSecretKey, getConversationKeyVersion, user]);
 
   /* ───── Handle conversation_created: show passcode to recipient ───── */
   useEffect(() => {
@@ -1192,11 +1226,31 @@ function App() {
     };
   }, [socket, user, selectedConvId, loadFriendsData]);
 
-  /* ───── Handle member_left: someone left a group chat ───── */
+  /* ───── Handle member_removed: current user removed from a group ───── */
   useEffect(() => {
     if (!socket) return;
 
+    const handleMemberRemoved = (data: { conversationId: string; removedByUserId: string }) => {
+      setConversations((prev) => prev.filter((c) => c.id !== data.conversationId));
+      if (selectedConvId === data.conversationId) {
+        setSelectedConvId(null);
+        setShowChatSettings(false);
+      }
+    };
+
+    socket.on("member_removed", handleMemberRemoved);
+    return () => {
+      socket.off("member_removed", handleMemberRemoved);
+    };
+  }, [socket, selectedConvId]);
+
+  /* ───── Handle member_left: someone left a group chat ───── */
+  useEffect(() => {
+    if (!socket || !token || !user) return;
+
     const handleMemberLeft = (data: { conversationId: string; userId: string; messagesWiped: boolean }) => {
+      const existingConv = conversationsRef.current.find((c) => c.id === data.conversationId);
+
       // Update the conversation member list
       setConversations((prev) =>
         prev.map((c) => {
@@ -1204,18 +1258,62 @@ function App() {
           return { ...c, members: c.members.filter((m) => m.userId !== data.userId) };
         })
       );
+
+      if (existingConv) {
+        void ensureConversationSecretKey({
+          conversation: existingConv,
+          token,
+          myUserId: user.id,
+          forceRefresh: true,
+        });
+      }
     };
 
     socket.on("member_left", handleMemberLeft);
     return () => {
       socket.off("member_left", handleMemberLeft);
     };
-  }, [socket]);
+  }, [socket, token, user, ensureConversationSecretKey]);
 
-  /* ───── Ensure conversation secret key for DMs ───── */
+  /* ───── Handle member_added: new member joined group chat ───── */
+  useEffect(() => {
+    if (!socket || !user || !token) return;
+
+    const handleMemberAdded = (data: { conversation: Conversation; passcode: string | null; addedByUserId: string }) => {
+      // Update the conversation with new members list
+      setConversations((prev) => {
+        const withoutDup = prev.filter((c) => c.id !== data.conversation.id);
+        return [data.conversation, ...withoutDup];
+      });
+
+      void ensureConversationSecretKey({
+        conversation: data.conversation,
+        token,
+        myUserId: user.id,
+        forceRefresh: true,
+      });
+
+      // If there's a passcode and I wasn't the one who added the members, show it
+      if (data.passcode && data.addedByUserId !== user.id) {
+        const label = data.conversation.name?.trim()
+          ? data.conversation.name.trim()
+          : `Group#${data.conversation.id.slice(0, 4)}`;
+        setDeferredPasscodes((prev) => ({
+          ...prev,
+          [data.conversation.id]: { passcode: data.passcode!, label },
+        }));
+      }
+    };
+
+    socket.on("member_added", handleMemberAdded);
+    return () => {
+      socket.off("member_added", handleMemberAdded);
+    };
+  }, [socket, user, token, ensureConversationSecretKey]);
+
+  /* ───── Ensure conversation secret key for selected conversation ───── */
   useEffect(() => {
     if (!token || !user || !selectedConversation) return;
-    if (selectedConversation.type !== "dm") return;
     ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
   }, [token, user?.id, selectedConversation, ensureConversationSecretKey]);
 
@@ -1443,7 +1541,24 @@ function App() {
         setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
         await loadFriendsData();
       } else {
-        await api.leaveGroupChat(deleteModal.conversationId, deleteWipeMessages, token);
+        const conv = conversations.find((c) => c.id === deleteModal.conversationId);
+        let encryptedKeys: Record<string, string> | undefined;
+        if (conv && conv.type === "group") {
+          const remainingMembers = conv.members.filter((m) => m.userId !== user?.id);
+          if (remainingMembers.length > 0) {
+            const rotatedSecretKey = await generateSecretKey();
+            encryptedKeys = {};
+            for (const member of remainingMembers) {
+              const memberKeys = await api.getUserKeys(member.userId, token);
+              const publicKey = latestPublicKey(memberKeys);
+              if (!publicKey) {
+                throw new Error(`Could not get public key for member ${member.userId}`);
+              }
+              encryptedKeys[member.userId] = await sealToPublicKey(rotatedSecretKey, publicKey);
+            }
+          }
+        }
+        await api.leaveGroupChat(deleteModal.conversationId, deleteWipeMessages, token, encryptedKeys);
         devLog.info("leaveGroupChat API call succeeded");
         setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
       }
@@ -1634,8 +1749,19 @@ function App() {
       setSearch("");
       setSearchResults([]);
 
-      // Auto-unlock with default settings
-      chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      // Show passcode to creator if present
+      if (conv.passcode) {
+        setPendingChatPasscode({
+          conversationId: conv.id,
+          passcode: conv.passcode,
+          label: conv.name?.trim() || groupCreationModal.groupName || "New Group",
+        });
+        // Don't auto-unlock — passcode modal will handle it
+      } else {
+        // No passcode — auto-unlock with default settings
+        chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      }
+
       await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
 
       // Close modal and reset
@@ -1651,6 +1777,85 @@ function App() {
         ...prev,
         loading: false,
         error: err?.message || "Failed to create group",
+      }));
+    }
+  };
+
+  /* ───── Add members to existing group ───── */
+  const addMembersToGroup = async () => {
+    if (!token) return;
+    if (!user) return;
+    if (!addMembersModal.conversationId) return;
+    if (addMembersModal.selectedMemberIds.size === 0) {
+      setAddMembersModal((prev) => ({ ...prev, error: "Select at least one member" }));
+      return;
+    }
+
+    setAddMembersModal((prev) => ({ ...prev, loading: true, error: null }));
+
+    try {
+      const conv = conversations.find((c) => c.id === addMembersModal.conversationId);
+      if (!conv) throw new Error("Conversation not found");
+
+      const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
+      const memberIds = Array.from(addMembersModal.selectedMemberIds);
+      const existingMemberIds = conv.members.map((m) => m.userId);
+      const resultingMemberIds = Array.from(new Set([...existingMemberIds, ...memberIds]));
+      const memberPublicKeys: Record<string, string> = {
+        [user.id]: myPublicKey,
+      };
+
+      // Get public keys for all resulting members after add.
+      for (const memberId of resultingMemberIds) {
+        if (memberId === user.id) continue;
+        const memberKeys = await api.getUserKeys(memberId, token);
+        const publicKey = latestPublicKey(memberKeys);
+        if (!publicKey) {
+          throw new Error(`Could not get public key for member ${memberId}`);
+        }
+        memberPublicKeys[memberId] = publicKey;
+      }
+
+      // Rotate to a new group key version for this membership change.
+      const rotatedSecretKey = await generateSecretKey();
+      const encryptedKeys: Record<string, string> = {};
+      for (const memberId of resultingMemberIds) {
+        encryptedKeys[memberId] = await sealToPublicKey(rotatedSecretKey, memberPublicKeys[memberId]);
+      }
+
+      // Add members via API
+      await api.addMembers(conv.id, { memberIds, encryptedKeys }, token);
+
+      // Keep local sender key cache aligned to the new version immediately.
+      const nextKeyVersion = (getConversationKeyVersion(conv.id) ?? 1) + 1;
+      setConversationSecretKeyVersion({
+        conversationId: conv.id,
+        keyVersion: nextKeyVersion,
+        secretKey: rotatedSecretKey,
+      });
+
+      // Refresh conversation to get updated member list
+      const updated = await api.getConversations(token);
+      const updatedConv = updated.find((c) => c.id === conv.id);
+      if (updatedConv) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === updatedConv.id ? updatedConv : c))
+        );
+      }
+
+      // Close modal and reset
+      setAddMembersModal({
+        open: false,
+        conversationId: null,
+        selectedMemberIds: new Set(),
+        loading: false,
+        error: null,
+      });
+    } catch (err: any) {
+      setAddMembersModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: err?.message || "Failed to add members",
       }));
     }
   };
@@ -2921,13 +3126,19 @@ function App() {
                         <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
                       </div>
                       <div className="mt-1">
-                        <DecryptedMessageBody
-                          conversationId={selectedConversation.id}
-                          token={token}
-                          cipherText={msg.cipherText}
-                          nonce={msg.nonce}
-                          keyVersion={msg.keyVersion}
-                        />
+                        {typeof msg.keyVersion === "number" && msg.keyVersion < myMinReadableKeyVersion ? (
+                          <p className="break-words text-orbit-muted">
+                            Encrypted message unavailable (sent before you joined this key version).
+                          </p>
+                        ) : (
+                          <DecryptedMessageBody
+                            conversationId={selectedConversation.id}
+                            token={token}
+                            cipherText={msg.cipherText}
+                            nonce={msg.nonce}
+                            keyVersion={msg.keyVersion}
+                          />
+                        )}
                       </div>
                     </div>
                   </article>
@@ -3509,6 +3720,52 @@ function App() {
                     })()}
                   </div>
 
+                  {/* ── Group Member Management ── */}
+                  {selectedConversation && selectedConversation.type === "group" && (
+                    <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Members ({selectedConversation.members.length})
+                      </p>
+                      <div className="mb-3 max-h-32 space-y-1.5 overflow-y-auto">
+                        {selectedConversation.members.map((member) => (
+                          <div key={member.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/5 bg-white/[0.02] px-2 py-1.5">
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[9px] font-semibold text-orbit-text">
+                                {(profileById[member.userId]?.avatarUrl) ? (
+                                  <img src={profileById[member.userId]?.avatarUrl ?? ""} alt={`@${member.user.username}`} className="h-full w-full object-cover" />
+                                ) : (
+                                  (member.user.username[0] ?? "U").toUpperCase()
+                                )}
+                              </div>
+                              <span className="min-w-0 truncate text-xs font-semibold text-orbit-text">
+                                @{member.user.username}
+                                {member.userId === selectedConversation.createdBy && (
+                                  <span className="ml-1 text-[10px] text-orbit-accent"> (owner)</span>
+                                )}
+                                {user && member.userId === user.id && (
+                                  <span className="ml-1 text-[10px] text-orbit-muted"> (you)</span>
+                                )}
+                              </span>
+                            </div>
+                            {/* TODO: Add remove button here for group owners in future */}
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        className="orbit-btn w-full px-3 py-2 text-xs"
+                        onClick={() => {
+                          setAddMembersModal((prev) => ({
+                            ...prev,
+                            open: true,
+                            conversationId: selectedConversation.id,
+                          }));
+                        }}
+                      >
+                        Add Members
+                      </button>
+                    </div>
+                  )}
+
                   {/* ── Danger Zone ── */}
                   <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3">
                     <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-rose-400">Danger Zone</p>
@@ -3696,6 +3953,120 @@ function App() {
                   onClick={() => void startGroupChat()}
                 >
                   {groupCreationModal.loading ? "Creating..." : "Create Group"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add members to group modal */}
+        {addMembersModal.open && (
+          <div
+            className="orbit-modal-overlay"
+            onClick={() => {
+              if (!addMembersModal.loading) {
+                setAddMembersModal((prev) => ({
+                  ...prev,
+                  open: false,
+                  conversationId: null,
+                  selectedMemberIds: new Set(),
+                  error: null,
+                }));
+              }
+            }}
+          >
+            <div
+              className="orbit-modal max-w-sm"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <h3 className="text-base font-bold text-orbit-text">Add Members to Group</h3>
+              <p className="mt-1 text-xs text-orbit-muted">Select friends to invite to this group.</p>
+
+              {addMembersModal.error && (
+                <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {addMembersModal.error}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold text-slate-400">Select members to invite ({addMembersModal.selectedMemberIds.size})</p>
+                <div className="max-h-48 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  {friends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No friends available.</p>
+                  ) : (
+                    friends.map((friend) => {
+                      const isSelected = addMembersModal.selectedMemberIds.has(friend.user.id);
+                      const isAlreadyMember = selectedConversation?.members.some((m) => m.userId === friend.user.id);
+                      const avatarUrl = friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl ?? null;
+
+                      if (isAlreadyMember) return null; // Skip if already in group
+
+                      return (
+                        <label
+                          key={friend.id}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 transition ${
+                            isSelected
+                              ? "border-orbit-accent/50 bg-orbit-accent/10"
+                              : "border-white/5 bg-white/[0.02] hover:border-white/10"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const newIds = new Set(addMembersModal.selectedMemberIds);
+                              if (e.target.checked) {
+                                newIds.add(friend.user.id);
+                              } else {
+                                newIds.delete(friend.user.id);
+                              }
+                              setAddMembersModal((prev) => ({
+                                ...prev,
+                                selectedMemberIds: newIds,
+                                error: null,
+                              }));
+                            }}
+                            className="h-4 w-4 accent-orbit-accent"
+                          />
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[10px] font-semibold text-orbit-text">
+                            {avatarUrl ? (
+                              <img src={avatarUrl} alt={`@${friend.user.username}`} className="h-full w-full object-cover" />
+                            ) : (
+                              (friend.user.username[0] ?? "U").toUpperCase()
+                            )}
+                          </div>
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">@{friend.user.username}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="orbit-btn px-3 py-2"
+                  disabled={addMembersModal.loading}
+                  onClick={() => {
+                    setAddMembersModal((prev) => ({
+                      ...prev,
+                      open: false,
+                      conversationId: null,
+                      selectedMemberIds: new Set(),
+                      error: null,
+                    }));
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="orbit-btn-primary px-4 py-2"
+                  disabled={addMembersModal.loading || addMembersModal.selectedMemberIds.size === 0}
+                  onClick={() => void addMembersToGroup()}
+                >
+                  {addMembersModal.loading ? "Adding..." : "Add Members"}
                 </button>
               </div>
             </div>

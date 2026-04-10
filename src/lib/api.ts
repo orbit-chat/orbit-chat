@@ -345,7 +345,13 @@ export type Conversation = {
   passcodeDisableRequestedBy: string | null;
   lockMode: ChatLockMode;
   lockTimeoutSeconds: number | null;
-  members: { id: string; userId: string; role: string; user: { id: string; username: string } }[];
+  members: {
+    id: string;
+    userId: string;
+    role: string;
+    minReadableKeyVersion: number;
+    user: { id: string; username: string };
+  }[];
   /** Only present once at creation time */
   passcode?: string;
   /** Whether the conversation was newly created (false = existing DM returned) */
@@ -421,10 +427,15 @@ export function deleteConversation(conversationId: string, wipeMessages: boolean
   });
 }
 
-export function leaveGroupChat(conversationId: string, wipeMessages: boolean, token: string) {
+export function leaveGroupChat(
+  conversationId: string,
+  wipeMessages: boolean,
+  token: string,
+  encryptedKeys?: Record<string, string>
+) {
   return request<{ success: true; destroyed: boolean }>(`/conversations/${conversationId}/leave`, {
     method: "POST",
-    body: { wipeMessages },
+    body: { wipeMessages, encryptedKeys },
     token,
   });
 }
@@ -437,6 +448,19 @@ export function addMembers(
   return request<{ success: true }>(`/conversations/${conversationId}/members`, {
     method: "POST",
     body: data,
+    token,
+  });
+}
+
+export function removeMember(
+  conversationId: string,
+  userId: string,
+  encryptedKeys: Record<string, string>,
+  token: string
+) {
+  return request<{ success: true }>(`/conversations/${conversationId}/members/${userId}`, {
+    method: "DELETE",
+    body: { encryptedKeys },
     token,
   });
 }
