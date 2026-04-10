@@ -49,7 +49,41 @@
   }
 
   .orbit-shell {
-    @apply h-screen overflow-hidden bg-gradient-to-b from-[#11131a] via-[#121620] to-[#0f1218] text-orbit-text;
+    @apply flex h-screen flex-col overflow-hidden bg-gradient-to-b from-[#11131a] via-[#121620] to-[#0f1218] text-orbit-text;
+  }
+
+  .orbit-shell > .grid {
+    @apply flex-1 min-h-0;
+  }
+
+  /* ─── Custom frameless title bar ─── */
+  .orbit-titlebar {
+    @apply flex h-9 flex-shrink-0 items-center bg-[#0c0e14] select-none;
+  }
+
+  .orbit-titlebar-drag {
+    @apply flex flex-1 items-center px-3;
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  .orbit-titlebar-label {
+    @apply text-[11px] font-semibold tracking-wide text-orbit-muted/70;
+  }
+
+  .orbit-titlebar-controls {
+    @apply flex items-center;
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  .orbit-titlebar-btn {
+    @apply inline-flex h-9 w-11 items-center justify-center text-orbit-muted/70 transition-colors duration-100;
+    @apply hover:bg-white/[0.08] hover:text-orbit-text;
+  }
+
+  .orbit-titlebar-btn-close {
+    @apply hover:bg-red-500/90 hover:text-white;
   }
 
   .orbit-rail-btn {

@@ -19,6 +19,40 @@ import {
 import { UserProfilePopover } from "./components/UserProfilePopover";
 import { ProfileSettings } from "./components/ProfileSettings";
 
+/* ─── Custom frameless title bar ─── */
+function TitleBar() {
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    window.electronAPI?.isMaximized().then(setMaximized).catch(() => {});
+    const unsub = window.electronAPI?.onMaximizedChanged((v) => setMaximized(v));
+    return () => unsub?.();
+  }, []);
+
+  return (
+    <div className="orbit-titlebar">
+      <div className="orbit-titlebar-drag">
+        <span className="orbit-titlebar-label">Orbit Chat</span>
+      </div>
+      <div className="orbit-titlebar-controls">
+        <button onClick={() => window.electronAPI?.minimize()} className="orbit-titlebar-btn" aria-label="Minimize">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect y="5" width="12" height="1.5" rx=".75" fill="currentColor"/></svg>
+        </button>
+        <button onClick={() => window.electronAPI?.maximize()} className="orbit-titlebar-btn" aria-label={maximized ? "Restore" : "Maximize"}>
+          {maximized ? (
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1.5" y="3" width="7.5" height="7.5" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M3.5 3V2a1.5 1.5 0 0 1 1.5-1.5H10A1.5 1.5 0 0 1 11.5 2v5A1.5 1.5 0 0 1 10 8.5H9" stroke="currentColor" strokeWidth="1.3" fill="none"/></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x=".75" y=".75" width="10.5" height="10.5" rx="2" stroke="currentColor" strokeWidth="1.3" fill="none"/></svg>
+          )}
+        </button>
+        <button onClick={() => window.electronAPI?.close()} className="orbit-titlebar-btn orbit-titlebar-btn-close" aria-label="Close">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 type UploadedAttachment = {
   kind: "image" | "file";
   mediaId: string;
@@ -1458,7 +1492,9 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (user && pendingChatPasscode) {
     return (
-      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
+      <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
+        <TitleBar />
+        <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-md rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
             <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1497,6 +1533,7 @@ function App() {
             </button>
           </div>
         </section>
+        </div>
       </div>
     );
   }
@@ -1506,7 +1543,9 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (user && pendingRecoveryCodes && pendingRecoveryCodes.length > 0) {
     return (
-      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
+      <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
+        <TitleBar />
+        <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-lg rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
             <svg viewBox="0 0 24 24" className="h-6 w-6 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1545,6 +1584,7 @@ function App() {
             </button>
           </div>
         </section>
+        </div>
       </div>
     );
   }
@@ -1554,7 +1594,9 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   if (!user) {
     return (
-      <div className="relative flex min-h-screen items-start justify-center overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel p-6 text-orbit-text sm:items-center">
+      <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
+        <TitleBar />
+        <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
             <div className="space-y-6">
@@ -1712,6 +1754,7 @@ function App() {
             </div>
           </div>
         </section>
+        </div>
       </div>
     );
   }
@@ -1721,6 +1764,7 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   return (
     <div className="orbit-shell">
+      <TitleBar />
       <div className="grid h-full grid-cols-[68px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
         <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#141822] p-2">
