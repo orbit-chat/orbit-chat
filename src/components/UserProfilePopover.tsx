@@ -153,14 +153,16 @@ export function UserProfilePopover({
       {/* Avatar + basics */}
       <div className="relative px-4 pb-4">
         <div className="-mt-10 flex items-end justify-between gap-3">
-          <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-white/10 bg-orbit-panelAlt">
-            {profile?.avatarUrl ? (
-              <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-lg font-bold text-orbit-text">
-                {initials(name)}
-              </div>
-            )}
+          <div className="relative h-20 w-20 rounded-2xl border border-white/10 bg-orbit-panelAlt">
+            <div className="h-full w-full overflow-hidden rounded-2xl">
+              {profile?.avatarUrl ? (
+                <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-lg font-bold text-orbit-text">
+                  {initials(name)}
+                </div>
+              )}
+            </div>
             <div className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-orbit-panel ${presenceDotClass(profile?.presence)}`} />
           </div>
 

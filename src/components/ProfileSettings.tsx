@@ -85,11 +85,11 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
   };
 
   return (
-    <div className="p-6">
+    <div className="mx-auto h-full max-w-5xl overflow-y-auto p-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-orbit-text">Profile Settings</h2>
-          <p className="mt-1 text-sm text-orbit-muted">Update your profile card, status, and links.</p>
+          <h2 className="text-lg font-bold text-orbit-text">Profile Settings</h2>
+          <p className="mt-1 text-xs text-orbit-muted">Personalize your card, status, and links.</p>
         </div>
         <button className="orbit-btn" onClick={onClose}>
           Back
@@ -98,7 +98,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
 
       {error && <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{error}</div>}
 
-      <div className="orbit-card-solid mt-6 overflow-hidden rounded-3xl">
+      <div className="orbit-card-solid mt-4 overflow-hidden rounded-2xl">
         <div className="relative h-36 bg-gradient-to-r from-orbit-accent/30 to-orbit-danger/25" style={bannerStyle}>
           <div className="absolute inset-0 bg-black/35" />
           <div className="absolute right-4 top-4">
@@ -119,7 +119,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
           </div>
         </div>
 
-        <div className="relative px-6 pb-6">
+        <div className="relative px-4 pb-4">
           <div className="-mt-10 flex items-end justify-between gap-4">
             <div className="flex items-end gap-4">
               <div className="h-24 w-24 overflow-hidden rounded-2xl border border-white/10 bg-orbit-panelAlt">
@@ -151,7 +151,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
             </div>
           </div>
 
-          <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
+          <form className="mt-4 grid gap-3" onSubmit={onSubmit}>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
                 <span className="orbit-label">Display name</span>
@@ -174,15 +174,33 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
               </label>
             </div>
 
-            <label className="block">
-              <span className="orbit-label">Bio</span>
-              <textarea
-                className="orbit-textarea"
-                value={bio}
-                onChange={(e) => setBio(e.target.value)}
-                placeholder="A short description about you…"
-              />
-            </label>
+            <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+              <label className="block">
+                <span className="orbit-label">Bio</span>
+                <textarea
+                  className="orbit-textarea"
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder="A short description about you..."
+                />
+              </label>
+
+              <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Quick Status Emoji</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {["🙂", "💬", "⚡", "🎯", "🚀", "🔥", "🧠", "🌙"].map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className="orbit-btn px-2 py-1 text-base"
+                      onClick={() => setStatusEmoji(emoji)}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
@@ -227,17 +245,17 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                   className="orbit-input"
                   value={statusEmoji}
                   onChange={(e) => setStatusEmoji(e.target.value)}
-                  placeholder="e.g. 🙂"
+                  placeholder="e.g. :)"
                 />
               </label>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-orbit-panelAlt p-4">
+            <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Links</p>
                 <button
                   type="button"
-                  className="orbit-btn px-3 py-2 text-xs"
+                  className="orbit-btn px-2.5 py-1.5 text-xs"
                   onClick={() => setLinks((prev) => [...prev, { label: "", url: "" }])}
                 >
                   Add link
@@ -266,7 +284,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                     />
                     <button
                       type="button"
-                      className="orbit-btn px-3 py-3 text-sm"
+                      className="orbit-btn px-2.5 py-2 text-sm"
                       onClick={() => setLinks((prev) => prev.filter((_, i) => i !== idx))}
                       aria-label="Remove link"
                     >
@@ -277,13 +295,13 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3">
-              <button type="button" className="orbit-btn px-4 py-3" onClick={onClose}>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" className="orbit-btn px-3 py-2" onClick={onClose}>
                 Cancel
               </button>
               <button
                 disabled={loading}
-                className="orbit-btn-primary px-5 py-3"
+                className="orbit-btn-primary px-4 py-2"
               >
                 {loading ? "Saving…" : "Save changes"}
               </button>

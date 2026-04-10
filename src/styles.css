@@ -16,44 +16,44 @@
   }
 
   .orbit-input {
-    @apply w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition duration-150;
+    @apply w-full rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition duration-150;
     @apply focus:border-orbit-accent/80 focus:ring-2 focus:ring-orbit-accent/25;
     @apply disabled:opacity-60;
   }
 
   .orbit-select {
-    @apply w-full rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text outline-none transition duration-150;
+    @apply w-full rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-sm text-orbit-text outline-none transition duration-150;
     @apply focus:border-orbit-accent/80 focus:ring-2 focus:ring-orbit-accent/25;
     @apply disabled:opacity-60;
   }
 
   .orbit-textarea {
-    @apply min-h-[92px] w-full resize-y rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-3 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition duration-150;
+    @apply min-h-[84px] w-full resize-y rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-sm text-orbit-text placeholder:text-orbit-muted/70 outline-none transition duration-150;
     @apply focus:border-orbit-accent/80 focus:ring-2 focus:ring-orbit-accent/25;
     @apply disabled:opacity-60;
   }
 
   .orbit-btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-semibold text-orbit-text transition duration-150;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.06] px-2.5 py-1.5 text-sm font-semibold text-orbit-text transition duration-150;
     @apply hover:-translate-y-[1px] hover:border-white/25 hover:bg-white/[0.1] active:translate-y-0 disabled:opacity-50;
   }
 
   .orbit-btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orbit-accent px-4 py-3 text-sm font-bold text-slate-950 shadow-[0_6px_20px_rgba(18,201,180,0.35)] transition duration-150;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-orbit-accent px-3 py-2 text-sm font-bold text-slate-950 shadow-[0_6px_20px_rgba(18,201,180,0.35)] transition duration-150;
     @apply hover:-translate-y-[1px] hover:brightness-110 active:translate-y-0 disabled:opacity-50;
   }
 
   .orbit-btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orbit-danger px-4 py-3 text-sm font-bold text-white transition duration-150;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-orbit-danger px-3 py-2 text-sm font-bold text-white transition duration-150;
     @apply hover:-translate-y-[1px] hover:brightness-110 active:translate-y-0 disabled:opacity-50;
   }
 
   .orbit-shell {
-    @apply min-h-screen overflow-auto bg-gradient-to-b from-[#11131a] via-[#121620] to-[#0f1218] text-orbit-text;
+    @apply h-screen overflow-hidden bg-gradient-to-b from-[#11131a] via-[#121620] to-[#0f1218] text-orbit-text;
   }
 
   .orbit-rail-btn {
-    @apply relative w-full rounded-2xl border border-white/10 bg-orbit-panel/85 px-2 py-2 text-[11px] font-semibold text-orbit-muted transition duration-150;
+    @apply relative w-full rounded-xl border border-white/10 bg-orbit-panel/85 px-2 py-1.5 text-[11px] font-semibold text-orbit-muted transition duration-150;
     @apply hover:border-white/30 hover:bg-orbit-panel hover:text-orbit-text;
   }
 

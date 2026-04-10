@@ -2,7 +2,7 @@
 
 Orbit Chat is a desktop direct-messaging app focused on private communication.
 
-Current desktop package version: `0.5.0`.
+Current desktop package version: `0.6.0`.
 
 This app is designed so message text in one-to-one chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
@@ -20,15 +20,18 @@ Orbit Chat combines:
 - per-chat passcode lock controls (on leave, on logout, timed, inactivity)
 - encrypted attachment handling for files and images
 - video link sharing (link-only, no direct video upload)
+- GIF search and attach flow (Giphy API)
+- searchable emoji picker with recents + keyboard navigation
 - client-side unread badge tracking that clears on active chat selection
 - chat display names editable in per-chat settings
 - DM fallback labels using `@username#chatId` when no custom chat name is set
 - full-scene scroll handling for auth, lock, modal, and app-shell views
 - client URL normalization safeguards for malformed API/socket base URLs
+- avatar rendering across DM and friends surfaces with initials fallback
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
-For local development, set `VITE_API_URL` and `VITE_SOCKET_URL` in `.env` (from `.env.example`) so desktop traffic points to your intended backend.
+For local development, set `VITE_API_URL` and `VITE_SOCKET_URL` in `.env` (from `.env.example`) so desktop traffic points to your intended backend. GIF search uses Giphy via `VITE_GIPHY_API_KEY`.
 
 ## What Is Actually Encrypted
 
@@ -37,6 +40,7 @@ Encrypted end-to-end:
 - direct message text payloads (DM content)
 - DM attachment metadata embedded in encrypted message envelopes
 - DM video links embedded in encrypted message envelopes
+- DM GIF links embedded in encrypted message envelopes
 - attachment file keys wrapped inside encrypted message envelopes
 - attachment file bytes uploaded as encrypted blobs
 
@@ -105,6 +109,8 @@ Runtime behavior notes:
 - Realtime duplicate safety delivery can arrive through both conversation and user rooms; client message upsert is id-based to prevent duplicate rows.
 - Encrypted attachment delivery supports chunked encryption and in-session retry reuse for files already uploaded.
 - Video attachments are currently link-only by design.
+- GIF picker search and selection supports keyboard navigation, active-item highlighting, and outside-click/Escape dismiss.
+- Emoji picker supports search tags, recent emoji shortcuts, and keyboard navigation.
 - Unread counters are maintained client-side and reset immediately when a conversation becomes active.
 - Chat settings support custom display names and passcode/lock updates in one panel.
 - Locked/passcode prompts include the chat label so users can match the correct passcode to the correct DM instance.
@@ -119,6 +125,7 @@ Desktop App (Electron + React)
 	|- Realtime socket client
 	|- URL-normalized API/socket endpoint handling
 	|- E2EE key management
+	|- GIF + emoji composer workflows
 	|- Encrypt/decrypt message content
 					|
 					| HTTPS + WSS
@@ -135,6 +142,9 @@ Orbit Backend (NestJS)
 	|- Realtime fanout (Socket.IO conversation room + user room safety net)
 	|- Friend list refresh events (`friendships_updated`)
 	|- Presence cache + media services
+
+External API
+	|- Giphy search API (GIF discovery only)
 ```
 
 ## Architecture View
@@ -144,6 +154,8 @@ flowchart LR
 	A[Sender Desktop Client] -->|Encrypted payload| B[Orbit Server]
 	B -->|Encrypted payload| C[Recipient Desktop Client]
 	B -->|Safety-net emit to user room| C
+	A -->|GIF search query| G[Giphy API]
+	G -->|GIF URLs and previews| A
 	A -->|Sealed conversation key for sender| B
 	A -->|Sealed conversation key for recipient| B
 	A -->|Encrypted attachment bytes| B
@@ -160,6 +172,7 @@ sequenceDiagram
 	participant R as Receiver Client
 
 	S->>S: Ensure conversation key exists
+	S->>S: Compose text/emoji and optional GIF link
 	S->>S: Encrypt plaintext -> ciphertext + nonce
 	S->>API: Send encrypted message payload
 	API->>R: Emit to conversation room
@@ -235,6 +248,10 @@ sequenceDiagram
 	participant RC as Redis Cache/Presence
 	participant RT as Socket.IO Gateway
 	participant OBJ as Object Storage
+	participant GF as Giphy API
+
+	C->>GF: GIF search request (query)
+	GF-->>C: GIF URLs + previews
 
 	C->>API: POST media/upload-url(conversationId, contentType, size)
 	API->>G: Validate token + conversation access
@@ -292,6 +309,7 @@ Server is not trusted for:
 - Fingerprint verification between users is not implemented.
 - Forward secrecy and ratcheting are not implemented yet.
 - Video files are intentionally disabled for direct upload (video links only).
+- GIF discovery uses Giphy search endpoints (client-side query to external API).
 - Attachment reservation metadata is handled server-side for access control and lifecycle management.
 - Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
 - Current build config forces `libsodium-wrappers` to its CommonJS entry due to an upstream ESM packaging issue.

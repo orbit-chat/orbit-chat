@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import * as api from "../lib/api";
 
+const profileLoadInFlight = new Map<string, Promise<api.UserProfile | null>>();
+
 type ProfilesState = {
   byId: Record<string, api.UserProfile>;
   loadingById: Record<string, boolean>;
@@ -23,6 +25,10 @@ export const useProfilesStore = create<ProfilesState>((set, get) => ({
     const cached = get().byId[userId];
     if (cached) return cached;
 
+    const pending = profileLoadInFlight.get(userId);
+    if (pending) return pending;
+
+    const loadPromise = (async () => {
     set({
       loadingById: { ...get().loadingById, [userId]: true },
       errorById: { ...get().errorById, [userId]: null },
@@ -41,7 +47,13 @@ export const useProfilesStore = create<ProfilesState>((set, get) => ({
         errorById: { ...get().errorById, [userId]: err?.message ?? "Failed to load profile" },
       });
       return null;
+    } finally {
+      profileLoadInFlight.delete(userId);
     }
+    })();
+
+    profileLoadInFlight.set(userId, loadPromise);
+    return loadPromise;
   },
 
   fetchMe: async (token, myUserId) => {

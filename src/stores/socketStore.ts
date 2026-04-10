@@ -6,6 +6,8 @@ import { useAuthStore } from "./authStore";
 type SocketState = {
   socket: Socket | null;
   connected: boolean;
+  connectionState: "idle" | "connecting" | "connected" | "disconnected" | "error";
+  connectionError: string | null;
   connect: (token: string) => void;
   disconnect: () => void;
 };
@@ -18,19 +20,95 @@ function normalizeBaseUrl(rawUrl: string) {
 
 const SOCKET_URL = normalizeBaseUrl(import.meta.env.VITE_SOCKET_URL ?? "http://147.135.31.128:3000");
 
+function isAuthSocketError(message?: string | null) {
+  if (!message) return false;
+  return /(unauthor|forbidden|jwt|token|auth)/i.test(message);
+}
+
 export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,
   connected: false,
+  connectionState: "idle",
+  connectionError: null,
   connect: (token) => {
-    if (get().socket) return;
+    const existing = get().socket;
+    if (existing) {
+      existing.auth = { token };
+      if (!existing.connected) {
+        set({ connectionState: "connecting", connectionError: null });
+        existing.connect();
+      }
+      return;
+    }
 
     const socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ["websocket", "polling"]
+      // Start with polling for reliability behind proxies/firewalls, then upgrade to websocket.
+      transports: ["polling", "websocket"],
+      upgrade: true,
+      rememberUpgrade: false,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
 
-    socket.on("connect", () => set({ connected: true }));
-    socket.on("disconnect", () => set({ connected: false }));
+    set({ connectionState: "connecting", connectionError: null });
+
+    socket.on("connect", () => set({ connected: true, connectionState: "connected", connectionError: null }));
+    socket.on("disconnect", () => set({ connected: false, connectionState: "disconnected" }));
+    socket.on("connect_error", (err: Error) => {
+      const message = err?.message ?? "Socket connection failed";
+      if (isAuthSocketError(message)) {
+        // Avoid infinite reconnect loops on invalid/expired auth.
+        socket.io.opts.reconnection = false;
+        socket.disconnect();
+        useAuthStore.getState().clearSession();
+        set({
+          socket: null,
+          connected: false,
+          connectionState: "error",
+          connectionError: "Session expired or invalid. Please sign in again.",
+        });
+        return;
+      }
+
+      set({ connected: false, connectionState: "error", connectionError: message });
+    });
+    socket.io.on("reconnect_error", (err: Error) => {
+      const message = err?.message ?? "Socket reconnect failed";
+      if (isAuthSocketError(message)) {
+        socket.io.opts.reconnection = false;
+        socket.disconnect();
+        useAuthStore.getState().clearSession();
+        set({
+          socket: null,
+          connected: false,
+          connectionState: "error",
+          connectionError: "Session expired or invalid. Please sign in again.",
+        });
+        return;
+      }
+
+      set({ connected: false, connectionState: "error", connectionError: message });
+    });
+    socket.io.on("reconnect_attempt", () => {
+      set((prev) => {
+        // Preserve visible errors instead of masking them as endless "connecting".
+        if (prev.connectionState === "error") {
+          return prev;
+        }
+        return { connectionState: "connecting", connectionError: prev.connectionError };
+      });
+    });
+    socket.io.on("reconnect_failed", () => {
+      set({
+        connected: false,
+        connectionState: "error",
+        connectionError: "Unable to reconnect to realtime server. Check server status and VITE_SOCKET_URL.",
+      });
+    });
 
     // Wire incoming messages into the messages store
     socket.on("new_message", (data: {
@@ -74,6 +152,6 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     const socket = get().socket;
     if (!socket) return;
     socket.disconnect();
-    set({ socket: null, connected: false });
+    set({ socket: null, connected: false, connectionState: "idle", connectionError: null });
   }
 }));

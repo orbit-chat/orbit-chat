@@ -37,7 +37,14 @@ type VideoLinkAttachment = {
   url: string;
 };
 
-type MessageAttachment = UploadedAttachment | VideoLinkAttachment;
+type GifLinkAttachment = {
+  kind: "gif_link";
+  url: string;
+  previewUrl?: string;
+  title?: string;
+};
+
+type MessageAttachment = UploadedAttachment | VideoLinkAttachment | GifLinkAttachment;
 
 type MessageEnvelope = {
   text?: string;
@@ -54,11 +61,171 @@ const VIDEO_ALLOWED_HOSTS = new Set([
   "www.loom.com",
 ]);
 
+const GIPHY_API_KEY = (import.meta.env.VITE_GIPHY_API_KEY ?? "dc6zaTOxFJmzC").trim();
+const GIF_SEARCH_LIMIT = 18;
+
+const EMOJI_CATALOG: Array<{ value: string; tags: string[] }> = [
+  { value: "😀", tags: ["smile", "happy", "grin"] },
+  { value: "😄", tags: ["smile", "joy", "happy"] },
+  { value: "😂", tags: ["laugh", "funny", "tears"] },
+  { value: "🤣", tags: ["rofl", "laugh", "funny"] },
+  { value: "🙂", tags: ["smile", "nice"] },
+  { value: "😊", tags: ["smile", "warm", "happy"] },
+  { value: "😉", tags: ["wink", "playful"] },
+  { value: "😍", tags: ["love", "heart", "eyes"] },
+  { value: "😘", tags: ["kiss", "love"] },
+  { value: "😎", tags: ["cool", "sunglasses"] },
+  { value: "🤔", tags: ["think", "hmm"] },
+  { value: "🫡", tags: ["salute", "respect"] },
+  { value: "👍", tags: ["thumbs", "yes", "ok"] },
+  { value: "👏", tags: ["clap", "nice"] },
+  { value: "🙌", tags: ["celebrate", "yay"] },
+  { value: "🔥", tags: ["fire", "hot", "lit"] },
+  { value: "✨", tags: ["sparkles", "shine"] },
+  { value: "💯", tags: ["hundred", "perfect"] },
+  { value: "🎉", tags: ["party", "celebrate"] },
+  { value: "🚀", tags: ["rocket", "launch"] },
+  { value: "❤️", tags: ["heart", "love"] },
+  { value: "🤍", tags: ["heart", "love"] },
+  { value: "🖤", tags: ["heart", "love"] },
+  { value: "🤝", tags: ["deal", "together"] },
+  { value: "🙏", tags: ["thanks", "please"] },
+  { value: "😅", tags: ["sweat", "relief"] },
+  { value: "😭", tags: ["cry", "sad"] },
+  { value: "😤", tags: ["frustrated", "angry"] },
+  { value: "😴", tags: ["sleep", "tired"] },
+  { value: "🤯", tags: ["mindblown", "wow"] },
+  { value: "👀", tags: ["eyes", "look"] },
+  { value: "🎯", tags: ["target", "focus"] },
+  { value: "✅", tags: ["done", "check"] },
+  { value: "❌", tags: ["no", "x"] },
+  { value: "⚡", tags: ["fast", "energy"] },
+  { value: "💡", tags: ["idea", "lightbulb"] },
+  { value: "📌", tags: ["pin", "important"] },
+  { value: "🧠", tags: ["brain", "smart"] },
+  { value: "🎵", tags: ["music", "song"] },
+  { value: "🕹️", tags: ["game", "gaming"] },
+  { value: "📷", tags: ["camera", "photo"] },
+  { value: "🌙", tags: ["night", "moon"] },
+  { value: "☀️", tags: ["sun", "day"] },
+  { value: "😁", tags: ["grin", "smile", "happy"] },
+  { value: "😇", tags: ["angel", "innocent", "good"] },
+  { value: "🥳", tags: ["party", "celebrate", "birthday"] },
+  { value: "🤩", tags: ["starstruck", "wow", "excited"] },
+  { value: "😋", tags: ["yum", "tasty", "tongue"] },
+  { value: "😜", tags: ["silly", "wink", "playful"] },
+  { value: "🤪", tags: ["goofy", "crazy", "funny"] },
+  { value: "😌", tags: ["calm", "relieved", "peaceful"] },
+  { value: "😔", tags: ["sad", "down", "disappointed"] },
+  { value: "😢", tags: ["cry", "sad", "tear"] },
+  { value: "😡", tags: ["angry", "mad", "rage"] },
+  { value: "🤬", tags: ["swear", "angry", "mad"] },
+  { value: "🥶", tags: ["cold", "freezing", "chill"] },
+  { value: "🥵", tags: ["hot", "heat", "sweat"] },
+  { value: "🤗", tags: ["hug", "support", "care"] },
+  { value: "🫶", tags: ["love", "heart", "hands"] },
+  { value: "💪", tags: ["strong", "workout", "muscle"] },
+  { value: "👌", tags: ["ok", "perfect", "fine"] },
+  { value: "🤌", tags: ["italian", "chef", "gesture"] },
+  { value: "✌️", tags: ["peace", "victory", "two"] },
+  { value: "🫰", tags: ["snap", "money", "finger"] },
+  { value: "👋", tags: ["wave", "hello", "bye"] },
+  { value: "🫵", tags: ["you", "point", "finger"] },
+  { value: "👏🏻", tags: ["clap", "applause", "nice"] },
+  { value: "🤞", tags: ["luck", "hope", "crossed"] },
+  { value: "🎊", tags: ["celebration", "confetti", "party"] },
+  { value: "🏆", tags: ["win", "trophy", "champion"] },
+  { value: "🥇", tags: ["gold", "first", "winner"] },
+  { value: "🎮", tags: ["game", "controller", "gaming"] },
+  { value: "🧩", tags: ["puzzle", "solve", "piece"] },
+  { value: "💻", tags: ["code", "computer", "dev"] },
+  { value: "⌨️", tags: ["keyboard", "typing", "code"] },
+  { value: "🖱️", tags: ["mouse", "click", "computer"] },
+  { value: "📱", tags: ["phone", "mobile", "app"] },
+  { value: "📞", tags: ["call", "phone", "ring"] },
+  { value: "📨", tags: ["message", "mail", "inbox"] },
+  { value: "✉️", tags: ["email", "message", "letter"] },
+  { value: "🧾", tags: ["receipt", "invoice", "bill"] },
+  { value: "📅", tags: ["calendar", "date", "schedule"] },
+  { value: "⏰", tags: ["alarm", "time", "clock"] },
+  { value: "📍", tags: ["location", "pin", "map"] },
+  { value: "🗺️", tags: ["map", "travel", "location"] },
+  { value: "🚗", tags: ["car", "drive", "travel"] },
+  { value: "✈️", tags: ["flight", "airplane", "travel"] },
+  { value: "🏠", tags: ["home", "house", "safe"] },
+  { value: "🏢", tags: ["office", "work", "building"] },
+  { value: "☕", tags: ["coffee", "break", "morning"] },
+  { value: "🍕", tags: ["pizza", "food", "eat"] },
+  { value: "🍔", tags: ["burger", "food", "eat"] },
+  { value: "🍜", tags: ["ramen", "noodles", "food"] },
+  { value: "🍣", tags: ["sushi", "food", "japan"] },
+  { value: "🍎", tags: ["apple", "fruit", "healthy"] },
+  { value: "🥤", tags: ["drink", "soda", "beverage"] },
+  { value: "🧋", tags: ["boba", "tea", "drink"] },
+  { value: "🧁", tags: ["cupcake", "dessert", "sweet"] },
+  { value: "🐶", tags: ["dog", "pet", "cute"] },
+  { value: "🐱", tags: ["cat", "pet", "cute"] },
+  { value: "🦊", tags: ["fox", "animal", "cute"] },
+  { value: "🐼", tags: ["panda", "animal", "cute"] },
+  { value: "🦄", tags: ["unicorn", "magic", "fun"] },
+  { value: "🌈", tags: ["rainbow", "color", "happy"] },
+  { value: "🌊", tags: ["ocean", "wave", "water"] },
+  { value: "🌧️", tags: ["rain", "weather", "storm"] },
+  { value: "❄️", tags: ["snow", "winter", "cold"] },
+  { value: "⚽", tags: ["soccer", "sports", "ball"] },
+  { value: "🏀", tags: ["basketball", "sports", "ball"] },
+  { value: "🎾", tags: ["tennis", "sports", "ball"] },
+  { value: "🏈", tags: ["football", "sports", "ball"] },
+  { value: "🎸", tags: ["guitar", "music", "instrument"] },
+  { value: "🎧", tags: ["headphones", "music", "listen"] },
+  { value: "🎬", tags: ["movie", "film", "video"] },
+  { value: "📚", tags: ["books", "read", "study"] },
+  { value: "✍️", tags: ["write", "notes", "author"] },
+  { value: "🔒", tags: ["lock", "secure", "private"] },
+  { value: "🔓", tags: ["unlock", "open", "access"] },
+  { value: "🛡️", tags: ["shield", "security", "protect"] },
+  { value: "🧪", tags: ["test", "experiment", "lab"] },
+  { value: "🐛", tags: ["bug", "issue", "debug"] },
+  { value: "🧰", tags: ["tools", "fix", "kit"] },
+  { value: "🛠️", tags: ["build", "repair", "tools"] },
+  { value: "📈", tags: ["growth", "analytics", "up"] },
+  { value: "📉", tags: ["down", "drop", "analytics"] },
+  { value: "🧭", tags: ["direction", "navigate", "compass"] },
+  { value: "🧨", tags: ["explosive", "hype", "boom"] },
+  { value: "🥲", tags: ["tears", "happy sad", "emotion"] },
+  { value: "🫠", tags: ["melting", "awkward", "heat"] },
+  { value: "🫣", tags: ["peek", "shy", "embarrassed"] },
+  { value: "🫤", tags: ["meh", "unsure", "neutral"] },
+  { value: "🫥", tags: ["invisible", "quiet", "hide"] },
+  { value: "🫨", tags: ["shaking", "shock", "wow"] },
+  { value: "🩷", tags: ["pink heart", "love", "heart"] },
+  { value: "🩵", tags: ["light blue heart", "love", "heart"] },
+  { value: "🩶", tags: ["grey heart", "love", "heart"] },
+  { value: "🫂", tags: ["hug", "support", "comfort"] },
+];
+
+type GifSearchResult = {
+  id: string;
+  title: string;
+  gifUrl: string;
+  previewUrl: string;
+};
+
 function normalizeVideoUrl(input: string) {
   try {
     const url = new URL(input.trim());
     if (url.protocol !== "https:") return null;
     if (!VIDEO_ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGifUrl(input: string) {
+  try {
+    const url = new URL(input.trim());
+    if (url.protocol !== "https:") return null;
     return url.toString();
   } catch {
     return null;
@@ -233,6 +400,27 @@ function DecryptedMessageBody(props: {
             </a>
           );
         }
+        if (attachment.kind === "gif_link") {
+          const safeUrl = normalizeGifUrl(attachment.url);
+          if (!safeUrl) return null;
+          return (
+            <a
+              key={`${safeUrl}:${idx}`}
+              href={safeUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="block overflow-hidden rounded-xl border border-white/10 bg-orbit-panelAlt"
+            >
+              <img
+                src={attachment.previewUrl || safeUrl}
+                alt={attachment.title || "GIF attachment"}
+                className="max-h-72 w-full object-cover"
+                loading="lazy"
+              />
+              <p className="px-3 py-2 text-xs text-orbit-muted">GIF attachment</p>
+            </a>
+          );
+        }
         return (
           <MediaAttachmentView
             key={`${attachment.mediaId}:${idx}`}
@@ -262,8 +450,23 @@ function App() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [videoLinkDraft, setVideoLinkDraft] = useState("");
   const [pendingVideoLinks, setPendingVideoLinks] = useState<string[]>([]);
+  const [pendingGifs, setPendingGifs] = useState<GifLinkAttachment[]>([]);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [gifQuery, setGifQuery] = useState("");
+  const [gifResults, setGifResults] = useState<GifSearchResult[]>([]);
+  const [gifLoading, setGifLoading] = useState(false);
+  const [gifError, setGifError] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiQuery, setEmojiQuery] = useState("");
+  const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  const [gifActiveIndex, setGifActiveIndex] = useState(0);
+  const [emojiActiveIndex, setEmojiActiveIndex] = useState(0);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const gifPickerRef = useRef<HTMLDivElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const gifButtonRef = useRef<HTMLButtonElement | null>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
 
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
@@ -297,9 +500,13 @@ function App() {
   const conversationsRef = useRef<Conversation[]>([]);
 
   const { user, clearSession, token, loading, error, login, signup, loginWithRecoveryCode, pendingRecoveryCodes, clearPendingRecoveryCodes } = useAuthStore();
-  const { connected, connect, disconnect, socket } = useSocketStore();
+  const { connected, connectionState, connectionError, connect, disconnect, socket } = useSocketStore();
   const { byConversation, unreadCountByConversation, upsertMessage, setActiveConversation } = useMessagesStore();
-  const profiles = useProfilesStore();
+  const profileById = useProfilesStore((state) => state.byId);
+  const profileLoadingById = useProfilesStore((state) => state.loadingById);
+  const profileErrorById = useProfilesStore((state) => state.errorById);
+  const fetchProfile = useProfilesStore((state) => state.fetchProfile);
+  const fetchMeProfile = useProfilesStore((state) => state.fetchMe);
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
@@ -353,6 +560,31 @@ function App() {
     });
   }, [conversations, unreadCountByConversation]);
 
+  const realtimeBadge = useMemo(() => {
+    if (connected || connectionState === "connected") {
+      return {
+        label: "Realtime connected",
+        className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
+      };
+    }
+    if (connectionState === "connecting") {
+      return {
+        label: "Realtime connecting...",
+        className: "border-amber-300/30 bg-amber-300/10 text-amber-200",
+      };
+    }
+    if (connectionState === "error") {
+      return {
+        label: connectionError ? `Realtime error: ${connectionError}` : "Realtime error",
+        className: "border-rose-400/30 bg-rose-400/10 text-rose-300",
+      };
+    }
+    return {
+      label: "Realtime disconnected",
+      className: "border-rose-400/30 bg-rose-400/10 text-rose-300",
+    };
+  }, [connected, connectionError, connectionState]);
+
   const formatRecentTimestamp = useCallback((timestampMs: number) => {
     const now = Date.now();
     const diffMs = now - timestampMs;
@@ -384,6 +616,34 @@ function App() {
       hour: "numeric",
       minute: "2-digit",
     });
+  }, []);
+
+  const presenceLabel = useCallback((presence?: api.Presence | null) => {
+    switch (presence) {
+      case "online":
+        return "Online";
+      case "idle":
+        return "Idle";
+      case "dnd":
+        return "Do Not Disturb";
+      case "offline":
+      default:
+        return "Offline";
+    }
+  }, []);
+
+  const presenceDotClass = useCallback((presence?: api.Presence | null) => {
+    switch (presence) {
+      case "online":
+        return "bg-emerald-400";
+      case "idle":
+        return "bg-amber-400";
+      case "dnd":
+        return "bg-rose-400";
+      case "offline":
+      default:
+        return "bg-slate-500";
+    }
   }, []);
 
   // Get the "other" user's name in a DM
@@ -474,9 +734,9 @@ function App() {
       if (!token) return;
       setProfilePopoverUserId(userId);
       setProfilePopoverAnchor(anchorEl ? anchorEl.getBoundingClientRect() : null);
-      await profiles.fetchProfile(userId, token);
+      await fetchProfile(userId, token);
     },
-    [profiles, token]
+    [fetchProfile, token]
   );
 
   const closeProfilePopover = useCallback(() => {
@@ -579,8 +839,29 @@ function App() {
 
   useEffect(() => {
     if (!token || !user) return;
-    profiles.fetchMe(token, user.id);
-  }, [token, user?.id]);
+    fetchMeProfile(token, user.id);
+  }, [fetchMeProfile, token, user?.id]);
+
+  useEffect(() => {
+    if (!token) return;
+    const ids = new Set<string>();
+
+    for (const conv of conversations) {
+      for (const member of conv.members) {
+        ids.add(member.user.id);
+      }
+    }
+    for (const friend of friends) ids.add(friend.user.id);
+    for (const request of friendRequests.incoming) ids.add(request.user.id);
+    for (const request of friendRequests.outgoing) ids.add(request.user.id);
+    for (const result of searchResults) ids.add(result.id);
+
+    ids.forEach((id) => {
+      if (!profileById[id]) {
+        void fetchProfile(id, token);
+      }
+    });
+  }, [token, conversations, friends, friendRequests.incoming, friendRequests.outgoing, searchResults, profileById, fetchProfile]);
 
   useEffect(() => {
     if (navTab !== "dm") {
@@ -593,10 +874,32 @@ function App() {
   useEffect(() => {
     setPendingFiles([]);
     setPendingVideoLinks([]);
+    setPendingGifs([]);
     setVideoLinkDraft("");
+    setShowGifPicker(false);
+    setGifQuery("");
+    setGifResults([]);
+    setGifError(null);
+    setShowEmojiPicker(false);
+    setEmojiQuery("");
+    setGifActiveIndex(0);
+    setEmojiActiveIndex(0);
     setMessageSendError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [selectedConvId]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("orbit_recent_emojis");
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as string[];
+      if (Array.isArray(parsed)) {
+        setRecentEmojis(parsed.filter((item) => typeof item === "string").slice(0, 16));
+      }
+    } catch {
+      // Ignore malformed local cache.
+    }
+  }, []);
 
   useEffect(() => {
     if (!showChatSettings) return;
@@ -606,6 +909,35 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showChatSettings]);
+
+  useEffect(() => {
+    if (!showGifPicker && !showEmojiPicker) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+
+      const clickedInsideGif = Boolean(gifPickerRef.current?.contains(target) || gifButtonRef.current?.contains(target));
+      const clickedInsideEmoji = Boolean(emojiPickerRef.current?.contains(target) || emojiButtonRef.current?.contains(target));
+
+      if (!clickedInsideGif) setShowGifPicker(false);
+      if (!clickedInsideEmoji) setShowEmojiPicker(false);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowGifPicker(false);
+        setShowEmojiPicker(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showEmojiPicker, showGifPicker]);
 
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
@@ -698,6 +1030,115 @@ function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search, token]);
+
+  useEffect(() => {
+    if (!showGifPicker) return;
+    const query = gifQuery.trim() || "trending";
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setGifLoading(true);
+      setGifError(null);
+      try {
+        if (!GIPHY_API_KEY) {
+          throw new Error("VITE_GIPHY_API_KEY is missing. Set it in orbit-chat/.env.");
+        }
+
+        const response = await fetch(
+          `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(GIPHY_API_KEY)}&q=${encodeURIComponent(query)}&limit=${GIF_SEARCH_LIMIT}&rating=pg-13&lang=en`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          throw new Error(`GIF search failed (${response.status})`);
+        }
+
+        const data = await response.json() as {
+          data?: Array<{
+            id?: string;
+            title?: string;
+            images?: {
+              original?: { url?: string };
+              fixed_width_small?: { url?: string };
+            };
+          }>;
+        };
+        const parsed = (data.data ?? [])
+          .map((item) => {
+            const gifUrl = normalizeGifUrl(item.images?.original?.url ?? "");
+            const previewUrl = normalizeGifUrl(item.images?.fixed_width_small?.url ?? "") ?? gifUrl;
+            if (!gifUrl || !previewUrl || !item.id) return null;
+            return {
+              id: item.id,
+              title: item.title ?? "GIF",
+              gifUrl,
+              previewUrl,
+            } satisfies GifSearchResult;
+          })
+          .filter((item): item is GifSearchResult => Boolean(item));
+        setGifResults(parsed);
+      } catch (err: any) {
+        if (controller.signal.aborted) return;
+        setGifResults([]);
+        setGifError(err?.message ?? "Unable to search GIFs right now.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setGifLoading(false);
+        }
+      }
+    }, 220);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [gifQuery, showGifPicker]);
+
+  const handleAddGif = useCallback((gif: GifSearchResult) => {
+    setPendingGifs((prev) => [
+      ...prev,
+      {
+        kind: "gif_link",
+        url: gif.gifUrl,
+        previewUrl: gif.previewUrl,
+        title: gif.title,
+      },
+    ]);
+    setMessageSendError(null);
+    setShowGifPicker(false);
+  }, []);
+
+  const handleInsertEmoji = useCallback((emoji: string) => {
+    setMessageDraft((prev) => `${prev}${emoji}`);
+    setRecentEmojis((prev) => {
+      const next = [emoji, ...prev.filter((value) => value !== emoji)].slice(0, 16);
+      try {
+        localStorage.setItem("orbit_recent_emojis", JSON.stringify(next));
+      } catch {
+        // Ignore quota/storage access errors.
+      }
+      return next;
+    });
+    setShowEmojiPicker(false);
+  }, []);
+
+  const filteredEmojis = useMemo(() => {
+    const query = emojiQuery.trim().toLowerCase();
+    if (!query) return EMOJI_CATALOG.slice(0, 40);
+    return EMOJI_CATALOG.filter((item) => item.tags.some((tag) => tag.includes(query))).slice(0, 40);
+  }, [emojiQuery]);
+
+  useEffect(() => {
+    setGifActiveIndex((prev) => {
+      if (!gifResults.length) return 0;
+      return Math.min(prev, gifResults.length - 1);
+    });
+  }, [gifResults]);
+
+  useEffect(() => {
+    setEmojiActiveIndex((prev) => {
+      if (!filteredEmojis.length) return 0;
+      return Math.min(prev, filteredEmojis.length - 1);
+    });
+  }, [filteredEmojis]);
 
   /* ───── Auth submit ───── */
   const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -823,7 +1264,7 @@ function App() {
   /* ───── Send message over socket ───── */
   const handleSendMessage = async () => {
     const draft = messageDraft.trim();
-    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0;
+    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0;
     if (!selectedConvId || !user || !socket) return;
     if (!token) return;
     if (!draft && !hasAttachments) return;
@@ -897,6 +1338,18 @@ function App() {
         attachments.push({ kind: "video_link", url });
       }
 
+      for (const gif of pendingGifs) {
+        const safeUrl = normalizeGifUrl(gif.url);
+        const safePreview = gif.previewUrl ? (normalizeGifUrl(gif.previewUrl) ?? undefined) : undefined;
+        if (!safeUrl) continue;
+        attachments.push({
+          kind: "gif_link",
+          url: safeUrl,
+          previewUrl: safePreview,
+          title: gif.title,
+        });
+      }
+
       const envelope: MessageEnvelope = {
         text: draft || undefined,
         attachments,
@@ -916,6 +1369,7 @@ function App() {
       setMessageDraft("");
       setPendingFiles([]);
       setPendingVideoLinks([]);
+      setPendingGifs([]);
       setMessageSendError(null);
       for (const key of usedCacheKeys) {
         delete uploadedAttachmentCacheRef.current[key];
@@ -1194,13 +1648,13 @@ function App() {
   /* ════════════════════════════════════════════════════ */
   return (
     <div className="orbit-shell">
-      <div className="grid min-h-screen grid-cols-[72px_320px_1fr]">
+      <div className="grid h-full grid-cols-[68px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
-        <aside className="overflow-y-auto border-r border-white/10 bg-[#141822] p-2.5">
+        <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#141822] p-2">
           <div className="mb-4 flex items-center justify-center rounded-2xl bg-gradient-to-br from-orbit-accent/25 to-cyan-300/5 p-2.5 shadow-[0_10px_25px_rgba(18,201,180,0.15)]">
             <img src="logo.png" alt="Orbit Chat logo" className="h-9 w-9 rounded-xl object-cover ring-1 ring-white/20" />
           </div>
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {[
               {
                 key: "dm" as const,
@@ -1270,7 +1724,7 @@ function App() {
         </aside>
 
         {/* ───── Sidebar: search + conversation list ───── */}
-        <aside className="overflow-y-auto border-r border-white/10 bg-[#1a1e29] p-3.5">
+        <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#1a1e29] p-3">
           {navTab === "dm" && (
             <>
               <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
@@ -1293,9 +1747,17 @@ function App() {
                     const relation = friendStatusByUserId.get(u.id);
                     const incomingRequest = friendRequests.incoming.find((request) => request.user.id === u.id);
                     const outgoingRequest = friendRequests.outgoing.find((request) => request.user.id === u.id);
+                    const avatarUrl = u.avatarUrl ?? profileById[u.id]?.avatarUrl ?? null;
 
                     return (
                       <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt={`@${u.username}`} className="h-full w-full object-cover" />
+                          ) : (
+                            (u.username[0] ?? "U").toUpperCase()
+                          )}
+                        </div>
                         <button
                           className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
                           onClick={(event) => openProfilePopover(u.id, event.currentTarget)}
@@ -1347,17 +1809,20 @@ function App() {
                 <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
               </div>
 
-              <div className="mt-2 space-y-2 overflow-y-auto pr-1">
+              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
                 {sortedConversations.map((conv) => {
                   const isSelected = conv.id === selectedConvId;
                   const otherMember = conv.members.find((m) => m.user.id !== user.id);
+                  const otherUserId = otherMember?.user.id ?? "";
+                  const otherUsername = otherMember?.user.username ?? "dm";
+                  const avatarUrl = profileById[otherUserId]?.avatarUrl ?? null;
                   const convoMessages = byConversation[conv.id] ?? [];
                   const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
                   const displayName =
                     conv.type === "dm"
                       ? (conv.name?.trim()
                         ? conv.name.trim()
-                        : `${otherMember?.user.username ?? "dm"}#${shortConversationId(conv.id)}`)
+                        : `${otherUsername}#${shortConversationId(conv.id)}`)
                       : conv.name ?? "Group";
                   const preview = lastMessage
                     ? `${lastMessage.sender === user.username ? "You" : lastMessage.sender}: Encrypted message`
@@ -1385,7 +1850,14 @@ function App() {
                       }}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-1.5">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
+                            {avatarUrl ? (
+                              <img src={avatarUrl} alt={`@${otherUsername}`} className="h-full w-full object-cover" />
+                            ) : (
+                              (otherUsername[0] ?? "D").toUpperCase()
+                            )}
+                          </div>
                           {conv.passcodeEnabled && !chatLock.isUnlocked(conv.id) && (
                             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-orbit-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
@@ -1442,8 +1914,16 @@ function App() {
                     const relation = friendStatusByUserId.get(u.id);
                     const incomingRequest = friendRequests.incoming.find((request) => request.user.id === u.id);
                     const outgoingRequest = friendRequests.outgoing.find((request) => request.user.id === u.id);
+                    const avatarUrl = u.avatarUrl ?? profileById[u.id]?.avatarUrl ?? null;
                     return (
                       <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt={`@${u.username}`} className="h-full w-full object-cover" />
+                          ) : (
+                            (u.username[0] ?? "U").toUpperCase()
+                          )}
+                        </div>
                         <button
                           className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
                           onClick={(event) => openProfilePopover(u.id, event.currentTarget)}
@@ -1492,12 +1972,21 @@ function App() {
               <div className="mt-2 space-y-2">
                 {friendRequests.incoming.slice(0, 4).map((request) => (
                   <div key={request.id} className="rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
-                    <button
-                      className="text-sm font-semibold hover:underline"
-                      onClick={(event) => openProfilePopover(request.user.id, event.currentTarget)}
-                    >
-                      @{request.user.username}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
+                        {(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ? (
+                          <img src={(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ?? ""} alt={`@${request.user.username}`} className="h-full w-full object-cover" />
+                        ) : (
+                          (request.user.username[0] ?? "U").toUpperCase()
+                        )}
+                      </div>
+                      <button
+                        className="text-sm font-semibold hover:underline"
+                        onClick={(event) => openProfilePopover(request.user.id, event.currentTarget)}
+                      >
+                        @{request.user.username}
+                      </button>
+                    </div>
                     <div className="mt-2 flex gap-2">
                       <button
                         className="orbit-btn-primary flex-1 px-3 py-2 text-xs"
@@ -1528,6 +2017,13 @@ function App() {
               <div className="mt-2 space-y-2">
                 {friendRequests.outgoing.slice(0, 3).map((request) => (
                   <div key={request.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
+                      {(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ? (
+                        <img src={(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ?? ""} alt={`@${request.user.username}`} className="h-full w-full object-cover" />
+                      ) : (
+                        (request.user.username[0] ?? "U").toUpperCase()
+                      )}
+                    </div>
                     <button
                       className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-orbit-text hover:underline"
                       onClick={(event) => openProfilePopover(request.user.id, event.currentTarget)}
@@ -1552,21 +2048,31 @@ function App() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">All Friends</p>
                 <span className="text-xs text-orbit-muted">{friends.length}</span>
               </div>
-              <div className="mt-2 max-h-[240px] space-y-2 overflow-y-auto pr-1">
+              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
                 {friends.map((friend) => (
                   <div key={friend.id} className="rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <button
-                        className="min-w-0 flex-1 text-left"
-                        onClick={(event) => openProfilePopover(friend.user.id, event.currentTarget)}
-                      >
-                        <p className="truncate text-sm font-semibold">@{friend.user.username}</p>
-                        <p className="truncate text-xs text-orbit-muted">
-                          {friend.user.statusEmoji ? `${friend.user.statusEmoji} ` : ""}
-                          {friend.user.statusText || friend.user.presence || "Available"}
-                        </p>
-                      </button>
-                      <span className={`h-2.5 w-2.5 rounded-full ${friend.user.presence === "online" ? "bg-emerald-400" : friend.user.presence === "idle" ? "bg-amber-400" : friend.user.presence === "dnd" ? "bg-rose-400" : "bg-slate-500"}`} />
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
+                          {(friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl) ? (
+                            <img src={(friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl) ?? ""} alt={`@${friend.user.username}`} className="h-full w-full object-cover" />
+                          ) : (
+                            (friend.user.username[0] ?? "U").toUpperCase()
+                          )}
+                        </div>
+                        <button
+                          className="min-w-0 flex-1 text-left"
+                          onClick={(event) => openProfilePopover(friend.user.id, event.currentTarget)}
+                        >
+                          <p className="truncate text-sm font-semibold">@{friend.user.username}</p>
+                          <p className="truncate text-xs text-orbit-muted">
+                            {friend.user.statusEmoji ? `${friend.user.statusEmoji} ` : ""}
+                            {presenceLabel(friend.user.presence)}
+                            {friend.user.statusText ? ` • ${friend.user.statusText}` : ""}
+                          </p>
+                        </button>
+                      </div>
+                      <span className={`h-2.5 w-2.5 rounded-full ${presenceDotClass(friend.user.presence)}`} />
                     </div>
                     <div className="mt-2 flex gap-2">
                       <button
@@ -1602,23 +2108,22 @@ function App() {
             </>
           )}
 
-          <div className="orbit-card-solid mt-4 rounded-xl bg-[#202533] p-4 text-sm">
-            <p className="font-semibold">Build {appVersion}</p>
-            <p className="mt-1 text-xs text-orbit-muted">Realtime session</p>
-            <p className={connected ? "mt-1 text-emerald-400" : "mt-1 text-rose-400"}>
-              {connected ? "Connected" : "Disconnected"}
-            </p>
-          </div>
         </aside>
 
         {/* ───── Main content area ───── */}
-        <main className="relative flex h-full flex-col overflow-hidden bg-gradient-to-b from-[#171b25] to-[#141822]">
-          <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#1b2030]/85 px-4 py-3 backdrop-blur">
+        <main className="relative flex h-full min-h-0 flex-col overflow-hidden bg-gradient-to-b from-[#171b25] to-[#141822]">
+          <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#1b2030]/85 px-3 py-2 backdrop-blur">
             <div className="flex items-center gap-3">
               <img src="logo.png" alt="Orbit Chat logo" className="h-7 w-7 rounded-lg ring-1 ring-white/20" />
               <div>
                 <p className="text-sm font-semibold text-orbit-text">Orbit Chat</p>
                 <p className="text-[11px] text-orbit-muted">Private by default</p>
+              </div>
+              <div className="ml-2 hidden items-center gap-2 md:flex">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-orbit-muted">Build {appVersion}</span>
+                <span className={`max-w-[340px] truncate rounded-full border px-2 py-1 text-[11px] ${realtimeBadge.className}`} title={realtimeBadge.label}>
+                  {realtimeBadge.label}
+                </span>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -1663,7 +2168,7 @@ function App() {
             </div>
           </header>
 
-          <section className="min-h-0 flex-1 overflow-y-auto">
+          <section className={`min-h-0 flex-1 ${mainView === "profile-settings" ? "overflow-y-auto" : "overflow-hidden"}`}>
             {mainView === "profile-settings" && token && user ? (
               <ProfileSettings
                 token={token}
@@ -1843,8 +2348,8 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="flex h-full flex-col">
-            <header className="flex items-center justify-between border-b border-white/10 bg-[#1b2030]/85 p-4 backdrop-blur">
+              <div className="flex h-full min-h-0 flex-col">
+            <header className="flex items-center justify-between border-b border-white/10 bg-[#1b2030]/85 px-4 py-2.5 backdrop-blur">
               <div>
                 <button
                   className="text-left text-base font-semibold text-orbit-text hover:underline"
@@ -1889,7 +2394,7 @@ function App() {
               </div>
             </header>
 
-            <section className="flex-1 space-y-3 overflow-y-auto p-4">
+            <section className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
               {messages.length === 0 && (
                 <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
               )}
@@ -1898,7 +2403,7 @@ function App() {
                 return (
                   <article
                     key={msg.id}
-                    className={`max-w-[80%] rounded-2xl border p-3 text-sm ${
+                    className={`max-w-[78%] rounded-xl border px-2.5 py-2 text-[13px] leading-snug ${
                       mine
                         ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
                         : "border-white/10 bg-[#202533]"
@@ -1925,12 +2430,12 @@ function App() {
               })}
             </section>
 
-            <footer className="border-t border-white/10 bg-[#1b2030]/90 p-4 backdrop-blur">
-              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0) && (
-                <div className="mb-3 flex flex-wrap gap-2">
+            <footer className="border-t border-white/10 bg-[#1b2030]/90 px-3 py-2 backdrop-blur">
+              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0) && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, idx) => (
-                    <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-text">
-                      {file.name}
+                    <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-text">
+                      📎 {file.name}
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
                         onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
@@ -1940,8 +2445,8 @@ function App() {
                     </span>
                   ))}
                   {pendingVideoLinks.map((link, idx) => (
-                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-orbit-panelAlt px-3 py-1 text-xs text-orbit-accent">
-                      {new URL(link).hostname}
+                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
+                      🎬 {new URL(link).hostname}
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
                         onClick={() => setPendingVideoLinks((prev) => prev.filter((_, i) => i !== idx))}
@@ -1950,10 +2455,21 @@ function App() {
                       </button>
                     </span>
                   ))}
+                  {pendingGifs.map((gif, idx) => (
+                    <span key={`${gif.url}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
+                      GIF
+                      <button
+                        className="text-orbit-muted hover:text-orbit-text"
+                        onClick={() => setPendingGifs((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
                 </div>
               )}
 
-              <div className="mb-3 flex gap-2">
+              <div className="mb-2 flex gap-1.5">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1961,27 +2477,171 @@ function App() {
                   className="hidden"
                   onChange={(event) => handleAttachFiles(event.target.files)}
                 />
-                <button className="orbit-btn px-3" onClick={() => fileInputRef.current?.click()}>
-                  Attach File
+                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Attach file">
+                  📎
+                </button>
+                <button
+                  ref={gifButtonRef}
+                  className={`orbit-btn h-8 px-2.5 text-xs ${showGifPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  onClick={() => {
+                    setShowGifPicker((prev) => !prev);
+                    setShowEmojiPicker(false);
+                    setGifActiveIndex(0);
+                  }}
+                  title="GIFs"
+                >
+                  GIF
+                </button>
+                <button
+                  ref={emojiButtonRef}
+                  className={`orbit-btn h-8 px-2.5 text-xs ${showEmojiPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  onClick={() => {
+                    setShowEmojiPicker((prev) => !prev);
+                    setShowGifPicker(false);
+                    setEmojiActiveIndex(0);
+                  }}
+                  title="Emoji"
+                >
+                  🙂
                 </button>
                 <input
-                  className="orbit-input flex-1 px-3"
+                  className="orbit-input h-8 flex-1 px-2.5 text-xs"
                   value={videoLinkDraft}
                   onChange={(event) => setVideoLinkDraft(event.target.value)}
-                  placeholder="Paste video link (YouTube, Vimeo, Loom)"
+                  placeholder="Video link"
                 />
-                <button className="orbit-btn px-3" onClick={handleAddVideoLink}>
-                  Add Link
+                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={handleAddVideoLink} title="Add video link">
+                  🎬
                 </button>
               </div>
+
+              {showGifPicker && (
+                <div ref={gifPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  <div className="mb-2 flex gap-1.5">
+                    <input
+                      className="orbit-input h-8 flex-1 px-2.5 text-xs"
+                      value={gifQuery}
+                      onChange={(event) => setGifQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (!gifResults.length) return;
+                        if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                          event.preventDefault();
+                          setGifActiveIndex((prev) => Math.min(prev + 1, gifResults.length - 1));
+                        } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setGifActiveIndex((prev) => Math.max(prev - 1, 0));
+                        } else if (event.key === "Enter") {
+                          event.preventDefault();
+                          const candidate = gifResults[gifActiveIndex];
+                          if (candidate) {
+                            handleAddGif(candidate);
+                          }
+                        }
+                      }}
+                      placeholder="Search GIFs"
+                    />
+                    <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => setShowGifPicker(false)}>
+                      Close
+                    </button>
+                  </div>
+                  {gifError && <p className="mb-2 text-xs text-rose-300">{gifError}</p>}
+                  {gifLoading ? (
+                    <p className="text-xs text-orbit-muted">Loading GIFs...</p>
+                  ) : (
+                    <div className="grid max-h-36 grid-cols-4 gap-1.5 overflow-y-auto pr-1">
+                      {gifResults.map((gif) => (
+                        <button
+                          key={gif.id}
+                          className={`overflow-hidden rounded-lg border hover:border-orbit-accent/40 ${gifResults[gifActiveIndex]?.id === gif.id ? "border-orbit-accent/70 ring-1 ring-orbit-accent/40" : "border-white/10"}`}
+                          onClick={() => handleAddGif(gif)}
+                          onFocus={() => {
+                            const index = gifResults.findIndex((item) => item.id === gif.id);
+                            if (index >= 0) setGifActiveIndex(index);
+                          }}
+                          title={gif.title || "GIF"}
+                        >
+                          <img src={gif.previewUrl} alt={gif.title || "GIF"} className="h-16 w-full object-cover" loading="lazy" />
+                        </button>
+                      ))}
+                      {!gifResults.length && (
+                        <p className="col-span-3 text-xs text-orbit-muted">No GIFs found for that search.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showEmojiPicker && (
+                <div ref={emojiPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  <div className="mb-2 flex gap-1.5">
+                    <input
+                      className="orbit-input h-8 flex-1 px-2.5 text-xs"
+                      value={emojiQuery}
+                      onChange={(event) => setEmojiQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (!filteredEmojis.length) return;
+                        if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                          event.preventDefault();
+                          setEmojiActiveIndex((prev) => Math.min(prev + 1, filteredEmojis.length - 1));
+                        } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setEmojiActiveIndex((prev) => Math.max(prev - 1, 0));
+                        } else if (event.key === "Enter") {
+                          event.preventDefault();
+                          const candidate = filteredEmojis[emojiActiveIndex];
+                          if (candidate) {
+                            handleInsertEmoji(candidate.value);
+                          }
+                        }
+                      }}
+                      placeholder="Search emoji"
+                    />
+                    <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => setShowEmojiPicker(false)}>
+                      Close
+                    </button>
+                  </div>
+                  {recentEmojis.length > 0 && !emojiQuery.trim() && (
+                    <div className="mb-2 flex flex-wrap gap-1">
+                      {recentEmojis.slice(0, 10).map((emoji) => (
+                        <button
+                          key={`recent:${emoji}`}
+                          className="rounded-md border border-white/10 px-2 py-1 text-lg hover:border-orbit-accent/40"
+                          onClick={() => handleInsertEmoji(emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid max-h-36 grid-cols-10 gap-1 overflow-y-auto pr-1">
+                    {filteredEmojis.map((item) => (
+                      <button
+                        key={item.value}
+                        className={`rounded-md border px-2 py-1 text-lg hover:border-orbit-accent/40 ${filteredEmojis[emojiActiveIndex]?.value === item.value ? "border-orbit-accent/70 ring-1 ring-orbit-accent/40" : "border-white/10"}`}
+                        onClick={() => handleInsertEmoji(item.value)}
+                        onFocus={() => {
+                          const index = filteredEmojis.findIndex((entry) => entry.value === item.value);
+                          if (index >= 0) setEmojiActiveIndex(index);
+                        }}
+                        title={item.tags.join(", ")}
+                      >
+                        {item.value}
+                      </button>
+                    ))}
+                    {!filteredEmojis.length && (
+                      <p className="col-span-8 text-xs text-orbit-muted">No emoji matched that search.</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {messageSendError && (
                 <p className="mb-2 text-xs text-rose-300">{messageSendError}</p>
               )}
 
-              <div className="flex gap-3">
+              <div className="flex gap-1.5">
                 <input
-                  className="orbit-input flex-1 px-4"
+                  className="orbit-input h-9 flex-1 px-3 text-sm"
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -1993,7 +2653,7 @@ function App() {
                   placeholder="Type message..."
                 />
                 <button
-                  className="orbit-btn-primary px-5"
+                  className="orbit-btn-primary h-9 px-3 text-xs"
                   onClick={() => void handleSendMessage()}
                 >
                   Send
@@ -2018,13 +2678,13 @@ function App() {
                 aria-modal="true"
                 aria-label="Chat settings"
               >
-                <div className="mb-4 flex items-start justify-between gap-4">
+                <div className="mb-3 flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-lg font-bold text-orbit-text">Chat Settings</h3>
-                    <p className="mt-1 text-xs text-orbit-muted">Manage lock and passcode for @{selectedConversationLabel}</p>
+                    <h3 className="text-base font-bold text-orbit-text">Chat Settings</h3>
+                    <p className="mt-1 text-xs text-orbit-muted">Customize this chat: display name, lock mode, and passcode.</p>
                   </div>
                   <button
-                    className="orbit-btn px-3 py-2 text-xs"
+                    className="orbit-btn px-2.5 py-1.5 text-xs"
                     onClick={() => setShowChatSettings(false)}
                     disabled={chatSettingsSaving}
                   >
@@ -2038,32 +2698,37 @@ function App() {
                   </div>
                 )}
 
-                <div className="space-y-4">
-                  <label className="block">
-                    <span className="orbit-label">Chat display name (optional)</span>
-                    <input
-                      className="orbit-input"
-                      value={chatSettingsName}
-                      onChange={(e) => setChatSettingsName(e.target.value)}
-                      placeholder="Leave blank to use @username#chatId"
-                      maxLength={64}
-                    />
-                    <span className="mt-1 block text-[11px] text-orbit-muted">Use a unique name to avoid needing the fallback chat ID.</span>
-                  </label>
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Identity</p>
+                    <label className="block">
+                      <span className="orbit-label">Chat display name (optional)</span>
+                      <input
+                        className="orbit-input"
+                        value={chatSettingsName}
+                        onChange={(e) => setChatSettingsName(e.target.value)}
+                        placeholder="Leave blank to use @username#chatId"
+                        maxLength={64}
+                      />
+                      <span className="mt-1 block text-[11px] text-orbit-muted">Use a unique name for easier chat switching.</span>
+                    </label>
+                  </div>
 
-                  <label className="block">
-                    <span className="orbit-label">New passcode (optional)</span>
-                    <input
-                      className="orbit-input font-mono tracking-[0.26em]"
-                      value={chatSettingsPasscode}
-                      onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      placeholder={"•".repeat(chatSettingsLength)}
-                      maxLength={6}
-                    />
-                    <span className="mt-1 block text-[11px] text-orbit-muted">Leave blank to keep the current passcode.</span>
-                  </label>
+                  <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Lock and Passcode</p>
+                    <label className="block">
+                      <span className="orbit-label">New passcode (optional)</span>
+                      <input
+                        className="orbit-input font-mono tracking-[0.24em]"
+                        value={chatSettingsPasscode}
+                        onChange={(e) => setChatSettingsPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        placeholder={"•".repeat(chatSettingsLength)}
+                        maxLength={6}
+                      />
+                      <span className="mt-1 block text-[11px] text-orbit-muted">Leave blank to keep current passcode.</span>
+                    </label>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <label className="block">
                       <span className="orbit-label">Passcode length</span>
                       <input
@@ -2092,29 +2757,44 @@ function App() {
                   </div>
 
                   {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
-                    <label className="block">
-                      <span className="orbit-label">Lock timeout in seconds</span>
-                      <input
-                        type="number"
-                        className="orbit-input"
-                        min={10}
-                        value={chatSettingsTimeout}
-                        onChange={(e) => setChatSettingsTimeout(e.target.value)}
-                        placeholder="300"
-                      />
-                    </label>
+                    <div className="mt-3 space-y-2">
+                      <label className="block">
+                        <span className="orbit-label">Lock timeout in seconds</span>
+                        <input
+                          type="number"
+                          className="orbit-input"
+                          min={10}
+                          value={chatSettingsTimeout}
+                          onChange={(e) => setChatSettingsTimeout(e.target.value)}
+                          placeholder="300"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[30, 60, 300, 900].map((seconds) => (
+                          <button
+                            key={seconds}
+                            type="button"
+                            className="orbit-btn px-2 py-1 text-[11px]"
+                            onClick={() => setChatSettingsTimeout(String(seconds))}
+                          >
+                            {seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
+                  </div>
 
-                  <div className="flex justify-end gap-3 pt-1">
+                  <div className="flex justify-end gap-2 pt-1">
                     <button
-                      className="orbit-btn px-4 py-2.5"
+                      className="orbit-btn px-3 py-2"
                       onClick={() => setShowChatSettings(false)}
                       disabled={chatSettingsSaving}
                     >
                       Cancel
                     </button>
                     <button
-                      className="orbit-btn-primary px-5 py-2.5"
+                      className="orbit-btn-primary px-4 py-2"
                       disabled={chatSettingsSaving}
                       onClick={async () => {
                         if (!token) return;
@@ -2155,9 +2835,9 @@ function App() {
         <UserProfilePopover
           open={Boolean(profilePopoverUserId)}
           anchorRect={profilePopoverAnchor}
-          profile={profilePopoverUserId ? profiles.byId[profilePopoverUserId] ?? null : null}
-          loading={profilePopoverUserId ? profiles.loadingById[profilePopoverUserId] ?? false : false}
-          error={profilePopoverUserId ? profiles.errorById[profilePopoverUserId] ?? null : null}
+          profile={profilePopoverUserId ? profileById[profilePopoverUserId] ?? null : null}
+          loading={profilePopoverUserId ? profileLoadingById[profilePopoverUserId] ?? false : false}
+          error={profilePopoverUserId ? profileErrorById[profilePopoverUserId] ?? null : null}
           onClose={closeProfilePopover}
           canEdit={Boolean(user && profilePopoverUserId && user.id === profilePopoverUserId)}
           onEditClick={() => {
