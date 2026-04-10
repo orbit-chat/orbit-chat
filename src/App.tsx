@@ -542,6 +542,8 @@ function App() {
     loading: false,
     error: null,
   });
+  const [groupMemberSearch, setGroupMemberSearch] = useState("");
+  const [addMemberSearch, setAddMemberSearch] = useState("");
 
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -627,6 +629,22 @@ function App() {
     () => sortedConversations.filter((conversation) => conversation.type === "group"),
     [sortedConversations],
   );
+
+  const filteredGroupCreationFriends = useMemo(() => {
+    const query = groupMemberSearch.trim().toLowerCase();
+    if (!query) return friends;
+    return friends.filter((friend) => friend.user.username.toLowerCase().includes(query));
+  }, [friends, groupMemberSearch]);
+
+  const filteredAddMembersFriends = useMemo(() => {
+    const query = addMemberSearch.trim().toLowerCase();
+    const currentMemberIds = new Set(selectedConversation?.members.map((m) => m.userId) ?? []);
+    return friends.filter((friend) => {
+      if (currentMemberIds.has(friend.user.id)) return false;
+      if (!query) return true;
+      return friend.user.username.toLowerCase().includes(query);
+    });
+  }, [friends, addMemberSearch, selectedConversation]);
 
   const hasUnreadDm = useMemo(() => {
     return conversations.some((conv) => {
@@ -1693,6 +1711,7 @@ function App() {
             }`}
             onContextMenu={(e) => ctxMenu.show(e, buildConvContextMenuItems(conv))}
             onClick={() => {
+              setNavTab(conv.type === "dm" ? "dm" : "groups");
               const deferred = deferredPasscodes[conv.id];
               if (deferred) {
                 setPendingChatPasscode({ conversationId: conv.id, ...deferred });
@@ -1883,6 +1902,7 @@ function App() {
         loading: false,
         error: null,
       });
+      setGroupMemberSearch("");
     } catch (err: any) {
       setGroupCreationModal((prev) => ({
         ...prev,
@@ -1962,6 +1982,7 @@ function App() {
         loading: false,
         error: null,
       });
+      setAddMemberSearch("");
     } catch (err: any) {
       setAddMembersModal((prev) => ({
         ...prev,
@@ -2568,13 +2589,6 @@ function App() {
                   })}
                 </div>
               )}
-
-              <button
-                className="orbit-btn-primary mt-4 w-full px-3 py-2 text-xs font-semibold"
-                onClick={() => setGroupCreationModal((prev) => ({ ...prev, open: true }))}
-              >
-                Create Group Chat
-              </button>
 
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Direct messages</p>
@@ -3838,6 +3852,7 @@ function App() {
                       <button
                         className="orbit-btn w-full px-3 py-2 text-xs"
                         onClick={() => {
+                          setAddMemberSearch("");
                           setAddMembersModal((prev) => ({
                             ...prev,
                             open: true,
@@ -3935,6 +3950,7 @@ function App() {
                   groupName: "",
                   error: null,
                 }));
+                setGroupMemberSearch("");
               }
             }}
           >
@@ -3966,11 +3982,19 @@ function App() {
 
               <div className="mt-4">
                 <p className="mb-2 text-xs font-semibold text-slate-400">Select members ({groupCreationModal.selectedMemberIds.size})</p>
-                <div className="max-h-48 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                <input
+                  className="orbit-input mb-2"
+                  placeholder="Search members..."
+                  value={groupMemberSearch}
+                  onChange={(e) => setGroupMemberSearch(e.target.value)}
+                />
+                <div className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
                   {friends.length === 0 ? (
                     <p className="text-center text-xs text-orbit-muted">No friends to add yet. Add some friends first.</p>
+                  ) : filteredGroupCreationFriends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No members match that search.</p>
                   ) : (
-                    friends.map((friend) => {
+                    filteredGroupCreationFriends.map((friend) => {
                       const isSelected = groupCreationModal.selectedMemberIds.has(friend.user.id);
                       const avatarUrl = friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl ?? null;
                       return (
@@ -4027,6 +4051,7 @@ function App() {
                       groupName: "",
                       error: null,
                     }));
+                    setGroupMemberSearch("");
                   }}
                 >
                   Cancel
@@ -4056,6 +4081,7 @@ function App() {
                   selectedMemberIds: new Set(),
                   error: null,
                 }));
+                setAddMemberSearch("");
               }
             }}
           >
@@ -4076,16 +4102,21 @@ function App() {
 
               <div className="mt-4">
                 <p className="mb-2 text-xs font-semibold text-slate-400">Select members to invite ({addMembersModal.selectedMemberIds.size})</p>
-                <div className="max-h-48 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                <input
+                  className="orbit-input mb-2"
+                  placeholder="Search members..."
+                  value={addMemberSearch}
+                  onChange={(e) => setAddMemberSearch(e.target.value)}
+                />
+                <div className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
                   {friends.length === 0 ? (
                     <p className="text-center text-xs text-orbit-muted">No friends available.</p>
+                  ) : filteredAddMembersFriends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No members match that search.</p>
                   ) : (
-                    friends.map((friend) => {
+                    filteredAddMembersFriends.map((friend) => {
                       const isSelected = addMembersModal.selectedMemberIds.has(friend.user.id);
-                      const isAlreadyMember = selectedConversation?.members.some((m) => m.userId === friend.user.id);
                       const avatarUrl = friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl ?? null;
-
-                      if (isAlreadyMember) return null; // Skip if already in group
 
                       return (
                         <label
@@ -4141,6 +4172,7 @@ function App() {
                       selectedMemberIds: new Set(),
                       error: null,
                     }));
+                    setAddMemberSearch("");
                   }}
                 >
                   Cancel
