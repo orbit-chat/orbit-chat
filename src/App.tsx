@@ -457,8 +457,11 @@ function App() {
   const [emojiActiveIndex, setEmojiActiveIndex] = useState(0);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
   const gifPickerRef = useRef<HTMLDivElement | null>(null);
+  const gifSearchInputRef = useRef<HTMLInputElement | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const emojiSearchInputRef = useRef<HTMLInputElement | null>(null);
   const gifButtonRef = useRef<HTMLButtonElement | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
@@ -968,6 +971,65 @@ function App() {
     };
   }, [showEmojiPicker, showGifPicker]);
 
+  useEffect(() => {
+    if (!user || mainView !== "chat" || navTab !== "dm") return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+
+      const target = event.target as HTMLElement | null;
+      const isEditable = Boolean(
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable),
+      );
+
+      const key = event.key.toLowerCase();
+      const canCompose = Boolean(selectedConversation && !showChatSettings);
+
+      if (key === "i" && canCompose) {
+        event.preventDefault();
+        fileInputRef.current?.click();
+        return;
+      }
+
+      if (key === "g" && canCompose) {
+        event.preventDefault();
+        setShowGifPicker((prev) => {
+          const next = !prev;
+          if (next) {
+            setShowEmojiPicker(false);
+            setGifActiveIndex(0);
+            requestAnimationFrame(() => gifSearchInputRef.current?.focus());
+          }
+          return next;
+        });
+        return;
+      }
+
+      if (key === "e" && canCompose) {
+        event.preventDefault();
+        setShowEmojiPicker((prev) => {
+          const next = !prev;
+          if (next) {
+            setShowGifPicker(false);
+            setEmojiActiveIndex(0);
+            requestAnimationFrame(() => emojiSearchInputRef.current?.focus());
+          }
+          return next;
+        });
+        return;
+      }
+
+      if (key === "/" && canCompose && !isEditable) {
+        event.preventDefault();
+        messageInputRef.current?.focus();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [user, mainView, navTab, selectedConversation, showChatSettings]);
+
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -1260,6 +1322,30 @@ function App() {
       return next;
     });
     setShowEmojiPicker(false);
+  }, []);
+
+  const toggleGifPicker = useCallback(() => {
+    setShowGifPicker((prev) => {
+      const next = !prev;
+      if (next) {
+        setShowEmojiPicker(false);
+        setGifActiveIndex(0);
+        requestAnimationFrame(() => gifSearchInputRef.current?.focus());
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleEmojiPicker = useCallback(() => {
+    setShowEmojiPicker((prev) => {
+      const next = !prev;
+      if (next) {
+        setShowGifPicker(false);
+        setEmojiActiveIndex(0);
+        requestAnimationFrame(() => emojiSearchInputRef.current?.focus());
+      }
+      return next;
+    });
   }, []);
 
   const filteredEmojis = useMemo(() => {
@@ -2808,11 +2894,7 @@ function App() {
                 <button
                   ref={gifButtonRef}
                   className={`orbit-btn h-8 px-2.5 text-xs ${showGifPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
-                  onClick={() => {
-                    setShowGifPicker((prev) => !prev);
-                    setShowEmojiPicker(false);
-                    setGifActiveIndex(0);
-                  }}
+                  onClick={toggleGifPicker}
                   title="GIFs"
                 >
                   <span className="inline-flex items-center gap-1">
@@ -2832,11 +2914,7 @@ function App() {
                 <button
                   ref={emojiButtonRef}
                   className={`orbit-btn h-8 px-2.5 text-xs ${showEmojiPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
-                  onClick={() => {
-                    setShowEmojiPicker((prev) => !prev);
-                    setShowGifPicker(false);
-                    setEmojiActiveIndex(0);
-                  }}
+                  onClick={toggleEmojiPicker}
                   title="Emoji"
                 >
                   <span className="inline-flex items-center gap-1">
@@ -2851,21 +2929,40 @@ function App() {
                 </button>
               </div>
 
+              <p className="mb-2 text-[10px] text-orbit-muted">
+                Shortcuts: Cmd/Ctrl+I attach image, Cmd/Ctrl+G GIF picker, Cmd/Ctrl+E emoji picker, Cmd/Ctrl+/ focus message.
+              </p>
+
               {showGifPicker && (
                 <div ref={gifPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
                   <div className="mb-2 flex gap-1.5">
                     <input
+                      ref={gifSearchInputRef}
                       className="orbit-input h-8 flex-1 px-2.5 text-xs"
                       value={gifQuery}
                       onChange={(event) => setGifQuery(event.target.value)}
                       onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setShowGifPicker(false);
+                          messageInputRef.current?.focus();
+                          return;
+                        }
                         if (!gifResults.length) return;
                         if (event.key === "ArrowRight" || event.key === "ArrowDown") {
                           event.preventDefault();
-                          setGifActiveIndex((prev) => Math.min(prev + 1, gifResults.length - 1));
+                          setGifActiveIndex((prev) => (prev + 1) % gifResults.length);
                         } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
                           event.preventDefault();
-                          setGifActiveIndex((prev) => Math.max(prev - 1, 0));
+                          setGifActiveIndex((prev) => (prev - 1 + gifResults.length) % gifResults.length);
+                        } else if (event.key === "Tab") {
+                          event.preventDefault();
+                          setGifActiveIndex((prev) => {
+                            if (event.shiftKey) {
+                              return (prev - 1 + gifResults.length) % gifResults.length;
+                            }
+                            return (prev + 1) % gifResults.length;
+                          });
                         } else if (event.key === "Enter") {
                           event.preventDefault();
                           const candidate = gifResults[gifActiveIndex];
@@ -2911,17 +3008,32 @@ function App() {
                 <div ref={emojiPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
                   <div className="mb-2 flex gap-1.5">
                     <input
+                      ref={emojiSearchInputRef}
                       className="orbit-input h-8 flex-1 px-2.5 text-xs"
                       value={emojiQuery}
                       onChange={(event) => setEmojiQuery(event.target.value)}
                       onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setShowEmojiPicker(false);
+                          messageInputRef.current?.focus();
+                          return;
+                        }
                         if (!filteredEmojis.length) return;
                         if (event.key === "ArrowRight" || event.key === "ArrowDown") {
                           event.preventDefault();
-                          setEmojiActiveIndex((prev) => Math.min(prev + 1, filteredEmojis.length - 1));
+                          setEmojiActiveIndex((prev) => (prev + 1) % filteredEmojis.length);
                         } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
                           event.preventDefault();
-                          setEmojiActiveIndex((prev) => Math.max(prev - 1, 0));
+                          setEmojiActiveIndex((prev) => (prev - 1 + filteredEmojis.length) % filteredEmojis.length);
+                        } else if (event.key === "Tab") {
+                          event.preventDefault();
+                          setEmojiActiveIndex((prev) => {
+                            if (event.shiftKey) {
+                              return (prev - 1 + filteredEmojis.length) % filteredEmojis.length;
+                            }
+                            return (prev + 1) % filteredEmojis.length;
+                          });
                         } else if (event.key === "Enter") {
                           event.preventDefault();
                           const candidate = filteredEmojis[emojiActiveIndex];
@@ -2977,6 +3089,7 @@ function App() {
 
               <div className="flex gap-1.5">
                 <input
+                  ref={messageInputRef}
                   className="orbit-input h-9 flex-1 px-3 text-sm"
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}

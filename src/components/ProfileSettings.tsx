@@ -278,6 +278,36 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
             </div>
 
             <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Keybinds</p>
+                <p className="mt-1 text-[11px] text-orbit-muted">Quick shortcuts available in the chat composer.</p>
+              </div>
+
+              <div className="mt-3 space-y-2 text-xs text-slate-200">
+                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-orbit-panel px-2.5 py-2">
+                  <span>Attach image</span>
+                  <span className="font-mono text-[11px] text-orbit-muted">Cmd/Ctrl + I</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-orbit-panel px-2.5 py-2">
+                  <span>Open GIF picker</span>
+                  <span className="font-mono text-[11px] text-orbit-muted">Cmd/Ctrl + G</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-orbit-panel px-2.5 py-2">
+                  <span>Open emoji picker</span>
+                  <span className="font-mono text-[11px] text-orbit-muted">Cmd/Ctrl + E</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-orbit-panel px-2.5 py-2">
+                  <span>Focus message input</span>
+                  <span className="font-mono text-[11px] text-orbit-muted">Cmd/Ctrl + /</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-orbit-panel px-2.5 py-2">
+                  <span>Send message</span>
+                  <span className="font-mono text-[11px] text-orbit-muted">Enter</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Links</p>
                 <button
