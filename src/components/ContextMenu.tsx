@@ -52,13 +52,15 @@ export function ContextMenuPortal({
       if (e.key === "Escape") onClose();
     };
     const handleClick = () => onClose();
+    const handleContextMenu = () => onClose();
     window.addEventListener("keydown", handleKey);
-    window.addEventListener("click", handleClick, true);
-    window.addEventListener("contextmenu", handleClick, true);
+    // Use bubble phase so stopPropagation on the menu container prevents closing
+    window.addEventListener("click", handleClick);
+    window.addEventListener("contextmenu", handleContextMenu, true);
     return () => {
       window.removeEventListener("keydown", handleKey);
-      window.removeEventListener("click", handleClick, true);
-      window.removeEventListener("contextmenu", handleClick, true);
+      window.removeEventListener("click", handleClick);
+      window.removeEventListener("contextmenu", handleContextMenu, true);
     };
   }, [menu, onClose]);
 
