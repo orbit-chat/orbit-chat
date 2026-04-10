@@ -36,10 +36,16 @@ type E2EEState = {
   getConversationSecretKey: (conversationId: string) => string | null;
   getConversationSecretKeyForVersion: (conversationId: string, keyVersion?: number | null) => string | null;
   getConversationKeyVersion: (conversationId: string) => number | null;
+  setConversationSecretKeyVersion: (params: {
+    conversationId: string;
+    keyVersion: number;
+    secretKey: string;
+  }) => void;
   ensureConversationSecretKey: (params: {
     conversation: api.Conversation;
     token: string;
     myUserId: string;
+    forceRefresh?: boolean;
   }) => Promise<string | null>;
 };
 
@@ -81,13 +87,34 @@ export const useE2EEStore = create<E2EEState>((set, get) => ({
     if (typeof keyVersion === "number" && byVersion[keyVersion]) {
       return byVersion[keyVersion];
     }
+    if (typeof keyVersion === "number") {
+      return null;
+    }
     return get().secretKeyByConversationId[conversationId] ?? null;
   },
   getConversationKeyVersion: (conversationId) => get().keyVersionByConversationId[conversationId] ?? null,
+  setConversationSecretKeyVersion: ({ conversationId, keyVersion, secretKey }) => {
+    set({
+      secretKeyByConversationId: { ...get().secretKeyByConversationId, [conversationId]: secretKey },
+      secretKeyByConversationIdAndVersion: {
+        ...get().secretKeyByConversationIdAndVersion,
+        [conversationId]: {
+          ...(get().secretKeyByConversationIdAndVersion[conversationId] ?? {}),
+          [keyVersion]: secretKey,
+        },
+      },
+      keyVersionByConversationId: {
+        ...get().keyVersionByConversationId,
+        [conversationId]: keyVersion,
+      },
+      errorByConversationId: { ...get().errorByConversationId, [conversationId]: null },
+      loadingByConversationId: { ...get().loadingByConversationId, [conversationId]: false },
+    });
+  },
 
-  ensureConversationSecretKey: async ({ conversation, token, myUserId }) => {
+  ensureConversationSecretKey: async ({ conversation, token, myUserId, forceRefresh }) => {
     const cached = get().secretKeyByConversationId[conversation.id];
-    if (cached) return cached;
+    if (cached && !forceRefresh) return cached;
 
     const pending = conversationKeyLoadInFlight.get(conversation.id);
     if (pending) {

@@ -69,11 +69,6 @@ type UploadedAttachment = {
   encryptedSha256?: string;
 };
 
-type VideoLinkAttachment = {
-  kind: "video_link";
-  url: string;
-};
-
 type GifLinkAttachment = {
   kind: "gif_link";
   url: string;
@@ -81,22 +76,12 @@ type GifLinkAttachment = {
   title?: string;
 };
 
-type MessageAttachment = UploadedAttachment | VideoLinkAttachment | GifLinkAttachment;
+type MessageAttachment = UploadedAttachment | GifLinkAttachment;
 
 type MessageEnvelope = {
   text?: string;
   attachments?: MessageAttachment[];
 };
-
-const VIDEO_ALLOWED_HOSTS = new Set([
-  "youtube.com",
-  "www.youtube.com",
-  "youtu.be",
-  "vimeo.com",
-  "www.vimeo.com",
-  "loom.com",
-  "www.loom.com",
-]);
 
 const GIPHY_API_KEY = (import.meta.env.VITE_GIPHY_API_KEY ?? "dc6zaTOxFJmzC").trim();
 const GIF_SEARCH_LIMIT = 18;
@@ -247,17 +232,6 @@ type GifSearchResult = {
   gifUrl: string;
   previewUrl: string;
 };
-
-function normalizeVideoUrl(input: string) {
-  try {
-    const url = new URL(input.trim());
-    if (url.protocol !== "https:") return null;
-    if (!VIDEO_ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
 
 function normalizeGifUrl(input: string) {
   try {
@@ -422,21 +396,6 @@ function DecryptedMessageBody(props: {
     <div className="mt-1 space-y-2">
       {(envelope?.text ?? legacyText) && <p className="break-words text-orbit-text">{envelope?.text ?? legacyText}</p>}
       {(envelope?.attachments ?? []).map((attachment, idx) => {
-        if (attachment.kind === "video_link") {
-          const safeUrl = normalizeVideoUrl(attachment.url);
-          if (!safeUrl) return null;
-          return (
-            <a
-              key={`${safeUrl}:${idx}`}
-              href={safeUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="block rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-xs text-orbit-accent hover:border-orbit-accent/40"
-            >
-              Video link: {new URL(safeUrl).hostname}
-            </a>
-          );
-        }
         if (attachment.kind === "gif_link") {
           const safeUrl = normalizeGifUrl(attachment.url);
           if (!safeUrl) return null;
@@ -477,7 +436,7 @@ function App() {
   const [authMode, setAuthMode] = useState<"login" | "signup" | "recovery">("login");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
-  const [navTab, setNavTab] = useState<"dm" | "friends" | "archive">("dm");
+  const [navTab, setNavTab] = useState<"home" | "dm" | "groups" | "friends" | "archive">("home");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -485,8 +444,6 @@ function App() {
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [videoLinkDraft, setVideoLinkDraft] = useState("");
-  const [pendingVideoLinks, setPendingVideoLinks] = useState<string[]>([]);
   const [pendingGifs, setPendingGifs] = useState<GifLinkAttachment[]>([]);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [gifQuery, setGifQuery] = useState("");
@@ -500,8 +457,11 @@ function App() {
   const [emojiActiveIndex, setEmojiActiveIndex] = useState(0);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
   const gifPickerRef = useRef<HTMLDivElement | null>(null);
+  const gifSearchInputRef = useRef<HTMLInputElement | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const emojiSearchInputRef = useRef<HTMLInputElement | null>(null);
   const gifButtonRef = useRef<HTMLButtonElement | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
@@ -553,6 +513,38 @@ function App() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Group creation modal
+  const [groupCreationModal, setGroupCreationModal] = useState<{
+    open: boolean;
+    selectedMemberIds: Set<string>;
+    groupName: string;
+    loading: boolean;
+    error: string | null;
+  }>({
+    open: false,
+    selectedMemberIds: new Set(),
+    groupName: "",
+    loading: false,
+    error: null,
+  });
+
+  // Add members to group modal
+  const [addMembersModal, setAddMembersModal] = useState<{
+    open: boolean;
+    conversationId: string | null;
+    selectedMemberIds: Set<string>;
+    loading: boolean;
+    error: string | null;
+  }>({
+    open: false,
+    conversationId: null,
+    selectedMemberIds: new Set(),
+    loading: false,
+    error: null,
+  });
+  const [groupMemberSearch, setGroupMemberSearch] = useState("");
+  const [addMemberSearch, setAddMemberSearch] = useState("");
+
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -575,6 +567,7 @@ function App() {
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
   const getConversationKeyVersion = useE2EEStore((state) => state.getConversationKeyVersion);
+  const setConversationSecretKeyVersion = useE2EEStore((state) => state.setConversationSecretKeyVersion);
   const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
 
   const chatLock = useChatLockStore();
@@ -605,6 +598,11 @@ function App() {
     [byConversation, selectedConvId]
   );
 
+  const myMinReadableKeyVersion = useMemo(() => {
+    if (!selectedConversation || !user) return 1;
+    return selectedConversation.members.find((m) => m.userId === user.id)?.minReadableKeyVersion ?? 1;
+  }, [selectedConversation, user]);
+
   const sortedConversations = useMemo(() => {
     const getConversationLastActivity = (conversation: Conversation) => {
       const convoMessages = byConversation[conversation.id] ?? [];
@@ -621,6 +619,32 @@ function App() {
   const archivedConversations = useMemo(() => {
     return conversations.filter((c) => archivedConvIds.has(c.id));
   }, [conversations, archivedConvIds]);
+
+  const directConversations = useMemo(
+    () => sortedConversations.filter((conversation) => conversation.type === "dm"),
+    [sortedConversations],
+  );
+
+  const groupConversations = useMemo(
+    () => sortedConversations.filter((conversation) => conversation.type === "group"),
+    [sortedConversations],
+  );
+
+  const filteredGroupCreationFriends = useMemo(() => {
+    const query = groupMemberSearch.trim().toLowerCase();
+    if (!query) return friends;
+    return friends.filter((friend) => friend.user.username.toLowerCase().includes(query));
+  }, [friends, groupMemberSearch]);
+
+  const filteredAddMembersFriends = useMemo(() => {
+    const query = addMemberSearch.trim().toLowerCase();
+    const currentMemberIds = new Set(selectedConversation?.members.map((m) => m.userId) ?? []);
+    return friends.filter((friend) => {
+      if (currentMemberIds.has(friend.user.id)) return false;
+      if (!query) return true;
+      return friend.user.username.toLowerCase().includes(query);
+    });
+  }, [friends, addMemberSearch, selectedConversation]);
 
   const hasUnreadDm = useMemo(() => {
     return conversations.some((conv) => {
@@ -938,7 +962,7 @@ function App() {
   }, [token, conversations, friends, friendRequests.incoming, friendRequests.outgoing, searchResults, profileById, fetchProfile]);
 
   useEffect(() => {
-    if (navTab !== "dm") {
+    if (navTab !== "home" && navTab !== "dm" && navTab !== "groups") {
       setActiveConversation(null);
       return;
     }
@@ -947,9 +971,7 @@ function App() {
 
   useEffect(() => {
     setPendingFiles([]);
-    setPendingVideoLinks([]);
     setPendingGifs([]);
-    setVideoLinkDraft("");
     setShowGifPicker(false);
     setGifQuery("");
     setGifResults([]);
@@ -1013,6 +1035,65 @@ function App() {
     };
   }, [showEmojiPicker, showGifPicker]);
 
+  useEffect(() => {
+    if (!user || mainView !== "chat" || navTab !== "dm") return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+
+      const target = event.target as HTMLElement | null;
+      const isEditable = Boolean(
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable),
+      );
+
+      const key = event.key.toLowerCase();
+      const canCompose = Boolean(selectedConversation && !showChatSettings);
+
+      if (key === "i" && canCompose) {
+        event.preventDefault();
+        fileInputRef.current?.click();
+        return;
+      }
+
+      if (key === "g" && canCompose) {
+        event.preventDefault();
+        setShowGifPicker((prev) => {
+          const next = !prev;
+          if (next) {
+            setShowEmojiPicker(false);
+            setGifActiveIndex(0);
+            requestAnimationFrame(() => gifSearchInputRef.current?.focus());
+          }
+          return next;
+        });
+        return;
+      }
+
+      if (key === "e" && canCompose) {
+        event.preventDefault();
+        setShowEmojiPicker((prev) => {
+          const next = !prev;
+          if (next) {
+            setShowGifPicker(false);
+            setEmojiActiveIndex(0);
+            requestAnimationFrame(() => emojiSearchInputRef.current?.focus());
+          }
+          return next;
+        });
+        return;
+      }
+
+      if (key === "/" && canCompose && !isEditable) {
+        event.preventDefault();
+        messageInputRef.current?.focus();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [user, mainView, navTab, selectedConversation, showChatSettings]);
+
   /* ───── Load messages when selecting a conversation ───── */
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -1054,10 +1135,23 @@ function App() {
   useEffect(() => {
     if (!socket || !token) return;
 
-    const handleNewMessage = (data: { conversationId: string }) => {
-      const exists = conversationsRef.current.some((conv) => conv.id === data.conversationId);
-      if (!exists) {
+    const handleNewMessage = (data: { conversationId: string; keyVersion?: number }) => {
+      const existingConv = conversationsRef.current.find((conv) => conv.id === data.conversationId);
+      if (!existingConv) {
         void loadConversations();
+        return;
+      }
+
+      if (typeof data.keyVersion === "number") {
+        const currentVersion = getConversationKeyVersion(data.conversationId) ?? 1;
+        if (data.keyVersion > currentVersion && user) {
+          void ensureConversationSecretKey({
+            conversation: existingConv,
+            token,
+            myUserId: user.id,
+            forceRefresh: true,
+          });
+        }
       }
     };
 
@@ -1065,7 +1159,7 @@ function App() {
     return () => {
       socket.off("new_message", handleNewMessage);
     };
-  }, [socket, token, loadConversations]);
+  }, [socket, token, loadConversations, ensureConversationSecretKey, getConversationKeyVersion, user]);
 
   /* ───── Handle conversation_created: show passcode to recipient ───── */
   useEffect(() => {
@@ -1160,11 +1254,31 @@ function App() {
     };
   }, [socket, user, selectedConvId, loadFriendsData]);
 
-  /* ───── Handle member_left: someone left a group chat ───── */
+  /* ───── Handle member_removed: current user removed from a group ───── */
   useEffect(() => {
     if (!socket) return;
 
+    const handleMemberRemoved = (data: { conversationId: string; removedByUserId: string }) => {
+      setConversations((prev) => prev.filter((c) => c.id !== data.conversationId));
+      if (selectedConvId === data.conversationId) {
+        setSelectedConvId(null);
+        setShowChatSettings(false);
+      }
+    };
+
+    socket.on("member_removed", handleMemberRemoved);
+    return () => {
+      socket.off("member_removed", handleMemberRemoved);
+    };
+  }, [socket, selectedConvId]);
+
+  /* ───── Handle member_left: someone left a group chat ───── */
+  useEffect(() => {
+    if (!socket || !token || !user) return;
+
     const handleMemberLeft = (data: { conversationId: string; userId: string; messagesWiped: boolean }) => {
+      const existingConv = conversationsRef.current.find((c) => c.id === data.conversationId);
+
       // Update the conversation member list
       setConversations((prev) =>
         prev.map((c) => {
@@ -1172,18 +1286,62 @@ function App() {
           return { ...c, members: c.members.filter((m) => m.userId !== data.userId) };
         })
       );
+
+      if (existingConv) {
+        void ensureConversationSecretKey({
+          conversation: existingConv,
+          token,
+          myUserId: user.id,
+          forceRefresh: true,
+        });
+      }
     };
 
     socket.on("member_left", handleMemberLeft);
     return () => {
       socket.off("member_left", handleMemberLeft);
     };
-  }, [socket]);
+  }, [socket, token, user, ensureConversationSecretKey]);
 
-  /* ───── Ensure conversation secret key for DMs ───── */
+  /* ───── Handle member_added: new member joined group chat ───── */
+  useEffect(() => {
+    if (!socket || !user || !token) return;
+
+    const handleMemberAdded = (data: { conversation: Conversation; passcode: string | null; addedByUserId: string }) => {
+      // Update the conversation with new members list
+      setConversations((prev) => {
+        const withoutDup = prev.filter((c) => c.id !== data.conversation.id);
+        return [data.conversation, ...withoutDup];
+      });
+
+      void ensureConversationSecretKey({
+        conversation: data.conversation,
+        token,
+        myUserId: user.id,
+        forceRefresh: true,
+      });
+
+      // If there's a passcode and I wasn't the one who added the members, show it
+      if (data.passcode && data.addedByUserId !== user.id) {
+        const label = data.conversation.name?.trim()
+          ? data.conversation.name.trim()
+          : `Group#${data.conversation.id.slice(0, 4)}`;
+        setDeferredPasscodes((prev) => ({
+          ...prev,
+          [data.conversation.id]: { passcode: data.passcode!, label },
+        }));
+      }
+    };
+
+    socket.on("member_added", handleMemberAdded);
+    return () => {
+      socket.off("member_added", handleMemberAdded);
+    };
+  }, [socket, user, token, ensureConversationSecretKey]);
+
+  /* ───── Ensure conversation secret key for selected conversation ───── */
   useEffect(() => {
     if (!token || !user || !selectedConversation) return;
-    if (selectedConversation.type !== "dm") return;
     ensureConversationSecretKey({ conversation: selectedConversation, token, myUserId: user.id });
   }, [token, user?.id, selectedConversation, ensureConversationSecretKey]);
 
@@ -1280,8 +1438,8 @@ function App() {
   }, [gifQuery, showGifPicker]);
 
   const handleAddGif = useCallback((gif: GifSearchResult) => {
-    setPendingGifs((prev) => [
-      ...prev,
+    // Keep a single selected GIF so choosing another one updates the preview.
+    setPendingGifs([
       {
         kind: "gif_link",
         url: gif.gifUrl,
@@ -1307,9 +1465,33 @@ function App() {
     setShowEmojiPicker(false);
   }, []);
 
+  const toggleGifPicker = useCallback(() => {
+    setShowGifPicker((prev) => {
+      const next = !prev;
+      if (next) {
+        setShowEmojiPicker(false);
+        setGifActiveIndex(0);
+        requestAnimationFrame(() => gifSearchInputRef.current?.focus());
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleEmojiPicker = useCallback(() => {
+    setShowEmojiPicker((prev) => {
+      const next = !prev;
+      if (next) {
+        setShowGifPicker(false);
+        setEmojiActiveIndex(0);
+        requestAnimationFrame(() => emojiSearchInputRef.current?.focus());
+      }
+      return next;
+    });
+  }, []);
+
   const filteredEmojis = useMemo(() => {
     const query = emojiQuery.trim().toLowerCase();
-    if (!query) return EMOJI_CATALOG.slice(0, 40);
+    if (!query) return EMOJI_CATALOG.slice(0, 80);
     return EMOJI_CATALOG.filter((item) => item.tags.some((tag) => tag.includes(query))).slice(0, 40);
   }, [emojiQuery]);
 
@@ -1387,7 +1569,24 @@ function App() {
         setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
         await loadFriendsData();
       } else {
-        await api.leaveGroupChat(deleteModal.conversationId, deleteWipeMessages, token);
+        const conv = conversations.find((c) => c.id === deleteModal.conversationId);
+        let encryptedKeys: Record<string, string> | undefined;
+        if (conv && conv.type === "group") {
+          const remainingMembers = conv.members.filter((m) => m.userId !== user?.id);
+          if (remainingMembers.length > 0) {
+            const rotatedSecretKey = await generateSecretKey();
+            encryptedKeys = {};
+            for (const member of remainingMembers) {
+              const memberKeys = await api.getUserKeys(member.userId, token);
+              const publicKey = latestPublicKey(memberKeys);
+              if (!publicKey) {
+                throw new Error(`Could not get public key for member ${member.userId}`);
+              }
+              encryptedKeys[member.userId] = await sealToPublicKey(rotatedSecretKey, publicKey);
+            }
+          }
+        }
+        await api.leaveGroupChat(deleteModal.conversationId, deleteWipeMessages, token, encryptedKeys);
         devLog.info("leaveGroupChat API call succeeded");
         setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
       }
@@ -1476,12 +1675,102 @@ function App() {
     return items;
   };
 
+  const renderConversationList = (conversationList: Conversation[], emptyText: string) => (
+    <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
+      {conversationList.map((conv) => {
+        const isSelected = conv.id === selectedConvId;
+        const otherMember = conv.members.find((m) => m.user.id !== user?.id);
+        const otherUserId = otherMember?.user.id ?? "";
+        const otherUsername = otherMember?.user.username ?? "dm";
+        const avatarUrl = profileById[otherUserId]?.avatarUrl ?? null;
+        const convoMessages = byConversation[conv.id] ?? [];
+        const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
+        const displayName =
+          conv.type === "dm"
+            ? (conv.name?.trim()
+              ? conv.name.trim()
+              : `${otherUsername}#${shortConversationId(conv.id)}`)
+            : conv.name ?? "Group";
+        const preview = lastMessage
+          ? `${lastMessage.sender === user?.username ? "You" : lastMessage.sender}: Encrypted message`
+          : conv.type === "dm"
+            ? "Direct message"
+            : `${conv.members.length} members`;
+        const activityTime = lastMessage
+          ? formatRecentTimestamp(lastMessage.createdAt)
+          : formatRecentTimestamp(new Date(conv.createdAt).getTime());
+        const unreadCount = unreadCountByConversation[conv.id] ?? 0;
+
+        return (
+          <button
+            key={conv.id}
+            className={`w-full rounded-xl border p-3 text-left transition ${
+              isSelected
+                ? "border-orbit-accent/60 bg-orbit-accent/10 shadow-[0_8px_20px_rgba(18,201,180,0.15)]"
+                : "border-white/5 bg-[#202533] hover:border-white/20"
+            }`}
+            onContextMenu={(e) => ctxMenu.show(e, buildConvContextMenuItems(conv))}
+            onClick={() => {
+              setNavTab(conv.type === "dm" ? "dm" : "groups");
+              const deferred = deferredPasscodes[conv.id];
+              if (deferred) {
+                setPendingChatPasscode({ conversationId: conv.id, ...deferred });
+                setDeferredPasscodes((prev) => {
+                  const next = { ...prev };
+                  delete next[conv.id];
+                  return next;
+                });
+              }
+              setSelectedConvId(conv.id);
+              setPasscodeInput("");
+              setPasscodeError(null);
+              setShowBypassInput(false);
+              setShowChatSettings(false);
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={`@${otherUsername}`} className="h-full w-full object-cover" />
+                  ) : (
+                    (otherUsername[0] ?? "D").toUpperCase()
+                  )}
+                </div>
+                {conv.passcodeEnabled && !chatLock.isUnlocked(conv.id) && (
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-orbit-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                )}
+                <p className="truncate text-sm font-semibold">@{displayName}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <span className="inline-flex min-w-[1.3rem] items-center justify-center rounded-full bg-orbit-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+                <span className="shrink-0 text-[10px] uppercase tracking-wide text-orbit-muted">{activityTime}</span>
+              </div>
+            </div>
+            <p className="mt-1 truncate text-xs text-slate-400">{preview}</p>
+          </button>
+        );
+      })}
+      {conversationList.length === 0 && (
+        <p className="text-xs text-orbit-muted">{emptyText}</p>
+      )}
+    </div>
+  );
+
   /* ───── Open or create a DM with a user ───── */
   const startDM = async (targetUser: { id: string; username: string }) => {
     if (!token) return;
     if (!user) return;
 
     setMainView("chat");
+    setNavTab("dm");
 
     try {
       const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
@@ -1500,10 +1789,22 @@ function App() {
         token
       );
 
-      setConversations((prev) => {
-        const withoutDup = prev.filter((existingConv) => existingConv.id !== conv.id);
-        return [conv, ...withoutDup];
-      });
+      const mergedConversations = [conv, ...conversations.filter((existingConv) => existingConv.id !== conv.id)];
+      setConversations(mergedConversations);
+
+      // Keep exactly one active DM thread per user: unarchive the selected DM, archive older duplicates.
+      const dmThreadsWithTarget = mergedConversations.filter(
+        (c) => c.type === "dm" && c.members.some((m) => m.user.id === targetUser.id)
+      );
+      const nextArchived = new Set(archivedConvIds);
+      nextArchived.delete(conv.id);
+      for (const thread of dmThreadsWithTarget) {
+        if (thread.id !== conv.id) {
+          nextArchived.add(thread.id);
+        }
+      }
+      persistArchived(nextArchived);
+
       setSelectedConvId(conv.id);
       setMainView("chat");
       setSearch("");
@@ -1525,40 +1826,195 @@ function App() {
     }
   };
 
+  /* ───── Create a new group chat ───── */
+  const startGroupChat = async () => {
+    if (!token) return;
+    if (!user) return;
+    if (groupCreationModal.selectedMemberIds.size === 0) {
+      setGroupCreationModal((prev) => ({ ...prev, error: "Select at least one member" }));
+      return;
+    }
+
+    setGroupCreationModal((prev) => ({ ...prev, loading: true, error: null }));
+
+    try {
+      const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
+      const memberIds = Array.from(groupCreationModal.selectedMemberIds);
+
+      // Get public keys for all members
+      const memberPublicKeys: Record<string, string> = {};
+      for (const memberId of memberIds) {
+        const memberKeys = await api.getUserKeys(memberId, token);
+        const publicKey = latestPublicKey(memberKeys);
+        if (!publicKey) {
+          throw new Error(`Could not get public key for member ${memberId}`);
+        }
+        memberPublicKeys[memberId] = publicKey;
+      }
+
+      // Create group secret key and encrypt for all members + creator
+      const secretKey = await generateSecretKey();
+      const encryptedKeys: Record<string, string> = {
+        [user.id]: await sealToPublicKey(secretKey, myPublicKey),
+      };
+
+      for (const memberId of memberIds) {
+        encryptedKeys[memberId] = await sealToPublicKey(secretKey, memberPublicKeys[memberId]);
+      }
+
+      // Create group conversation
+      const conv = await api.createConversation(
+        {
+          type: "group",
+          name: groupCreationModal.groupName || "New Group",
+          memberIds,
+          encryptedKeys,
+        },
+        token
+      );
+
+      setConversations((prev) => [conv, ...prev]);
+      setSelectedConvId(conv.id);
+      setMainView("chat");
+      setSearch("");
+      setSearchResults([]);
+
+      // Show passcode to creator if present
+      if (conv.passcode) {
+        setPendingChatPasscode({
+          conversationId: conv.id,
+          passcode: conv.passcode,
+          label: conv.name?.trim() || groupCreationModal.groupName || "New Group",
+        });
+        // Don't auto-unlock — passcode modal will handle it
+      } else {
+        // No passcode — auto-unlock with default settings
+        chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      }
+
+      await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
+
+      // Close modal and reset
+      setGroupCreationModal({
+        open: false,
+        selectedMemberIds: new Set(),
+        groupName: "",
+        loading: false,
+        error: null,
+      });
+      setGroupMemberSearch("");
+    } catch (err: any) {
+      setGroupCreationModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: err?.message || "Failed to create group",
+      }));
+    }
+  };
+
+  /* ───── Add members to existing group ───── */
+  const addMembersToGroup = async () => {
+    if (!token) return;
+    if (!user) return;
+    if (!addMembersModal.conversationId) return;
+    if (addMembersModal.selectedMemberIds.size === 0) {
+      setAddMembersModal((prev) => ({ ...prev, error: "Select at least one member" }));
+      return;
+    }
+
+    setAddMembersModal((prev) => ({ ...prev, loading: true, error: null }));
+
+    try {
+      const conv = conversations.find((c) => c.id === addMembersModal.conversationId);
+      if (!conv) throw new Error("Conversation not found");
+
+      const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
+      const memberIds = Array.from(addMembersModal.selectedMemberIds);
+      const existingMemberIds = conv.members.map((m) => m.userId);
+      const resultingMemberIds = Array.from(new Set([...existingMemberIds, ...memberIds]));
+      const memberPublicKeys: Record<string, string> = {
+        [user.id]: myPublicKey,
+      };
+
+      // Get public keys for all resulting members after add.
+      for (const memberId of resultingMemberIds) {
+        if (memberId === user.id) continue;
+        const memberKeys = await api.getUserKeys(memberId, token);
+        const publicKey = latestPublicKey(memberKeys);
+        if (!publicKey) {
+          throw new Error(`Could not get public key for member ${memberId}`);
+        }
+        memberPublicKeys[memberId] = publicKey;
+      }
+
+      // Rotate to a new group key version for this membership change.
+      const rotatedSecretKey = await generateSecretKey();
+      const encryptedKeys: Record<string, string> = {};
+      for (const memberId of resultingMemberIds) {
+        encryptedKeys[memberId] = await sealToPublicKey(rotatedSecretKey, memberPublicKeys[memberId]);
+      }
+
+      // Add members via API
+      await api.addMembers(conv.id, { memberIds, encryptedKeys }, token);
+
+      // Keep local sender key cache aligned to the new version immediately.
+      const nextKeyVersion = (getConversationKeyVersion(conv.id) ?? 1) + 1;
+      setConversationSecretKeyVersion({
+        conversationId: conv.id,
+        keyVersion: nextKeyVersion,
+        secretKey: rotatedSecretKey,
+      });
+
+      // Refresh conversation to get updated member list
+      const updated = await api.getConversations(token);
+      const updatedConv = updated.find((c) => c.id === conv.id);
+      if (updatedConv) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === updatedConv.id ? updatedConv : c))
+        );
+      }
+
+      // Close modal and reset
+      setAddMembersModal({
+        open: false,
+        conversationId: null,
+        selectedMemberIds: new Set(),
+        loading: false,
+        error: null,
+      });
+      setAddMemberSearch("");
+    } catch (err: any) {
+      setAddMembersModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: err?.message || "Failed to add members",
+      }));
+    }
+  };
+
   const handleAttachFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const accepted = Array.from(files).filter((file) => {
-      if (file.type.startsWith("video/")) return false;
+      if (!file.type.startsWith("image/")) return false;
       return file.size <= 50 * 1024 * 1024;
     });
     if (!accepted.length) {
-      setMessageSendError("Only non-video files up to 50MB are supported.");
+      setMessageSendError("Only image files up to 50MB are supported.");
       return;
     }
     setMessageSendError(null);
     setPendingFiles((prev) => [...prev, ...accepted]);
   };
 
-  const handleAddVideoLink = () => {
-    const safeUrl = normalizeVideoUrl(videoLinkDraft);
-    if (!safeUrl) {
-      setMessageSendError("Video links must be HTTPS and from an approved host (YouTube, Vimeo, Loom).");
-      return;
-    }
-    setMessageSendError(null);
-    setPendingVideoLinks((prev) => [...prev, safeUrl]);
-    setVideoLinkDraft("");
-  };
-
   /* ───── Send message over socket ───── */
   const handleSendMessage = async () => {
     const draft = messageDraft.trim();
-    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0;
+    const hasAttachments = pendingFiles.length > 0 || pendingGifs.length > 0;
     if (!selectedConvId || !user || !socket) return;
     if (!token) return;
     if (!draft && !hasAttachments) return;
 
-    if (!selectedConversation || selectedConversation.type !== "dm") return;
+    if (!selectedConversation) return;
 
     try {
       const secretKey = await ensureConversationSecretKey({
@@ -1623,10 +2079,6 @@ function App() {
         usedCacheKeys.push(cacheKey);
       }
 
-      for (const url of pendingVideoLinks) {
-        attachments.push({ kind: "video_link", url });
-      }
-
       for (const gif of pendingGifs) {
         const safeUrl = normalizeGifUrl(gif.url);
         const safePreview = gif.previewUrl ? (normalizeGifUrl(gif.previewUrl) ?? undefined) : undefined;
@@ -1657,7 +2109,6 @@ function App() {
 
       setMessageDraft("");
       setPendingFiles([]);
-      setPendingVideoLinks([]);
       setPendingGifs([]);
       setMessageSendError(null);
       for (const key of usedCacheKeys) {
@@ -1956,11 +2407,33 @@ function App() {
           <div className="space-y-2">
             {[
               {
+                key: "home" as const,
+                label: "Home",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 10.5L12 3l9 7.5" />
+                    <path d="M5.5 9.5V20h13V9.5" />
+                  </svg>
+                ),
+              },
+              {
                 key: "dm" as const,
                 label: "DM",
                 icon: (
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                ),
+              },
+              {
+                key: "groups" as const,
+                label: "Groups",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="8" cy="8" r="3" />
+                    <circle cx="16" cy="9" r="2.5" />
+                    <path d="M3 19a5 5 0 0 1 10 0" />
+                    <path d="M13 19a4 4 0 0 1 8 0" />
                   </svg>
                 ),
               },
@@ -1995,7 +2468,7 @@ function App() {
                   className={`group orbit-rail-btn ${active ? "orbit-rail-btn-active" : ""}`}
                   onClick={() => {
                     setNavTab(item.key);
-                    if (item.key !== "dm") {
+                    if (item.key === "friends" || item.key === "archive") {
                       setSelectedConvId(null);
                     }
                     setShowChatSettings(false);
@@ -2024,6 +2497,20 @@ function App() {
 
         {/* ───── Sidebar: search + conversation list ───── */}
         <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#1a1e29] p-3">
+          {navTab === "home" && (
+            <>
+              <h1 className="text-lg font-semibold tracking-tight">Home</h1>
+              <p className="mt-1 text-[13px] text-orbit-muted">Your recent conversations across DMs and groups</p>
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
+                <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
+              </div>
+
+              {renderConversationList(sortedConversations, "No recent chats yet.")}
+            </>
+          )}
+
           {navTab === "dm" && (
             <>
               <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
@@ -2104,95 +2591,32 @@ function App() {
               )}
 
               <div className="mt-4 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
-                <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Direct messages</p>
+                <span className="text-xs text-orbit-muted">{directConversations.length}</span>
               </div>
 
-              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
-                {sortedConversations.map((conv) => {
-                  const isSelected = conv.id === selectedConvId;
-                  const otherMember = conv.members.find((m) => m.user.id !== user.id);
-                  const otherUserId = otherMember?.user.id ?? "";
-                  const otherUsername = otherMember?.user.username ?? "dm";
-                  const avatarUrl = profileById[otherUserId]?.avatarUrl ?? null;
-                  const convoMessages = byConversation[conv.id] ?? [];
-                  const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
-                  const displayName =
-                    conv.type === "dm"
-                      ? (conv.name?.trim()
-                        ? conv.name.trim()
-                        : `${otherUsername}#${shortConversationId(conv.id)}`)
-                      : conv.name ?? "Group";
-                  const preview = lastMessage
-                    ? `${lastMessage.sender === user.username ? "You" : lastMessage.sender}: Encrypted message`
-                    : conv.type === "dm"
-                      ? "Direct message"
-                      : `${conv.members.length} members`;
-                  const activityTime = lastMessage
-                    ? formatRecentTimestamp(lastMessage.createdAt)
-                    : formatRecentTimestamp(new Date(conv.createdAt).getTime());
-                  const unreadCount = unreadCountByConversation[conv.id] ?? 0;
-                  return (
-                    <button
-                      key={conv.id}
-                      className={`w-full rounded-xl border p-3 text-left transition ${
-                        isSelected
-                          ? "border-orbit-accent/60 bg-orbit-accent/10 shadow-[0_8px_20px_rgba(18,201,180,0.15)]"
-                          : "border-white/5 bg-[#202533] hover:border-white/20"
-                      }`}
-                      onContextMenu={(e) => ctxMenu.show(e, buildConvContextMenuItems(conv))}
-                      onClick={() => {
-                        // Show deferred passcode if this is the first time opening this chat
-                        const deferred = deferredPasscodes[conv.id];
-                        if (deferred) {
-                          setPendingChatPasscode({ conversationId: conv.id, ...deferred });
-                          setDeferredPasscodes((prev) => {
-                            const next = { ...prev };
-                            delete next[conv.id];
-                            return next;
-                          });
-                        }
-                        setSelectedConvId(conv.id);
-                        setPasscodeInput("");
-                        setPasscodeError(null);
-                        setShowBypassInput(false);
-                        setShowChatSettings(false);
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
-                            {avatarUrl ? (
-                              <img src={avatarUrl} alt={`@${otherUsername}`} className="h-full w-full object-cover" />
-                            ) : (
-                              (otherUsername[0] ?? "D").toUpperCase()
-                            )}
-                          </div>
-                          {conv.passcodeEnabled && !chatLock.isUnlocked(conv.id) && (
-                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-orbit-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                            </svg>
-                          )}
-                          <p className="truncate text-sm font-semibold">@{displayName}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {unreadCount > 0 && (
-                            <span className="inline-flex min-w-[1.3rem] items-center justify-center rounded-full bg-orbit-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
-                              {unreadCount > 99 ? "99+" : unreadCount}
-                            </span>
-                          )}
-                          <span className="shrink-0 text-[10px] uppercase tracking-wide text-orbit-muted">{activityTime}</span>
-                        </div>
-                      </div>
-                      <p className="mt-1 truncate text-xs text-slate-400">{preview}</p>
-                    </button>
-                  );
-                })}
-                {sortedConversations.length === 0 && (
-                  <p className="text-xs text-orbit-muted">No conversations yet. Search for a user above to start one.</p>
-                )}
+              {renderConversationList(directConversations, "No direct messages yet. Search for a user above to start one.")}
+            </>
+          )}
+
+          {navTab === "groups" && (
+            <>
+              <h1 className="text-lg font-semibold tracking-tight">Group Chats</h1>
+              <p className="mt-1 text-[13px] text-orbit-muted">Create and manage your group conversations</p>
+
+              <button
+                className="orbit-btn-primary mt-4 w-full px-3 py-2 text-xs font-semibold"
+                onClick={() => setGroupCreationModal((prev) => ({ ...prev, open: true }))}
+              >
+                Create Group Chat
+              </button>
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Groups</p>
+                <span className="text-xs text-orbit-muted">{groupConversations.length}</span>
               </div>
+
+              {renderConversationList(groupConversations, "No group chats yet. Create one to get started.")}
             </>
           )}
 
@@ -2761,42 +3185,76 @@ function App() {
               )}
               {messages.map((msg) => {
                 const mine = msg.sender === user.username;
+                const senderProfile = profileById[msg.senderId] ?? null;
+                const senderLabel = senderProfile?.displayName?.trim() || msg.sender;
+                const senderAvatar = senderProfile?.avatarUrl ?? null;
+                const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
                 return (
                   <article
                     key={msg.id}
-                    className={`max-w-[78%] rounded-xl border px-2.5 py-2 text-[13px] leading-snug ${
-                      mine
-                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
-                        : "border-white/10 bg-[#202533]"
-                    }`}
+                    className={`flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
                   >
                     <button
-                      className="font-semibold text-orbit-accent hover:underline"
+                      className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text"
                       onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                      aria-label={`Open profile for ${senderLabel}`}
+                      title={senderLabel}
                     >
-                      {msg.sender}
+                      {senderAvatar ? (
+                        <img src={senderAvatar} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center">{senderInitial}</span>
+                      )}
                     </button>
-                    <DecryptedMessageBody
-                      conversationId={selectedConversation.id}
-                      token={token}
-                      cipherText={msg.cipherText}
-                      nonce={msg.nonce}
-                      keyVersion={msg.keyVersion}
-                    />
-                    <p className={`mt-2 text-[11px] ${mine ? "text-right text-slate-300" : "text-orbit-muted"}`}>
-                      {formatMessageTimestamp(msg.createdAt)}
-                    </p>
+
+                    <div
+                      className={`min-w-0 rounded-xl border px-3 py-2 text-[13px] leading-snug shadow-sm ${
+                        mine
+                          ? "border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
+                          : "border-white/10 bg-[#202533]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="max-w-[180px] truncate text-[11px] font-semibold text-orbit-accent hover:underline"
+                          onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                        >
+                          {mine ? "You" : senderLabel}
+                        </button>
+                        <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
+                      </div>
+                      <div className="mt-1">
+                        {typeof msg.keyVersion === "number" && msg.keyVersion < myMinReadableKeyVersion ? (
+                          <p className="break-words text-orbit-muted">
+                            Encrypted message unavailable (sent before you joined this key version).
+                          </p>
+                        ) : (
+                          <DecryptedMessageBody
+                            conversationId={selectedConversation.id}
+                            token={token}
+                            cipherText={msg.cipherText}
+                            nonce={msg.nonce}
+                            keyVersion={msg.keyVersion}
+                          />
+                        )}
+                      </div>
+                    </div>
                   </article>
                 );
               })}
             </section>
 
             <footer className="border-t border-white/10 bg-[#1b2030]/90 px-3 py-2 backdrop-blur">
-              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0) && (
+              {(pendingFiles.length > 0 || pendingGifs.length > 0) && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, idx) => (
                     <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-text">
-                      📎 {file.name}
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <circle cx="8.5" cy="9" r="1.5" />
+                        <path d="M21 16l-5.5-5.5a1 1 0 0 0-1.4 0L7 17" />
+                      </svg>
+                      {file.name}
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
                         onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
@@ -2805,27 +3263,38 @@ function App() {
                       </button>
                     </span>
                   ))}
-                  {pendingVideoLinks.map((link, idx) => (
-                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
-                      🎬 {new URL(link).hostname}
-                      <button
-                        className="text-orbit-muted hover:text-orbit-text"
-                        onClick={() => setPendingVideoLinks((prev) => prev.filter((_, i) => i !== idx))}
-                      >
-                        x
-                      </button>
-                    </span>
-                  ))}
                   {pendingGifs.map((gif, idx) => (
-                    <span key={`${gif.url}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
-                      GIF
-                      <button
-                        className="text-orbit-muted hover:text-orbit-text"
-                        onClick={() => setPendingGifs((prev) => prev.filter((_, i) => i !== idx))}
-                      >
-                        x
-                      </button>
-                    </span>
+                    <div
+                      key={`${gif.url}:${idx}`}
+                      className="group flex items-center gap-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-1.5"
+                    >
+                      <img
+                        src={gif.previewUrl || gif.url}
+                        alt={gif.title || "Selected GIF"}
+                        className="h-12 w-16 rounded-md border border-white/10 object-cover"
+                        loading="lazy"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-[11px] font-semibold text-orbit-accent">GIF preview</p>
+                        <p className="truncate text-[10px] text-orbit-muted">{gif.title || "Selected from GIF picker"}</p>
+                      </div>
+                      <div className="ml-auto flex items-center gap-1">
+                        <button
+                          className="orbit-btn px-2 py-1 text-[10px]"
+                          onClick={() => toggleGifPicker()}
+                          title="Choose another GIF"
+                        >
+                          Change
+                        </button>
+                        <button
+                          className="orbit-btn px-2 py-1 text-[10px] text-rose-300 hover:bg-rose-500/15"
+                          onClick={() => setPendingGifs([])}
+                          title="Remove selected GIF"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -2835,62 +3304,92 @@ function App() {
                   ref={fileInputRef}
                   type="file"
                   multiple
+                  accept="image/*"
                   className="hidden"
                   onChange={(event) => handleAttachFiles(event.target.files)}
                 />
-                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Attach file">
-                  📎
+                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Attach image">
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="4" width="18" height="16" rx="2" />
+                      <circle cx="8.5" cy="9" r="1.5" />
+                      <path d="M21 16l-5.5-5.5a1 1 0 0 0-1.4 0L7 17" />
+                    </svg>
+                    Image
+                  </span>
                 </button>
                 <button
                   ref={gifButtonRef}
                   className={`orbit-btn h-8 px-2.5 text-xs ${showGifPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
-                  onClick={() => {
-                    setShowGifPicker((prev) => !prev);
-                    setShowEmojiPicker(false);
-                    setGifActiveIndex(0);
-                  }}
+                  onClick={toggleGifPicker}
                   title="GIFs"
                 >
-                  GIF
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="5" width="18" height="14" rx="2" />
+                      <path d="M8 10h-.5A1.5 1.5 0 0 0 6 11.5v1A1.5 1.5 0 0 0 7.5 14H9" />
+                      <path d="M9 12H7.75" />
+                      <path d="M11 10v4" />
+                      <path d="M11 10h2" />
+                      <path d="M11 12h1.5" />
+                      <path d="M11 14h2" />
+                      <path d="M17 14v-4h1.5A1.5 1.5 0 0 1 20 11.5v1A1.5 1.5 0 0 1 18.5 14H17z" />
+                    </svg>
+                    GIF
+                  </span>
                 </button>
                 <button
                   ref={emojiButtonRef}
                   className={`orbit-btn h-8 px-2.5 text-xs ${showEmojiPicker ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
-                  onClick={() => {
-                    setShowEmojiPicker((prev) => !prev);
-                    setShowGifPicker(false);
-                    setEmojiActiveIndex(0);
-                  }}
+                  onClick={toggleEmojiPicker}
                   title="Emoji"
                 >
-                  🙂
-                </button>
-                <input
-                  className="orbit-input h-8 flex-1 px-2.5 text-xs"
-                  value={videoLinkDraft}
-                  onChange={(event) => setVideoLinkDraft(event.target.value)}
-                  placeholder="Video link"
-                />
-                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={handleAddVideoLink} title="Add video link">
-                  🎬
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none" />
+                      <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
+                      <path d="M8.5 14.5c.8 1 2.05 1.5 3.5 1.5s2.7-.5 3.5-1.5" />
+                    </svg>
+                    Emoji
+                  </span>
                 </button>
               </div>
+
+              <p className="mb-2 text-[10px] text-orbit-muted">
+                Shortcuts: Cmd/Ctrl+I attach image, Cmd/Ctrl+G GIF picker, Cmd/Ctrl+E emoji picker, Cmd/Ctrl+/ focus message.
+              </p>
 
               {showGifPicker && (
                 <div ref={gifPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
                   <div className="mb-2 flex gap-1.5">
                     <input
+                      ref={gifSearchInputRef}
                       className="orbit-input h-8 flex-1 px-2.5 text-xs"
                       value={gifQuery}
                       onChange={(event) => setGifQuery(event.target.value)}
                       onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setShowGifPicker(false);
+                          messageInputRef.current?.focus();
+                          return;
+                        }
                         if (!gifResults.length) return;
                         if (event.key === "ArrowRight" || event.key === "ArrowDown") {
                           event.preventDefault();
-                          setGifActiveIndex((prev) => Math.min(prev + 1, gifResults.length - 1));
+                          setGifActiveIndex((prev) => (prev + 1) % gifResults.length);
                         } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
                           event.preventDefault();
-                          setGifActiveIndex((prev) => Math.max(prev - 1, 0));
+                          setGifActiveIndex((prev) => (prev - 1 + gifResults.length) % gifResults.length);
+                        } else if (event.key === "Tab") {
+                          event.preventDefault();
+                          setGifActiveIndex((prev) => {
+                            if (event.shiftKey) {
+                              return (prev - 1 + gifResults.length) % gifResults.length;
+                            }
+                            return (prev + 1) % gifResults.length;
+                          });
                         } else if (event.key === "Enter") {
                           event.preventDefault();
                           const candidate = gifResults[gifActiveIndex];
@@ -2936,17 +3435,32 @@ function App() {
                 <div ref={emojiPickerRef} className="mb-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
                   <div className="mb-2 flex gap-1.5">
                     <input
+                      ref={emojiSearchInputRef}
                       className="orbit-input h-8 flex-1 px-2.5 text-xs"
                       value={emojiQuery}
                       onChange={(event) => setEmojiQuery(event.target.value)}
                       onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setShowEmojiPicker(false);
+                          messageInputRef.current?.focus();
+                          return;
+                        }
                         if (!filteredEmojis.length) return;
                         if (event.key === "ArrowRight" || event.key === "ArrowDown") {
                           event.preventDefault();
-                          setEmojiActiveIndex((prev) => Math.min(prev + 1, filteredEmojis.length - 1));
+                          setEmojiActiveIndex((prev) => (prev + 1) % filteredEmojis.length);
                         } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
                           event.preventDefault();
-                          setEmojiActiveIndex((prev) => Math.max(prev - 1, 0));
+                          setEmojiActiveIndex((prev) => (prev - 1 + filteredEmojis.length) % filteredEmojis.length);
+                        } else if (event.key === "Tab") {
+                          event.preventDefault();
+                          setEmojiActiveIndex((prev) => {
+                            if (event.shiftKey) {
+                              return (prev - 1 + filteredEmojis.length) % filteredEmojis.length;
+                            }
+                            return (prev + 1) % filteredEmojis.length;
+                          });
                         } else if (event.key === "Enter") {
                           event.preventDefault();
                           const candidate = filteredEmojis[emojiActiveIndex];
@@ -3002,6 +3516,7 @@ function App() {
 
               <div className="flex gap-1.5">
                 <input
+                  ref={messageInputRef}
                   className="orbit-input h-9 flex-1 px-3 text-sm"
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
@@ -3303,6 +3818,53 @@ function App() {
                     })()}
                   </div>
 
+                  {/* ── Group Member Management ── */}
+                  {selectedConversation && selectedConversation.type === "group" && (
+                    <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Members ({selectedConversation.members.length})
+                      </p>
+                      <div className="mb-3 max-h-32 space-y-1.5 overflow-y-auto">
+                        {selectedConversation.members.map((member) => (
+                          <div key={member.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/5 bg-white/[0.02] px-2 py-1.5">
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[9px] font-semibold text-orbit-text">
+                                {(profileById[member.userId]?.avatarUrl) ? (
+                                  <img src={profileById[member.userId]?.avatarUrl ?? ""} alt={`@${member.user.username}`} className="h-full w-full object-cover" />
+                                ) : (
+                                  (member.user.username[0] ?? "U").toUpperCase()
+                                )}
+                              </div>
+                              <span className="min-w-0 truncate text-xs font-semibold text-orbit-text">
+                                @{member.user.username}
+                                {member.userId === selectedConversation.createdBy && (
+                                  <span className="ml-1 text-[10px] text-orbit-accent"> (owner)</span>
+                                )}
+                                {user && member.userId === user.id && (
+                                  <span className="ml-1 text-[10px] text-orbit-muted"> (you)</span>
+                                )}
+                              </span>
+                            </div>
+                            {/* TODO: Add remove button here for group owners in future */}
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        className="orbit-btn w-full px-3 py-2 text-xs"
+                        onClick={() => {
+                          setAddMemberSearch("");
+                          setAddMembersModal((prev) => ({
+                            ...prev,
+                            open: true,
+                            conversationId: selectedConversation.id,
+                          }));
+                        }}
+                      >
+                        Add Members
+                      </button>
+                    </div>
+                  )}
+
                   {/* ── Danger Zone ── */}
                   <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3">
                     <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-rose-400">Danger Zone</p>
@@ -3375,6 +3937,258 @@ function App() {
           )}
         </main>
 
+        {/* Group creation modal */}
+        {groupCreationModal.open && (
+          <div
+            className="orbit-modal-overlay"
+            onClick={() => {
+              if (!groupCreationModal.loading) {
+                setGroupCreationModal((prev) => ({
+                  ...prev,
+                  open: false,
+                  selectedMemberIds: new Set(),
+                  groupName: "",
+                  error: null,
+                }));
+                setGroupMemberSearch("");
+              }
+            }}
+          >
+            <div
+              className="orbit-modal max-w-sm"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <h3 className="text-base font-bold text-orbit-text">Create Group Chat</h3>
+              <p className="mt-1 text-xs text-orbit-muted">Add members from your friends and give the group a name.</p>
+
+              {groupCreationModal.error && (
+                <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {groupCreationModal.error}
+                </div>
+              )}
+
+              <label className="mt-4 block">
+                <span className="orbit-label">Group name</span>
+                <input
+                  className="orbit-input"
+                  placeholder="My Team"
+                  value={groupCreationModal.groupName}
+                  onChange={(e) => setGroupCreationModal((prev) => ({ ...prev, groupName: e.target.value, error: null }))}
+                  maxLength={64}
+                />
+              </label>
+
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold text-slate-400">Select members ({groupCreationModal.selectedMemberIds.size})</p>
+                <input
+                  className="orbit-input mb-2"
+                  placeholder="Search members..."
+                  value={groupMemberSearch}
+                  onChange={(e) => setGroupMemberSearch(e.target.value)}
+                />
+                <div className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  {friends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No friends to add yet. Add some friends first.</p>
+                  ) : filteredGroupCreationFriends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No members match that search.</p>
+                  ) : (
+                    filteredGroupCreationFriends.map((friend) => {
+                      const isSelected = groupCreationModal.selectedMemberIds.has(friend.user.id);
+                      const avatarUrl = friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl ?? null;
+                      return (
+                        <label
+                          key={friend.id}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 transition ${
+                            isSelected
+                              ? "border-orbit-accent/50 bg-orbit-accent/10"
+                              : "border-white/5 bg-white/[0.02] hover:border-white/10"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const newIds = new Set(groupCreationModal.selectedMemberIds);
+                              if (e.target.checked) {
+                                newIds.add(friend.user.id);
+                              } else {
+                                newIds.delete(friend.user.id);
+                              }
+                              setGroupCreationModal((prev) => ({
+                                ...prev,
+                                selectedMemberIds: newIds,
+                                error: null,
+                              }));
+                            }}
+                            className="h-4 w-4 accent-orbit-accent"
+                          />
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[10px] font-semibold text-orbit-text">
+                            {avatarUrl ? (
+                              <img src={avatarUrl} alt={`@${friend.user.username}`} className="h-full w-full object-cover" />
+                            ) : (
+                              (friend.user.username[0] ?? "U").toUpperCase()
+                            )}
+                          </div>
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">@{friend.user.username}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="orbit-btn px-3 py-2"
+                  disabled={groupCreationModal.loading}
+                  onClick={() => {
+                    setGroupCreationModal((prev) => ({
+                      ...prev,
+                      open: false,
+                      selectedMemberIds: new Set(),
+                      groupName: "",
+                      error: null,
+                    }));
+                    setGroupMemberSearch("");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="orbit-btn-primary px-4 py-2"
+                  disabled={groupCreationModal.loading || groupCreationModal.selectedMemberIds.size === 0}
+                  onClick={() => void startGroupChat()}
+                >
+                  {groupCreationModal.loading ? "Creating..." : "Create Group"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add members to group modal */}
+        {addMembersModal.open && (
+          <div
+            className="orbit-modal-overlay"
+            onClick={() => {
+              if (!addMembersModal.loading) {
+                setAddMembersModal((prev) => ({
+                  ...prev,
+                  open: false,
+                  conversationId: null,
+                  selectedMemberIds: new Set(),
+                  error: null,
+                }));
+                setAddMemberSearch("");
+              }
+            }}
+          >
+            <div
+              className="orbit-modal max-w-sm"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <h3 className="text-base font-bold text-orbit-text">Add Members to Group</h3>
+              <p className="mt-1 text-xs text-orbit-muted">Select friends to invite to this group.</p>
+
+              {addMembersModal.error && (
+                <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {addMembersModal.error}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold text-slate-400">Select members to invite ({addMembersModal.selectedMemberIds.size})</p>
+                <input
+                  className="orbit-input mb-2"
+                  placeholder="Search members..."
+                  value={addMemberSearch}
+                  onChange={(e) => setAddMemberSearch(e.target.value)}
+                />
+                <div className="max-h-56 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  {friends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No friends available.</p>
+                  ) : filteredAddMembersFriends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No members match that search.</p>
+                  ) : (
+                    filteredAddMembersFriends.map((friend) => {
+                      const isSelected = addMembersModal.selectedMemberIds.has(friend.user.id);
+                      const avatarUrl = friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl ?? null;
+
+                      return (
+                        <label
+                          key={friend.id}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 transition ${
+                            isSelected
+                              ? "border-orbit-accent/50 bg-orbit-accent/10"
+                              : "border-white/5 bg-white/[0.02] hover:border-white/10"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const newIds = new Set(addMembersModal.selectedMemberIds);
+                              if (e.target.checked) {
+                                newIds.add(friend.user.id);
+                              } else {
+                                newIds.delete(friend.user.id);
+                              }
+                              setAddMembersModal((prev) => ({
+                                ...prev,
+                                selectedMemberIds: newIds,
+                                error: null,
+                              }));
+                            }}
+                            className="h-4 w-4 accent-orbit-accent"
+                          />
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[10px] font-semibold text-orbit-text">
+                            {avatarUrl ? (
+                              <img src={avatarUrl} alt={`@${friend.user.username}`} className="h-full w-full object-cover" />
+                            ) : (
+                              (friend.user.username[0] ?? "U").toUpperCase()
+                            )}
+                          </div>
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">@{friend.user.username}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="orbit-btn px-3 py-2"
+                  disabled={addMembersModal.loading}
+                  onClick={() => {
+                    setAddMembersModal((prev) => ({
+                      ...prev,
+                      open: false,
+                      conversationId: null,
+                      selectedMemberIds: new Set(),
+                      error: null,
+                    }));
+                    setAddMemberSearch("");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="orbit-btn-primary px-4 py-2"
+                  disabled={addMembersModal.loading || addMembersModal.selectedMemberIds.size === 0}
+                  onClick={() => void addMembersToGroup()}
+                >
+                  {addMembersModal.loading ? "Adding..." : "Add Members"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <UserProfilePopover
           open={Boolean(profilePopoverUserId)}
           anchorRect={profilePopoverAnchor}
@@ -3405,8 +4219,8 @@ function App() {
 
               {deleteModal.type === "dm" ? (
                 <p className="mt-2 text-sm text-slate-300">
-                  This will <strong className="text-rose-400">unfriend</strong> the other person and remove this chat from your list.
-                  They will still be able to see the conversation but cannot send messages until you become friends again.
+                  This will permanently <strong className="text-rose-400">delete the chat</strong>, remove the friendship, and erase the chat media from the server for both sides.
+                  The conversation will no longer be available to either person.
                 </p>
               ) : (
                 <p className="mt-2 text-sm text-slate-300">
@@ -3415,22 +4229,30 @@ function App() {
                 </p>
               )}
 
-              <label className="mt-4 flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={deleteWipeMessages}
-                  onChange={(e) => setDeleteWipeMessages(e.target.checked)}
-                  className="h-4 w-4 accent-orbit-accent"
-                />
-                <span className="text-sm text-slate-200">
-                  Delete all my messages from this chat
-                </span>
-              </label>
-              <p className="mt-1 text-[11px] text-orbit-muted">
-                {deleteWipeMessages
-                  ? "Your messages and any files you sent will be permanently wiped from the server."
-                  : "Your messages will remain visible to the other member(s)."}
-              </p>
+              {deleteModal.type === "group" ? (
+                <>
+                  <label className="mt-4 flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={deleteWipeMessages}
+                      onChange={(e) => setDeleteWipeMessages(e.target.checked)}
+                      className="h-4 w-4 accent-orbit-accent"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Delete all my messages from this chat
+                    </span>
+                  </label>
+                  <p className="mt-1 text-[11px] text-orbit-muted">
+                    {deleteWipeMessages
+                      ? "Your messages and any files you sent will be permanently wiped from the server."
+                      : "Your messages will remain visible to the other member(s)."}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-4 text-[11px] text-orbit-muted">
+                  This action always removes the DM, its messages, and any uploaded media from the server.
+                </p>
+              )}
 
               {deleteError && (
                 <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
