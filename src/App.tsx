@@ -1264,7 +1264,7 @@ function App() {
 
   const filteredEmojis = useMemo(() => {
     const query = emojiQuery.trim().toLowerCase();
-    if (!query) return EMOJI_CATALOG.slice(0, 40);
+    if (!query) return EMOJI_CATALOG.slice(0, 80);
     return EMOJI_CATALOG.filter((item) => item.tags.some((tag) => tag.includes(query))).slice(0, 40);
   }, [emojiQuery]);
 
@@ -2700,31 +2700,54 @@ function App() {
               )}
               {messages.map((msg) => {
                 const mine = msg.sender === user.username;
+                const senderProfile = profileById[msg.senderId] ?? null;
+                const senderLabel = senderProfile?.displayName?.trim() || msg.sender;
+                const senderAvatar = senderProfile?.avatarUrl ?? null;
+                const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
                 return (
                   <article
                     key={msg.id}
-                    className={`max-w-[78%] rounded-xl border px-2.5 py-2 text-[13px] leading-snug ${
-                      mine
-                        ? "ml-auto border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
-                        : "border-white/10 bg-[#202533]"
-                    }`}
+                    className={`flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
                   >
                     <button
-                      className="font-semibold text-orbit-accent hover:underline"
+                      className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text"
                       onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                      aria-label={`Open profile for ${senderLabel}`}
+                      title={senderLabel}
                     >
-                      {msg.sender}
+                      {senderAvatar ? (
+                        <img src={senderAvatar} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center">{senderInitial}</span>
+                      )}
                     </button>
-                    <DecryptedMessageBody
-                      conversationId={selectedConversation.id}
-                      token={token}
-                      cipherText={msg.cipherText}
-                      nonce={msg.nonce}
-                      keyVersion={msg.keyVersion}
-                    />
-                    <p className={`mt-2 text-[11px] ${mine ? "text-right text-slate-300" : "text-orbit-muted"}`}>
-                      {formatMessageTimestamp(msg.createdAt)}
-                    </p>
+
+                    <div
+                      className={`min-w-0 rounded-xl border px-3 py-2 text-[13px] leading-snug shadow-sm ${
+                        mine
+                          ? "border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
+                          : "border-white/10 bg-[#202533]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="max-w-[180px] truncate text-[11px] font-semibold text-orbit-accent hover:underline"
+                          onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                        >
+                          {mine ? "You" : senderLabel}
+                        </button>
+                        <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
+                      </div>
+                      <div className="mt-1">
+                        <DecryptedMessageBody
+                          conversationId={selectedConversation.id}
+                          token={token}
+                          cipherText={msg.cipherText}
+                          nonce={msg.nonce}
+                          keyVersion={msg.keyVersion}
+                        />
+                      </div>
+                    </div>
                   </article>
                 );
               })}
