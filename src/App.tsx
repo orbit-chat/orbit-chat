@@ -3348,8 +3348,8 @@ function App() {
 
               {deleteModal.type === "dm" ? (
                 <p className="mt-2 text-sm text-slate-300">
-                  This will <strong className="text-rose-400">unfriend</strong> the other person and remove this chat from your list.
-                  They will still be able to see the conversation but cannot send messages until you become friends again.
+                  This will permanently <strong className="text-rose-400">delete the chat</strong>, remove the friendship, and erase the chat media from the server for both sides.
+                  The conversation will no longer be available to either person.
                 </p>
               ) : (
                 <p className="mt-2 text-sm text-slate-300">
@@ -3358,22 +3358,30 @@ function App() {
                 </p>
               )}
 
-              <label className="mt-4 flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={deleteWipeMessages}
-                  onChange={(e) => setDeleteWipeMessages(e.target.checked)}
-                  className="h-4 w-4 accent-orbit-accent"
-                />
-                <span className="text-sm text-slate-200">
-                  Delete all my messages from this chat
-                </span>
-              </label>
-              <p className="mt-1 text-[11px] text-orbit-muted">
-                {deleteWipeMessages
-                  ? "Your messages and any files you sent will be permanently wiped from the server."
-                  : "Your messages will remain visible to the other member(s)."}
-              </p>
+              {deleteModal.type === "group" ? (
+                <>
+                  <label className="mt-4 flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={deleteWipeMessages}
+                      onChange={(e) => setDeleteWipeMessages(e.target.checked)}
+                      className="h-4 w-4 accent-orbit-accent"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Delete all my messages from this chat
+                    </span>
+                  </label>
+                  <p className="mt-1 text-[11px] text-orbit-muted">
+                    {deleteWipeMessages
+                      ? "Your messages and any files you sent will be permanently wiped from the server."
+                      : "Your messages will remain visible to the other member(s)."}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-4 text-[11px] text-orbit-muted">
+                  This action always removes the DM, its messages, and any uploaded media from the server.
+                </p>
+              )}
 
               {deleteError && (
                 <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
