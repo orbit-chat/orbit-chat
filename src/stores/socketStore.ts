@@ -37,6 +37,12 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       if (!existing.connected) {
         set({ connectionState: "connecting", connectionError: null });
         existing.connect();
+      } else {
+        // Token was refreshed while connected — force reconnect so the server
+        // validates the new JWT and re-attaches rooms / presence.
+        existing.disconnect();
+        set({ connectionState: "connecting", connectionError: null });
+        existing.connect();
       }
       return;
     }
@@ -58,10 +64,20 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     socket.on("connect", () => set({ connected: true, connectionState: "connected", connectionError: null }));
     socket.on("disconnect", () => set({ connected: false, connectionState: "disconnected" }));
-    socket.on("connect_error", (err: Error) => {
+    socket.on("connect_error", async (err: Error) => {
       const message = err?.message ?? "Socket connection failed";
       if (isAuthSocketError(message)) {
-        // Avoid infinite reconnect loops on invalid/expired auth.
+        // Try a silent token refresh before giving up
+        const refreshed = await useAuthStore.getState().silentRefresh?.();
+        if (refreshed) {
+          const newToken = useAuthStore.getState().token;
+          if (newToken) {
+            socket.auth = { token: newToken };
+            // Let socket.io's built-in reconnection retry with the fresh token
+            return;
+          }
+        }
+        // Refresh failed — session is truly dead
         socket.io.opts.reconnection = false;
         socket.disconnect();
         useAuthStore.getState().clearSession();
@@ -76,9 +92,17 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
       set({ connected: false, connectionState: "error", connectionError: message });
     });
-    socket.io.on("reconnect_error", (err: Error) => {
+    socket.io.on("reconnect_error", async (err: Error) => {
       const message = err?.message ?? "Socket reconnect failed";
       if (isAuthSocketError(message)) {
+        const refreshed = await useAuthStore.getState().silentRefresh?.();
+        if (refreshed) {
+          const newToken = useAuthStore.getState().token;
+          if (newToken) {
+            socket.auth = { token: newToken };
+            return;
+          }
+        }
         socket.io.opts.reconnection = false;
         socket.disconnect();
         useAuthStore.getState().clearSession();

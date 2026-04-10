@@ -1,8 +1,11 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import path from "node:path";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const appIcon = path.join(app.getAppPath(), "logo.png");
+
+// Remove the default application menu (File, Edit, View, Window, Help)
+Menu.setApplicationMenu(null);
 
 function isAllowedExternalUrl(url: string): boolean {
   // Keep this conservative; expand only if you need more schemes.
@@ -18,6 +21,8 @@ function createWindow() {
     backgroundColor: "#0d1117",
     title: "Orbit Chat",
     icon: appIcon,
+    frame: false,
+    titleBarStyle: "hidden",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -26,6 +31,27 @@ function createWindow() {
       devTools: isDev
     }
   });
+
+  // Auto-open devTools in dev mode
+  if (isDev) {
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  }
+
+  // Window control IPC handlers
+  ipcMain.on("window:minimize", () => mainWindow.minimize());
+  ipcMain.on("window:maximize", () => {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  });
+  ipcMain.on("window:close", () => mainWindow.close());
+  ipcMain.handle("window:isMaximized", () => mainWindow.isMaximized());
+
+  // Notify renderer when maximized state changes
+  mainWindow.on("maximize", () => mainWindow.webContents.send("window:maximized-changed", true));
+  mainWindow.on("unmaximize", () => mainWindow.webContents.send("window:maximized-changed", false));
 
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL as string);

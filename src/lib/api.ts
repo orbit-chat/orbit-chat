@@ -10,6 +10,8 @@ type RequestOptions = {
   method?: string;
   body?: unknown;
   token?: string | null;
+  /** @internal prevent infinite 401→refresh→retry loops */
+  _isRetry?: boolean;
 };
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -43,6 +45,15 @@ async function request<T = unknown>(path: string, opts: RequestOptions = {}): Pr
   }
 
   if (!res.ok) {
+    // On 401, attempt a silent token refresh and retry the request once
+    if (res.status === 401 && opts.token && !opts._isRetry) {
+      const { useAuthStore } = await import("../stores/authStore");
+      const refreshed = await useAuthStore.getState().silentRefresh();
+      if (refreshed) {
+        const newToken = useAuthStore.getState().token;
+        return request<T>(path, { ...opts, token: newToken, _isRetry: true });
+      }
+    }
     const err = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(err.message ?? `HTTP ${res.status}`);
   }
@@ -148,6 +159,7 @@ export type UserProfile = {
   lastActiveAt?: string | null;
   links?: ProfileLink[] | null;
   roles?: UserRole[] | null;
+  deleteMessagesOnUnfriend?: boolean;
 };
 
 export type UpdateMyProfileInput = {
@@ -159,6 +171,7 @@ export type UpdateMyProfileInput = {
   statusText?: string | null;
   statusEmoji?: string | null;
   links?: ProfileLink[] | null;
+  deleteMessagesOnUnfriend?: boolean;
 };
 
 export type FriendSummary = {
@@ -329,11 +342,14 @@ export type Conversation = {
   imageUrlNonce: string | null;
   passcodeEnabled: boolean;
   passcodeLength: number;
+  passcodeDisableRequestedBy: string | null;
   lockMode: ChatLockMode;
   lockTimeoutSeconds: number | null;
   members: { id: string; userId: string; role: string; user: { id: string; username: string } }[];
   /** Only present once at creation time */
   passcode?: string;
+  /** Whether the conversation was newly created (false = existing DM returned) */
+  created?: boolean;
 };
 
 export function getConversations(token: string) {
@@ -369,6 +385,46 @@ export function bypassPasscode(conversationId: string, recoveryCode: string, tok
   return request<{ success: true; message: string }>(`/conversations/${conversationId}/bypass-passcode`, {
     method: "POST",
     body: { recoveryCode },
+    token,
+  });
+}
+
+export function requestDisablePasscode(conversationId: string, token: string) {
+  return request<{
+    status: "pending" | "disabled" | "already_disabled";
+    conversation: Conversation;
+  }>(`/conversations/${conversationId}/request-disable-passcode`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function cancelDisableRequest(conversationId: string, token: string) {
+  return request<Conversation>(`/conversations/${conversationId}/cancel-disable-request`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function reenablePasscode(conversationId: string, token: string) {
+  return request<{ passcode: string; conversation: Conversation }>(
+    `/conversations/${conversationId}/reenable-passcode`,
+    { method: "POST", token }
+  );
+}
+
+export function deleteConversation(conversationId: string, wipeMessages: boolean, token: string) {
+  return request<{ success: true }>(`/conversations/${conversationId}/delete`, {
+    method: "POST",
+    body: { wipeMessages },
+    token,
+  });
+}
+
+export function leaveGroupChat(conversationId: string, wipeMessages: boolean, token: string) {
+  return request<{ success: true; destroyed: boolean }>(`/conversations/${conversationId}/leave`, {
+    method: "POST",
+    body: { wipeMessages },
     token,
   });
 }
