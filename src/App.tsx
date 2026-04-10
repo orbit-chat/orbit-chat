@@ -18,6 +18,7 @@ import {
 } from "./lib/crypto";
 import { UserProfilePopover } from "./components/UserProfilePopover";
 import { ProfileSettings } from "./components/ProfileSettings";
+import { useContextMenu, ContextMenuPortal, type ContextMenuItem } from "./components/ContextMenu";
 
 /* ─── Custom frameless title bar ─── */
 function TitleBar() {
@@ -508,6 +509,8 @@ function App() {
 
   /** Passcode for newly created chat (shown once) */
   const [pendingChatPasscode, setPendingChatPasscode] = useState<{ conversationId: string; passcode: string; label: string } | null>(null);
+  /** Passcodes waiting to be shown when the user first opens a conversation */
+  const [deferredPasscodes, setDeferredPasscodes] = useState<Record<string, { passcode: string; label: string }>>({});
   /** When a locked chat is selected, show the unlock screen */
   const [passcodeInput, setPasscodeInput] = useState("");
   const [passcodeError, setPasscodeError] = useState<string | null>(null);
@@ -522,6 +525,31 @@ function App() {
   const [chatSettingsTimeout, setChatSettingsTimeout] = useState("");
   const [chatSettingsError, setChatSettingsError] = useState<string | null>(null);
   const [chatSettingsSaving, setChatSettingsSaving] = useState(false);
+
+  // Archive (client-side, persisted per-user via localStorage)
+  const [archivedConvIds, setArchivedConvIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("orbit:archived");
+      return raw ? new Set(JSON.parse(raw)) : new Set<string>();
+    } catch { return new Set<string>(); }
+  });
+  const persistArchived = useCallback((ids: Set<string>) => {
+    setArchivedConvIds(ids);
+    localStorage.setItem("orbit:archived", JSON.stringify([...ids]));
+  }, []);
+
+  // Context menu
+  const ctxMenu = useContextMenu();
+
+  // Delete / leave confirmation modal
+  const [deleteModal, setDeleteModal] = useState<{
+    conversationId: string;
+    type: "dm" | "group";
+    displayName: string;
+  } | null>(null);
+  const [deleteWipeMessages, setDeleteWipeMessages] = useState(true);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -583,9 +611,14 @@ function App() {
     };
 
     return conversations
+      .filter((c) => !archivedConvIds.has(c.id))
       .slice()
       .sort((a, b) => getConversationLastActivity(b) - getConversationLastActivity(a));
-  }, [byConversation, conversations]);
+  }, [byConversation, conversations, archivedConvIds]);
+
+  const archivedConversations = useMemo(() => {
+    return conversations.filter((c) => archivedConvIds.has(c.id));
+  }, [conversations, archivedConvIds]);
 
   const hasUnreadDm = useMemo(() => {
     return conversations.some((conv) => {
@@ -759,6 +792,11 @@ function App() {
     if (!token) return;
     await runFriendAction(`remove:${friendUserId}`, async () => {
       await api.removeFriend(friendUserId, token);
+      // Remove DM conversations with this friend from local state
+      setConversations((prev) => prev.filter((c) => {
+        if (c.type !== "dm") return true;
+        return !c.members.some((m) => m.userId === friendUserId);
+      }));
       await loadFriendsData();
     });
   }, [loadFriendsData, runFriendAction, token]);
@@ -1031,23 +1069,22 @@ function App() {
   useEffect(() => {
     if (!socket || !user) return;
 
-    const handleConversationCreated = (data: { conversation: Conversation; passcode: string }) => {
+    const handleConversationCreated = (data: { conversation: Conversation; passcode: string | null }) => {
       // Add the new conversation to the list
       setConversations((prev) => {
         const withoutDup = prev.filter((c) => c.id !== data.conversation.id);
         return [data.conversation, ...withoutDup];
       });
-      // Show the passcode modal to the recipient
+      // Store the passcode to show when the recipient first opens this chat (groups only)
       if (data.passcode) {
         const otherMember = data.conversation.members.find((m) => m.userId !== user.id);
         const label = data.conversation.name?.trim()
           ? data.conversation.name.trim()
           : `${otherMember?.user.username ?? "chat"}#${data.conversation.id.slice(0, 4)}`;
-        setPendingChatPasscode({
-          conversationId: data.conversation.id,
-          passcode: data.passcode,
-          label,
-        });
+        setDeferredPasscodes((prev) => ({
+          ...prev,
+          [data.conversation.id]: { passcode: data.passcode!, label },
+        }));
       }
     };
 
@@ -1081,16 +1118,16 @@ function App() {
       setConversations((prev) =>
         prev.map((c) => (c.id === data.conversation.id ? data.conversation : c))
       );
+      // Store the passcode to show when the user next opens this chat
       if (data.passcode) {
         const otherMember = data.conversation.members.find((m) => m.userId !== user.id);
         const label = data.conversation.name?.trim()
           ? data.conversation.name.trim()
           : `${otherMember?.user.username ?? "chat"}#${data.conversation.id.slice(0, 4)}`;
-        setPendingChatPasscode({
-          conversationId: data.conversation.id,
-          passcode: data.passcode,
-          label,
-        });
+        setDeferredPasscodes((prev) => ({
+          ...prev,
+          [data.conversation.id]: { passcode: data.passcode, label },
+        }));
       }
     };
 
@@ -1099,6 +1136,47 @@ function App() {
       socket.off("passcode_reenabled", handlePasscodeReenabled);
     };
   }, [socket, user]);
+
+  /* ───── Handle conversation_deleted: other user deleted a DM ───── */
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handleConversationDeleted = (data: { conversationId: string; deletedByUserId: string; type: string }) => {
+      // Remove the conversation from local state
+      setConversations((prev) => prev.filter((c) => c.id !== data.conversationId));
+      if (selectedConvId === data.conversationId) {
+        setSelectedConvId(null);
+        setShowChatSettings(false);
+      }
+      // Also refresh friends since unfriending happened
+      loadFriendsData();
+    };
+
+    socket.on("conversation_deleted", handleConversationDeleted);
+    return () => {
+      socket.off("conversation_deleted", handleConversationDeleted);
+    };
+  }, [socket, user, selectedConvId, loadFriendsData]);
+
+  /* ───── Handle member_left: someone left a group chat ───── */
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleMemberLeft = (data: { conversationId: string; userId: string; messagesWiped: boolean }) => {
+      // Update the conversation member list
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.id !== data.conversationId) return c;
+          return { ...c, members: c.members.filter((m) => m.userId !== data.userId) };
+        })
+      );
+    };
+
+    socket.on("member_left", handleMemberLeft);
+    return () => {
+      socket.off("member_left", handleMemberLeft);
+    };
+  }, [socket]);
 
   /* ───── Ensure conversation secret key for DMs ───── */
   useEffect(() => {
@@ -1291,14 +1369,111 @@ function App() {
     setConfirmPassword("");
   };
 
-  /* ───── Start DM with a searched user (always creates a new chat) ───── */
+  /* ───── Delete DM / Leave Group ───── */
+  const handleDeleteOrLeave = async () => {
+    if (!deleteModal || !token) return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      if (deleteModal.type === "dm") {
+        await api.deleteConversation(deleteModal.conversationId, deleteWipeMessages, token);
+        setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
+        await loadFriendsData();
+      } else {
+        await api.leaveGroupChat(deleteModal.conversationId, deleteWipeMessages, token);
+        setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
+      }
+      if (selectedConvId === deleteModal.conversationId) {
+        setSelectedConvId(null);
+        setShowChatSettings(false);
+      }
+      setDeleteModal(null);
+      setDeleteWipeMessages(true);
+    } catch (err: any) {
+      setDeleteError(err?.message ?? "Action failed");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const openDeleteModal = (conv: Conversation) => {
+    const otherMember = conv.members.find((m) => m.user.id !== user?.id);
+    const displayName = conv.type === "dm"
+      ? (conv.name?.trim() ? conv.name.trim() : `@${otherMember?.user.username ?? "dm"}`)
+      : (conv.name ?? "Group");
+    setDeleteWipeMessages(true);
+    setDeleteError(null);
+    setDeleteModal({ conversationId: conv.id, type: conv.type, displayName });
+  };
+
+  /* ───── Archive / Unarchive conversation ───── */
+  const archiveConversation = (convId: string) => {
+    const next = new Set(archivedConvIds);
+    next.add(convId);
+    persistArchived(next);
+    if (selectedConvId === convId) {
+      setSelectedConvId(null);
+      setShowChatSettings(false);
+    }
+  };
+
+  const unarchiveConversation = (convId: string) => {
+    const next = new Set(archivedConvIds);
+    next.delete(convId);
+    persistArchived(next);
+  };
+
+  /* ───── Build context menu items for a conversation ───── */
+  const buildConvContextMenuItems = (conv: Conversation): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    const isArchived = archivedConvIds.has(conv.id);
+    const isLocked = conv.passcodeEnabled && !chatLock.isUnlocked(conv.id);
+
+    // Re-lock
+    if (conv.passcodeEnabled && chatLock.isUnlocked(conv.id)) {
+      items.push({
+        type: "item",
+        label: "Relock chat",
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+        ),
+        onClick: () => chatLock.lock(conv.id),
+      });
+    }
+
+    // Archive / Unarchive
+    items.push({
+      type: "item",
+      label: isArchived ? "Unarchive" : "Archive",
+      icon: (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="4" rx="1.2" /><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></svg>
+      ),
+      onClick: () => isArchived ? unarchiveConversation(conv.id) : archiveConversation(conv.id),
+    });
+
+    items.push({ type: "separator" });
+
+    // Delete / Leave
+    items.push({
+      type: "item",
+      label: conv.type === "dm" ? "Delete chat" : "Leave group",
+      danger: true,
+      icon: (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+      ),
+      onClick: () => openDeleteModal(conv),
+    });
+
+    return items;
+  };
+
+  /* ───── Open or create a DM with a user ───── */
   const startDM = async (targetUser: { id: string; username: string }) => {
     if (!token) return;
     if (!user) return;
 
     setMainView("chat");
 
-    // Always create a new DM conversation (multiple chats per person allowed)
     try {
       const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
       const otherKeys = await api.getUserKeys(targetUser.id, token);
@@ -1325,16 +1500,14 @@ function App() {
       setSearch("");
       setSearchResults([]);
 
-      // Show the one-time passcode to the user
-      if (conv.passcode) {
-        setPendingChatPasscode({
-          conversationId: conv.id,
-          passcode: conv.passcode,
-          label: conv.name?.trim() ? conv.name.trim() : `${targetUser.username}#${shortConversationId(conv.id)}`,
-        });
+      // Existing DM returned — just navigate, no passcode
+      if (conv.created === false) {
+        chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+        await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
+        return;
       }
 
-      // Auto-unlock the newly created chat
+      // Newly created DM — no passcode for DMs, just auto-unlock
       chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
 
       await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
@@ -1958,7 +2131,18 @@ function App() {
                           ? "border-orbit-accent/60 bg-orbit-accent/10 shadow-[0_8px_20px_rgba(18,201,180,0.15)]"
                           : "border-white/5 bg-[#202533] hover:border-white/20"
                       }`}
+                      onContextMenu={(e) => ctxMenu.show(e, buildConvContextMenuItems(conv))}
                       onClick={() => {
+                        // Show deferred passcode if this is the first time opening this chat
+                        const deferred = deferredPasscodes[conv.id];
+                        if (deferred) {
+                          setPendingChatPasscode({ conversationId: conv.id, ...deferred });
+                          setDeferredPasscodes((prev) => {
+                            const next = { ...prev };
+                            delete next[conv.id];
+                            return next;
+                          });
+                        }
                         setSelectedConvId(conv.id);
                         setPasscodeInput("");
                         setPasscodeError(null);
@@ -2221,7 +2405,56 @@ function App() {
           {navTab === "archive" && (
             <>
               <h1 className="text-lg font-semibold">Archive</h1>
-              <p className="mt-2 text-sm text-orbit-muted">Archive tools are coming soon.</p>
+              <p className="mt-1 text-[13px] text-orbit-muted">Archived chats are hidden from DMs but still active</p>
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Archived</p>
+                <span className="text-xs text-orbit-muted">{archivedConversations.length}</span>
+              </div>
+
+              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
+                {archivedConversations.map((conv) => {
+                  const otherMember = conv.members.find((m) => m.user.id !== user.id);
+                  const otherUserId = otherMember?.user.id ?? "";
+                  const otherUsername = otherMember?.user.username ?? "dm";
+                  const avatarUrl = profileById[otherUserId]?.avatarUrl ?? null;
+                  const displayName =
+                    conv.type === "dm"
+                      ? (conv.name?.trim() ? conv.name.trim() : `${otherUsername}#${shortConversationId(conv.id)}`)
+                      : conv.name ?? "Group";
+                  return (
+                    <div key={conv.id} className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#202533] p-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
+                        {avatarUrl ? (
+                          <img src={avatarUrl} alt={`@${otherUsername}`} className="h-full w-full object-cover" />
+                        ) : (
+                          (otherUsername[0] ?? "D").toUpperCase()
+                        )}
+                      </div>
+                      <p className="min-w-0 flex-1 truncate text-sm font-semibold">@{displayName}</p>
+                      <button
+                        className="orbit-btn px-2 py-1 text-[11px]"
+                        onClick={() => {
+                          unarchiveConversation(conv.id);
+                          setNavTab("dm");
+                          setSelectedConvId(conv.id);
+                        }}
+                      >
+                        Unarchive
+                      </button>
+                      <button
+                        className="orbit-btn px-2 py-1 text-[11px] text-rose-400 hover:bg-rose-500/15"
+                        onClick={() => openDeleteModal(conv)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  );
+                })}
+                {archivedConversations.length === 0 && (
+                  <p className="text-xs text-orbit-muted">No archived chats.</p>
+                )}
+              </div>
             </>
           )}
 
@@ -2322,7 +2555,9 @@ function App() {
                 <div className="orbit-card max-w-xl rounded-3xl p-8 text-center">
                   <h2 className="text-3xl font-bold">Archive</h2>
                   <p className="mt-3 text-sm text-slate-300">
-                    Archived threads and media controls will appear here in a future update.
+                    {archivedConversations.length
+                      ? `${archivedConversations.length} archived chat${archivedConversations.length > 1 ? "s" : ""}. You can unarchive or delete them from the sidebar.`
+                      : "No archived chats. Right-click a conversation to archive it."}
                   </p>
                 </div>
               </div>
@@ -3059,6 +3294,31 @@ function App() {
                     })()}
                   </div>
 
+                  {/* ── Danger Zone ── */}
+                  <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-rose-400">Danger Zone</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="orbit-btn px-3 py-2 text-xs"
+                        onClick={() => {
+                          archiveConversation(selectedConversation.id);
+                          setShowChatSettings(false);
+                        }}
+                      >
+                        {archivedConvIds.has(selectedConversation.id) ? "Unarchive chat" : "Archive chat"}
+                      </button>
+                      <button
+                        className="orbit-btn px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/15"
+                        onClick={() => {
+                          openDeleteModal(selectedConversation);
+                          setShowChatSettings(false);
+                        }}
+                      >
+                        {selectedConversation.type === "dm" ? "Delete chat" : "Leave group"}
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="flex justify-end gap-2 pt-1">
                     <button
                       className="orbit-btn px-3 py-2"
@@ -3119,6 +3379,76 @@ function App() {
             setSelectedConvId(null);
           }}
         />
+
+        {/* Context menu */}
+        <ContextMenuPortal menu={ctxMenu.menu} onClose={ctxMenu.hide} />
+
+        {/* Delete / Leave confirmation modal */}
+        {deleteModal && (
+          <div className="orbit-modal-overlay" onClick={() => { if (!deleteLoading) setDeleteModal(null); }}>
+            <div className="orbit-modal max-w-md" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+              <h3 className="text-base font-bold text-orbit-text">
+                {deleteModal.type === "dm" ? "Delete Chat & Unfriend" : "Leave Group Chat"}
+              </h3>
+
+              {deleteModal.type === "dm" ? (
+                <p className="mt-2 text-sm text-slate-300">
+                  This will <strong className="text-rose-400">unfriend</strong> the other person and remove this chat from your list.
+                  They will still be able to see the conversation but cannot send messages until you become friends again.
+                </p>
+              ) : (
+                <p className="mt-2 text-sm text-slate-300">
+                  You are about to leave <strong className="text-orbit-accent">{deleteModal.displayName}</strong>.
+                  Other members will still see the group. If you are the last member, the group and all its data will be permanently deleted.
+                </p>
+              )}
+
+              <label className="mt-4 flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={deleteWipeMessages}
+                  onChange={(e) => setDeleteWipeMessages(e.target.checked)}
+                  className="h-4 w-4 accent-orbit-accent"
+                />
+                <span className="text-sm text-slate-200">
+                  Delete all my messages from this chat
+                </span>
+              </label>
+              <p className="mt-1 text-[11px] text-orbit-muted">
+                {deleteWipeMessages
+                  ? "Your messages and any files you sent will be permanently wiped from the server."
+                  : "Your messages will remain visible to the other member(s)."}
+              </p>
+
+              {deleteError && (
+                <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="orbit-btn px-3 py-2"
+                  disabled={deleteLoading}
+                  onClick={() => setDeleteModal(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="orbit-btn-danger px-4 py-2"
+                  disabled={deleteLoading}
+                  onClick={handleDeleteOrLeave}
+                >
+                  {deleteLoading
+                    ? "Processing..."
+                    : deleteModal.type === "dm"
+                      ? "Delete & Unfriend"
+                      : "Leave Group"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

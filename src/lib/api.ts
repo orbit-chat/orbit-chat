@@ -159,6 +159,7 @@ export type UserProfile = {
   lastActiveAt?: string | null;
   links?: ProfileLink[] | null;
   roles?: UserRole[] | null;
+  deleteMessagesOnUnfriend?: boolean;
 };
 
 export type UpdateMyProfileInput = {
@@ -170,6 +171,7 @@ export type UpdateMyProfileInput = {
   statusText?: string | null;
   statusEmoji?: string | null;
   links?: ProfileLink[] | null;
+  deleteMessagesOnUnfriend?: boolean;
 };
 
 export type FriendSummary = {
@@ -346,6 +348,8 @@ export type Conversation = {
   members: { id: string; userId: string; role: string; user: { id: string; username: string } }[];
   /** Only present once at creation time */
   passcode?: string;
+  /** Whether the conversation was newly created (false = existing DM returned) */
+  created?: boolean;
 };
 
 export function getConversations(token: string) {
@@ -407,6 +411,22 @@ export function reenablePasscode(conversationId: string, token: string) {
     `/conversations/${conversationId}/reenable-passcode`,
     { method: "POST", token }
   );
+}
+
+export function deleteConversation(conversationId: string, wipeMessages: boolean, token: string) {
+  return request<{ success: true }>(`/conversations/${conversationId}`, {
+    method: "DELETE",
+    body: { wipeMessages },
+    token,
+  });
+}
+
+export function leaveGroupChat(conversationId: string, wipeMessages: boolean, token: string) {
+  return request<{ success: true; destroyed: boolean }>(`/conversations/${conversationId}/leave`, {
+    method: "POST",
+    body: { wipeMessages },
+    token,
+  });
 }
 
 export function updateChatSettings(

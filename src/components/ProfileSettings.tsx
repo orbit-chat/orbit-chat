@@ -33,6 +33,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
   const [statusText, setStatusText] = useState("");
   const [statusEmoji, setStatusEmoji] = useState("");
   const [links, setLinks] = useState<LinkRow[]>([]);
+  const [deleteMessagesOnUnfriend, setDeleteMessagesOnUnfriend] = useState(true);
 
   useEffect(() => {
     fetchMe(token, myUserId);
@@ -48,6 +49,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
     setStatusText(profile.statusText ?? "");
     setStatusEmoji(profile.statusEmoji ?? "");
     setLinks(safeLinks(profile.links));
+    setDeleteMessagesOnUnfriend(profile.deleteMessagesOnUnfriend ?? true);
   }, [profile?.id]);
 
   const bannerStyle = useMemo(() => {
@@ -78,6 +80,7 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
         statusText: statusText.trim() || null,
         statusEmoji: statusEmoji.trim() || null,
         links: cleanedLinks.length ? cleanedLinks : null,
+        deleteMessagesOnUnfriend,
       },
       token,
       myUserId
@@ -248,6 +251,30 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                   placeholder="e.g. :)"
                 />
               </label>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Privacy</p>
+                  <p className="mt-1 text-[11px] text-orbit-muted">Control what happens when you unfriend someone.</p>
+                </div>
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={deleteMessagesOnUnfriend}
+                  onChange={(e) => setDeleteMessagesOnUnfriend(e.target.checked)}
+                  className="h-4 w-4 accent-orbit-accent"
+                />
+                <span className="text-sm text-slate-200">
+                  Delete my messages when I unfriend someone
+                </span>
+              </label>
+              <p className="mt-1 ml-7 text-[11px] text-orbit-muted">
+                When enabled, your messages and attached files will be permanently removed from shared DMs upon unfriending.
+              </p>
             </div>
 
             <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
