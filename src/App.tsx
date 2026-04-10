@@ -993,6 +993,79 @@ function App() {
     };
   }, [socket, token, loadConversations]);
 
+  /* ───── Handle conversation_created: show passcode to recipient ───── */
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handleConversationCreated = (data: { conversation: Conversation; passcode: string }) => {
+      // Add the new conversation to the list
+      setConversations((prev) => {
+        const withoutDup = prev.filter((c) => c.id !== data.conversation.id);
+        return [data.conversation, ...withoutDup];
+      });
+      // Show the passcode modal to the recipient
+      if (data.passcode) {
+        const otherMember = data.conversation.members.find((m) => m.userId !== user.id);
+        const label = data.conversation.name?.trim()
+          ? data.conversation.name.trim()
+          : `${otherMember?.user.username ?? "chat"}#${data.conversation.id.slice(0, 4)}`;
+        setPendingChatPasscode({
+          conversationId: data.conversation.id,
+          passcode: data.passcode,
+          label,
+        });
+      }
+    };
+
+    socket.on("conversation_created", handleConversationCreated);
+    return () => {
+      socket.off("conversation_created", handleConversationCreated);
+    };
+  }, [socket, user]);
+
+  /* ───── Handle chat_settings_updated: sync changes from other member ───── */
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleSettingsUpdated = (data: { conversation: Conversation }) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === data.conversation.id ? data.conversation : c))
+      );
+    };
+
+    socket.on("chat_settings_updated", handleSettingsUpdated);
+    return () => {
+      socket.off("chat_settings_updated", handleSettingsUpdated);
+    };
+  }, [socket]);
+
+  /* ───── Handle passcode_reenabled: show new passcode to all members ───── */
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handlePasscodeReenabled = (data: { conversation: Conversation; passcode: string }) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === data.conversation.id ? data.conversation : c))
+      );
+      if (data.passcode) {
+        const otherMember = data.conversation.members.find((m) => m.userId !== user.id);
+        const label = data.conversation.name?.trim()
+          ? data.conversation.name.trim()
+          : `${otherMember?.user.username ?? "chat"}#${data.conversation.id.slice(0, 4)}`;
+        setPendingChatPasscode({
+          conversationId: data.conversation.id,
+          passcode: data.passcode,
+          label,
+        });
+      }
+    };
+
+    socket.on("passcode_reenabled", handlePasscodeReenabled);
+    return () => {
+      socket.off("passcode_reenabled", handlePasscodeReenabled);
+    };
+  }, [socket, user]);
+
   /* ───── Ensure conversation secret key for DMs ───── */
   useEffect(() => {
     if (!token || !user || !selectedConversation) return;
@@ -2783,6 +2856,163 @@ function App() {
                       </div>
                     </div>
                   )}
+                  </div>
+
+                  {/* ── Chat Code Protection ── */}
+                  <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Chat Code Protection</p>
+                    {(() => {
+                      const conv = selectedConversation;
+                      const myId = user?.id;
+                      if (!conv || !myId) return null;
+
+                      // Passcode is currently disabled
+                      if (!conv.passcodeEnabled) {
+                        return (
+                          <div>
+                            <p className="mb-2 text-xs text-orbit-muted">
+                              Chat codes are <span className="font-semibold text-amber-300">disabled</span> for this chat.
+                              Either person can re-enable protection, which will generate a new code shown to both members.
+                            </p>
+                            <button
+                              className="orbit-btn px-3 py-2 text-xs"
+                              disabled={chatSettingsSaving}
+                              onClick={async () => {
+                                if (!token) return;
+                                setChatSettingsSaving(true);
+                                setChatSettingsError(null);
+                                try {
+                                  const result = await api.reenablePasscode(conv.id, token);
+                                  setConversations((prev) =>
+                                    prev.map((c) => (c.id === result.conversation.id ? result.conversation : c))
+                                  );
+                                  // Show the new passcode to the caller
+                                  const otherMember = result.conversation.members.find((m) => m.userId !== myId);
+                                  const label = result.conversation.name?.trim()
+                                    ? result.conversation.name.trim()
+                                    : `${otherMember?.user.username ?? "chat"}#${result.conversation.id.slice(0, 4)}`;
+                                  setPendingChatPasscode({
+                                    conversationId: result.conversation.id,
+                                    passcode: result.passcode,
+                                    label,
+                                  });
+                                  setShowChatSettings(false);
+                                } catch (err: any) {
+                                  setChatSettingsError(err?.message ?? "Failed to re-enable passcode");
+                                } finally {
+                                  setChatSettingsSaving(false);
+                                }
+                              }}
+                            >
+                              {chatSettingsSaving ? "Enabling..." : "Re-enable chat code"}
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      // I requested to disable, waiting for other member
+                      if (conv.passcodeDisableRequestedBy === myId) {
+                        return (
+                          <div>
+                            <p className="mb-2 text-xs text-orbit-muted">
+                              You've requested to <span className="font-semibold text-amber-300">disable</span> the chat code.
+                              Waiting for the other person to approve.
+                            </p>
+                            <button
+                              className="orbit-btn px-3 py-2 text-xs"
+                              disabled={chatSettingsSaving}
+                              onClick={async () => {
+                                if (!token) return;
+                                setChatSettingsSaving(true);
+                                setChatSettingsError(null);
+                                try {
+                                  const updated = await api.cancelDisableRequest(conv.id, token);
+                                  setConversations((prev) =>
+                                    prev.map((c) => (c.id === updated.id ? updated : c))
+                                  );
+                                } catch (err: any) {
+                                  setChatSettingsError(err?.message ?? "Failed to cancel request");
+                                } finally {
+                                  setChatSettingsSaving(false);
+                                }
+                              }}
+                            >
+                              {chatSettingsSaving ? "Cancelling..." : "Cancel request"}
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      // The other member requested to disable, I can approve
+                      if (conv.passcodeDisableRequestedBy && conv.passcodeDisableRequestedBy !== myId) {
+                        const requester = conv.members.find((m) => m.userId === conv.passcodeDisableRequestedBy);
+                        return (
+                          <div>
+                            <p className="mb-2 text-xs text-orbit-muted">
+                              <span className="font-semibold text-orbit-accent">@{requester?.user.username ?? "Other member"}</span> has
+                              requested to disable the chat code. Both members must agree.
+                            </p>
+                            <div className="flex gap-2">
+                              <button
+                                className="orbit-btn-primary px-3 py-2 text-xs"
+                                disabled={chatSettingsSaving}
+                                onClick={async () => {
+                                  if (!token) return;
+                                  setChatSettingsSaving(true);
+                                  setChatSettingsError(null);
+                                  try {
+                                    const result = await api.requestDisablePasscode(conv.id, token);
+                                    setConversations((prev) =>
+                                      prev.map((c) => (c.id === result.conversation.id ? result.conversation : c))
+                                    );
+                                    if (result.status === "disabled") {
+                                      chatLock.unlock(result.conversation.id, result.conversation.lockMode, result.conversation.lockTimeoutSeconds);
+                                    }
+                                  } catch (err: any) {
+                                    setChatSettingsError(err?.message ?? "Failed to approve");
+                                  } finally {
+                                    setChatSettingsSaving(false);
+                                  }
+                                }}
+                              >
+                                {chatSettingsSaving ? "Approving..." : "Approve & disable"}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Default: passcode enabled, no pending request — user can request to disable
+                      return (
+                        <div>
+                          <p className="mb-2 text-xs text-orbit-muted">
+                            Chat codes are <span className="font-semibold text-green-400">enabled</span>.
+                            To disable, both members must agree. Either person can re-enable at any time.
+                          </p>
+                          <button
+                            className="orbit-btn px-3 py-2 text-xs"
+                            disabled={chatSettingsSaving}
+                            onClick={async () => {
+                              if (!token) return;
+                              setChatSettingsSaving(true);
+                              setChatSettingsError(null);
+                              try {
+                                const result = await api.requestDisablePasscode(conv.id, token);
+                                setConversations((prev) =>
+                                  prev.map((c) => (c.id === result.conversation.id ? result.conversation : c))
+                                );
+                              } catch (err: any) {
+                                setChatSettingsError(err?.message ?? "Failed to request disable");
+                              } finally {
+                                setChatSettingsSaving(false);
+                              }
+                            }}
+                          >
+                            {chatSettingsSaving ? "Requesting..." : "Request to disable chat code"}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="flex justify-end gap-2 pt-1">

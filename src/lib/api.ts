@@ -329,6 +329,7 @@ export type Conversation = {
   imageUrlNonce: string | null;
   passcodeEnabled: boolean;
   passcodeLength: number;
+  passcodeDisableRequestedBy: string | null;
   lockMode: ChatLockMode;
   lockTimeoutSeconds: number | null;
   members: { id: string; userId: string; role: string; user: { id: string; username: string } }[];
@@ -371,6 +372,30 @@ export function bypassPasscode(conversationId: string, recoveryCode: string, tok
     body: { recoveryCode },
     token,
   });
+}
+
+export function requestDisablePasscode(conversationId: string, token: string) {
+  return request<{
+    status: "pending" | "disabled" | "already_disabled";
+    conversation: Conversation;
+  }>(`/conversations/${conversationId}/request-disable-passcode`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function cancelDisableRequest(conversationId: string, token: string) {
+  return request<Conversation>(`/conversations/${conversationId}/cancel-disable-request`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function reenablePasscode(conversationId: string, token: string) {
+  return request<{ passcode: string; conversation: Conversation }>(
+    `/conversations/${conversationId}/reenable-passcode`,
+    { method: "POST", token }
+  );
 }
 
 export function updateChatSettings(
