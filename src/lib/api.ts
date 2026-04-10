@@ -10,6 +10,8 @@ type RequestOptions = {
   method?: string;
   body?: unknown;
   token?: string | null;
+  /** @internal prevent infinite 401→refresh→retry loops */
+  _isRetry?: boolean;
 };
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -43,6 +45,15 @@ async function request<T = unknown>(path: string, opts: RequestOptions = {}): Pr
   }
 
   if (!res.ok) {
+    // On 401, attempt a silent token refresh and retry the request once
+    if (res.status === 401 && opts.token && !opts._isRetry) {
+      const { useAuthStore } = await import("../stores/authStore");
+      const refreshed = await useAuthStore.getState().silentRefresh();
+      if (refreshed) {
+        const newToken = useAuthStore.getState().token;
+        return request<T>(path, { ...opts, token: newToken, _isRetry: true });
+      }
+    }
     const err = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(err.message ?? `HTTP ${res.status}`);
   }
