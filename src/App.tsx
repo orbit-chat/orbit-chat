@@ -2758,7 +2758,12 @@ function App() {
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, idx) => (
                     <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-text">
-                      🖼️ {file.name}
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-orbit-accent" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <circle cx="8.5" cy="9" r="1.5" />
+                        <path d="M21 16l-5.5-5.5a1 1 0 0 0-1.4 0L7 17" />
+                      </svg>
+                      {file.name}
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
                         onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
@@ -2791,7 +2796,14 @@ function App() {
                   onChange={(event) => handleAttachFiles(event.target.files)}
                 />
                 <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Attach image">
-                  🖼️
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="4" width="18" height="16" rx="2" />
+                      <circle cx="8.5" cy="9" r="1.5" />
+                      <path d="M21 16l-5.5-5.5a1 1 0 0 0-1.4 0L7 17" />
+                    </svg>
+                    Image
+                  </span>
                 </button>
                 <button
                   ref={gifButtonRef}
@@ -2803,7 +2815,19 @@ function App() {
                   }}
                   title="GIFs"
                 >
-                  GIF
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="5" width="18" height="14" rx="2" />
+                      <path d="M8 10h-.5A1.5 1.5 0 0 0 6 11.5v1A1.5 1.5 0 0 0 7.5 14H9" />
+                      <path d="M9 12H7.75" />
+                      <path d="M11 10v4" />
+                      <path d="M11 10h2" />
+                      <path d="M11 12h1.5" />
+                      <path d="M11 14h2" />
+                      <path d="M17 14v-4h1.5A1.5 1.5 0 0 1 20 11.5v1A1.5 1.5 0 0 1 18.5 14H17z" />
+                    </svg>
+                    GIF
+                  </span>
                 </button>
                 <button
                   ref={emojiButtonRef}
@@ -2815,7 +2839,15 @@ function App() {
                   }}
                   title="Emoji"
                 >
-                  🙂
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none" />
+                      <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
+                      <path d="M8.5 14.5c.8 1 2.05 1.5 3.5 1.5s2.7-.5 3.5-1.5" />
+                    </svg>
+                    Emoji
+                  </span>
                 </button>
               </div>
 
