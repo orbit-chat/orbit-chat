@@ -32,6 +32,11 @@ function createWindow() {
     }
   });
 
+  // Auto-open devTools in dev mode
+  if (isDev) {
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  }
+
   // Window control IPC handlers
   ipcMain.on("window:minimize", () => mainWindow.minimize());
   ipcMain.on("window:maximize", () => {

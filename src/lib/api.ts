@@ -414,8 +414,8 @@ export function reenablePasscode(conversationId: string, token: string) {
 }
 
 export function deleteConversation(conversationId: string, wipeMessages: boolean, token: string) {
-  return request<{ success: true }>(`/conversations/${conversationId}`, {
-    method: "DELETE",
+  return request<{ success: true }>(`/conversations/${conversationId}/delete`, {
+    method: "POST",
     body: { wipeMessages },
     token,
   });

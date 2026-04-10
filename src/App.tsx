@@ -19,6 +19,8 @@ import {
 import { UserProfilePopover } from "./components/UserProfilePopover";
 import { ProfileSettings } from "./components/ProfileSettings";
 import { useContextMenu, ContextMenuPortal, type ContextMenuItem } from "./components/ContextMenu";
+import DevOverlay from "./components/DevOverlay";
+import { devLog } from "./lib/devLogger";
 
 /* ─── Custom frameless title bar ─── */
 function TitleBar() {
@@ -1371,16 +1373,22 @@ function App() {
 
   /* ───── Delete DM / Leave Group ───── */
   const handleDeleteOrLeave = async () => {
-    if (!deleteModal || !token) return;
+    if (!deleteModal || !token) {
+      devLog.warn(`handleDeleteOrLeave aborted: deleteModal=${!!deleteModal}, token=${!!token}`);
+      return;
+    }
+    devLog.info(`handleDeleteOrLeave: type=${deleteModal.type}, conv=${deleteModal.conversationId}, wipe=${deleteWipeMessages}`);
     setDeleteLoading(true);
     setDeleteError(null);
     try {
       if (deleteModal.type === "dm") {
         await api.deleteConversation(deleteModal.conversationId, deleteWipeMessages, token);
+        devLog.info("deleteConversation API call succeeded");
         setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
         await loadFriendsData();
       } else {
         await api.leaveGroupChat(deleteModal.conversationId, deleteWipeMessages, token);
+        devLog.info("leaveGroupChat API call succeeded");
         setConversations((prev) => prev.filter((c) => c.id !== deleteModal.conversationId));
       }
       if (selectedConvId === deleteModal.conversationId) {
@@ -1390,6 +1398,7 @@ function App() {
       setDeleteModal(null);
       setDeleteWipeMessages(true);
     } catch (err: any) {
+      devLog.error(`handleDeleteOrLeave failed: ${err?.message}`, err?.stack);
       setDeleteError(err?.message ?? "Action failed");
     } finally {
       setDeleteLoading(false);
@@ -3382,6 +3391,9 @@ function App() {
 
         {/* Context menu */}
         <ContextMenuPortal menu={ctxMenu.menu} onClose={ctxMenu.hide} />
+
+        {/* Dev overlay — only renders in dev builds */}
+        {import.meta.env.DEV && <DevOverlay />}
 
         {/* Delete / Leave confirmation modal */}
         {deleteModal && (
