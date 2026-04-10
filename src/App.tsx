@@ -436,7 +436,7 @@ function App() {
   const [authMode, setAuthMode] = useState<"login" | "signup" | "recovery">("login");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
-  const [navTab, setNavTab] = useState<"dm" | "friends" | "archive">("dm");
+  const [navTab, setNavTab] = useState<"home" | "dm" | "groups" | "friends" | "archive">("home");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -617,6 +617,16 @@ function App() {
   const archivedConversations = useMemo(() => {
     return conversations.filter((c) => archivedConvIds.has(c.id));
   }, [conversations, archivedConvIds]);
+
+  const directConversations = useMemo(
+    () => sortedConversations.filter((conversation) => conversation.type === "dm"),
+    [sortedConversations],
+  );
+
+  const groupConversations = useMemo(
+    () => sortedConversations.filter((conversation) => conversation.type === "group"),
+    [sortedConversations],
+  );
 
   const hasUnreadDm = useMemo(() => {
     return conversations.some((conv) => {
@@ -934,7 +944,7 @@ function App() {
   }, [token, conversations, friends, friendRequests.incoming, friendRequests.outgoing, searchResults, profileById, fetchProfile]);
 
   useEffect(() => {
-    if (navTab !== "dm") {
+    if (navTab !== "home" && navTab !== "dm" && navTab !== "groups") {
       setActiveConversation(null);
       return;
     }
@@ -1647,12 +1657,101 @@ function App() {
     return items;
   };
 
+  const renderConversationList = (conversationList: Conversation[], emptyText: string) => (
+    <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
+      {conversationList.map((conv) => {
+        const isSelected = conv.id === selectedConvId;
+        const otherMember = conv.members.find((m) => m.user.id !== user?.id);
+        const otherUserId = otherMember?.user.id ?? "";
+        const otherUsername = otherMember?.user.username ?? "dm";
+        const avatarUrl = profileById[otherUserId]?.avatarUrl ?? null;
+        const convoMessages = byConversation[conv.id] ?? [];
+        const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
+        const displayName =
+          conv.type === "dm"
+            ? (conv.name?.trim()
+              ? conv.name.trim()
+              : `${otherUsername}#${shortConversationId(conv.id)}`)
+            : conv.name ?? "Group";
+        const preview = lastMessage
+          ? `${lastMessage.sender === user?.username ? "You" : lastMessage.sender}: Encrypted message`
+          : conv.type === "dm"
+            ? "Direct message"
+            : `${conv.members.length} members`;
+        const activityTime = lastMessage
+          ? formatRecentTimestamp(lastMessage.createdAt)
+          : formatRecentTimestamp(new Date(conv.createdAt).getTime());
+        const unreadCount = unreadCountByConversation[conv.id] ?? 0;
+
+        return (
+          <button
+            key={conv.id}
+            className={`w-full rounded-xl border p-3 text-left transition ${
+              isSelected
+                ? "border-orbit-accent/60 bg-orbit-accent/10 shadow-[0_8px_20px_rgba(18,201,180,0.15)]"
+                : "border-white/5 bg-[#202533] hover:border-white/20"
+            }`}
+            onContextMenu={(e) => ctxMenu.show(e, buildConvContextMenuItems(conv))}
+            onClick={() => {
+              const deferred = deferredPasscodes[conv.id];
+              if (deferred) {
+                setPendingChatPasscode({ conversationId: conv.id, ...deferred });
+                setDeferredPasscodes((prev) => {
+                  const next = { ...prev };
+                  delete next[conv.id];
+                  return next;
+                });
+              }
+              setSelectedConvId(conv.id);
+              setPasscodeInput("");
+              setPasscodeError(null);
+              setShowBypassInput(false);
+              setShowChatSettings(false);
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={`@${otherUsername}`} className="h-full w-full object-cover" />
+                  ) : (
+                    (otherUsername[0] ?? "D").toUpperCase()
+                  )}
+                </div>
+                {conv.passcodeEnabled && !chatLock.isUnlocked(conv.id) && (
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-orbit-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                )}
+                <p className="truncate text-sm font-semibold">@{displayName}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <span className="inline-flex min-w-[1.3rem] items-center justify-center rounded-full bg-orbit-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+                <span className="shrink-0 text-[10px] uppercase tracking-wide text-orbit-muted">{activityTime}</span>
+              </div>
+            </div>
+            <p className="mt-1 truncate text-xs text-slate-400">{preview}</p>
+          </button>
+        );
+      })}
+      {conversationList.length === 0 && (
+        <p className="text-xs text-orbit-muted">{emptyText}</p>
+      )}
+    </div>
+  );
+
   /* ───── Open or create a DM with a user ───── */
   const startDM = async (targetUser: { id: string; username: string }) => {
     if (!token) return;
     if (!user) return;
 
     setMainView("chat");
+    setNavTab("dm");
 
     try {
       const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
@@ -1671,10 +1770,22 @@ function App() {
         token
       );
 
-      setConversations((prev) => {
-        const withoutDup = prev.filter((existingConv) => existingConv.id !== conv.id);
-        return [conv, ...withoutDup];
-      });
+      const mergedConversations = [conv, ...conversations.filter((existingConv) => existingConv.id !== conv.id)];
+      setConversations(mergedConversations);
+
+      // Keep exactly one active DM thread per user: unarchive the selected DM, archive older duplicates.
+      const dmThreadsWithTarget = mergedConversations.filter(
+        (c) => c.type === "dm" && c.members.some((m) => m.user.id === targetUser.id)
+      );
+      const nextArchived = new Set(archivedConvIds);
+      nextArchived.delete(conv.id);
+      for (const thread of dmThreadsWithTarget) {
+        if (thread.id !== conv.id) {
+          nextArchived.add(thread.id);
+        }
+      }
+      persistArchived(nextArchived);
+
       setSelectedConvId(conv.id);
       setMainView("chat");
       setSearch("");
@@ -2275,11 +2386,33 @@ function App() {
           <div className="space-y-2">
             {[
               {
+                key: "home" as const,
+                label: "Home",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 10.5L12 3l9 7.5" />
+                    <path d="M5.5 9.5V20h13V9.5" />
+                  </svg>
+                ),
+              },
+              {
                 key: "dm" as const,
                 label: "DM",
                 icon: (
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                ),
+              },
+              {
+                key: "groups" as const,
+                label: "Groups",
+                icon: (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="8" cy="8" r="3" />
+                    <circle cx="16" cy="9" r="2.5" />
+                    <path d="M3 19a5 5 0 0 1 10 0" />
+                    <path d="M13 19a4 4 0 0 1 8 0" />
                   </svg>
                 ),
               },
@@ -2314,7 +2447,7 @@ function App() {
                   className={`group orbit-rail-btn ${active ? "orbit-rail-btn-active" : ""}`}
                   onClick={() => {
                     setNavTab(item.key);
-                    if (item.key !== "dm") {
+                    if (item.key === "friends" || item.key === "archive") {
                       setSelectedConvId(null);
                     }
                     setShowChatSettings(false);
@@ -2343,6 +2476,20 @@ function App() {
 
         {/* ───── Sidebar: search + conversation list ───── */}
         <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#1a1e29] p-3">
+          {navTab === "home" && (
+            <>
+              <h1 className="text-lg font-semibold tracking-tight">Home</h1>
+              <p className="mt-1 text-[13px] text-orbit-muted">Your recent conversations across DMs and groups</p>
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
+                <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
+              </div>
+
+              {renderConversationList(sortedConversations, "No recent chats yet.")}
+            </>
+          )}
+
           {navTab === "dm" && (
             <>
               <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
@@ -2430,95 +2577,32 @@ function App() {
               </button>
 
               <div className="mt-4 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
-                <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Direct messages</p>
+                <span className="text-xs text-orbit-muted">{directConversations.length}</span>
               </div>
 
-              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
-                {sortedConversations.map((conv) => {
-                  const isSelected = conv.id === selectedConvId;
-                  const otherMember = conv.members.find((m) => m.user.id !== user.id);
-                  const otherUserId = otherMember?.user.id ?? "";
-                  const otherUsername = otherMember?.user.username ?? "dm";
-                  const avatarUrl = profileById[otherUserId]?.avatarUrl ?? null;
-                  const convoMessages = byConversation[conv.id] ?? [];
-                  const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
-                  const displayName =
-                    conv.type === "dm"
-                      ? (conv.name?.trim()
-                        ? conv.name.trim()
-                        : `${otherUsername}#${shortConversationId(conv.id)}`)
-                      : conv.name ?? "Group";
-                  const preview = lastMessage
-                    ? `${lastMessage.sender === user.username ? "You" : lastMessage.sender}: Encrypted message`
-                    : conv.type === "dm"
-                      ? "Direct message"
-                      : `${conv.members.length} members`;
-                  const activityTime = lastMessage
-                    ? formatRecentTimestamp(lastMessage.createdAt)
-                    : formatRecentTimestamp(new Date(conv.createdAt).getTime());
-                  const unreadCount = unreadCountByConversation[conv.id] ?? 0;
-                  return (
-                    <button
-                      key={conv.id}
-                      className={`w-full rounded-xl border p-3 text-left transition ${
-                        isSelected
-                          ? "border-orbit-accent/60 bg-orbit-accent/10 shadow-[0_8px_20px_rgba(18,201,180,0.15)]"
-                          : "border-white/5 bg-[#202533] hover:border-white/20"
-                      }`}
-                      onContextMenu={(e) => ctxMenu.show(e, buildConvContextMenuItems(conv))}
-                      onClick={() => {
-                        // Show deferred passcode if this is the first time opening this chat
-                        const deferred = deferredPasscodes[conv.id];
-                        if (deferred) {
-                          setPendingChatPasscode({ conversationId: conv.id, ...deferred });
-                          setDeferredPasscodes((prev) => {
-                            const next = { ...prev };
-                            delete next[conv.id];
-                            return next;
-                          });
-                        }
-                        setSelectedConvId(conv.id);
-                        setPasscodeInput("");
-                        setPasscodeError(null);
-                        setShowBypassInput(false);
-                        setShowChatSettings(false);
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
-                            {avatarUrl ? (
-                              <img src={avatarUrl} alt={`@${otherUsername}`} className="h-full w-full object-cover" />
-                            ) : (
-                              (otherUsername[0] ?? "D").toUpperCase()
-                            )}
-                          </div>
-                          {conv.passcodeEnabled && !chatLock.isUnlocked(conv.id) && (
-                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-orbit-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                            </svg>
-                          )}
-                          <p className="truncate text-sm font-semibold">@{displayName}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {unreadCount > 0 && (
-                            <span className="inline-flex min-w-[1.3rem] items-center justify-center rounded-full bg-orbit-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-950">
-                              {unreadCount > 99 ? "99+" : unreadCount}
-                            </span>
-                          )}
-                          <span className="shrink-0 text-[10px] uppercase tracking-wide text-orbit-muted">{activityTime}</span>
-                        </div>
-                      </div>
-                      <p className="mt-1 truncate text-xs text-slate-400">{preview}</p>
-                    </button>
-                  );
-                })}
-                {sortedConversations.length === 0 && (
-                  <p className="text-xs text-orbit-muted">No conversations yet. Search for a user above to start one.</p>
-                )}
+              {renderConversationList(directConversations, "No direct messages yet. Search for a user above to start one.")}
+            </>
+          )}
+
+          {navTab === "groups" && (
+            <>
+              <h1 className="text-lg font-semibold tracking-tight">Group Chats</h1>
+              <p className="mt-1 text-[13px] text-orbit-muted">Create and manage your group conversations</p>
+
+              <button
+                className="orbit-btn-primary mt-4 w-full px-3 py-2 text-xs font-semibold"
+                onClick={() => setGroupCreationModal((prev) => ({ ...prev, open: true }))}
+              >
+                Create Group Chat
+              </button>
+
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Groups</p>
+                <span className="text-xs text-orbit-muted">{groupConversations.length}</span>
               </div>
+
+              {renderConversationList(groupConversations, "No group chats yet. Create one to get started.")}
             </>
           )}
 
