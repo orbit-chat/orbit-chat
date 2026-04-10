@@ -69,11 +69,6 @@ type UploadedAttachment = {
   encryptedSha256?: string;
 };
 
-type VideoLinkAttachment = {
-  kind: "video_link";
-  url: string;
-};
-
 type GifLinkAttachment = {
   kind: "gif_link";
   url: string;
@@ -81,22 +76,12 @@ type GifLinkAttachment = {
   title?: string;
 };
 
-type MessageAttachment = UploadedAttachment | VideoLinkAttachment | GifLinkAttachment;
+type MessageAttachment = UploadedAttachment | GifLinkAttachment;
 
 type MessageEnvelope = {
   text?: string;
   attachments?: MessageAttachment[];
 };
-
-const VIDEO_ALLOWED_HOSTS = new Set([
-  "youtube.com",
-  "www.youtube.com",
-  "youtu.be",
-  "vimeo.com",
-  "www.vimeo.com",
-  "loom.com",
-  "www.loom.com",
-]);
 
 const GIPHY_API_KEY = (import.meta.env.VITE_GIPHY_API_KEY ?? "dc6zaTOxFJmzC").trim();
 const GIF_SEARCH_LIMIT = 18;
@@ -247,17 +232,6 @@ type GifSearchResult = {
   gifUrl: string;
   previewUrl: string;
 };
-
-function normalizeVideoUrl(input: string) {
-  try {
-    const url = new URL(input.trim());
-    if (url.protocol !== "https:") return null;
-    if (!VIDEO_ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
 
 function normalizeGifUrl(input: string) {
   try {
@@ -422,21 +396,6 @@ function DecryptedMessageBody(props: {
     <div className="mt-1 space-y-2">
       {(envelope?.text ?? legacyText) && <p className="break-words text-orbit-text">{envelope?.text ?? legacyText}</p>}
       {(envelope?.attachments ?? []).map((attachment, idx) => {
-        if (attachment.kind === "video_link") {
-          const safeUrl = normalizeVideoUrl(attachment.url);
-          if (!safeUrl) return null;
-          return (
-            <a
-              key={`${safeUrl}:${idx}`}
-              href={safeUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="block rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2 text-xs text-orbit-accent hover:border-orbit-accent/40"
-            >
-              Video link: {new URL(safeUrl).hostname}
-            </a>
-          );
-        }
         if (attachment.kind === "gif_link") {
           const safeUrl = normalizeGifUrl(attachment.url);
           if (!safeUrl) return null;
@@ -485,8 +444,6 @@ function App() {
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [videoLinkDraft, setVideoLinkDraft] = useState("");
-  const [pendingVideoLinks, setPendingVideoLinks] = useState<string[]>([]);
   const [pendingGifs, setPendingGifs] = useState<GifLinkAttachment[]>([]);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [gifQuery, setGifQuery] = useState("");
@@ -947,9 +904,7 @@ function App() {
 
   useEffect(() => {
     setPendingFiles([]);
-    setPendingVideoLinks([]);
     setPendingGifs([]);
-    setVideoLinkDraft("");
     setShowGifPicker(false);
     setGifQuery("");
     setGifResults([]);
@@ -1528,32 +1483,21 @@ function App() {
   const handleAttachFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const accepted = Array.from(files).filter((file) => {
-      if (file.type.startsWith("video/")) return false;
+      if (!file.type.startsWith("image/")) return false;
       return file.size <= 50 * 1024 * 1024;
     });
     if (!accepted.length) {
-      setMessageSendError("Only non-video files up to 50MB are supported.");
+      setMessageSendError("Only image files up to 50MB are supported.");
       return;
     }
     setMessageSendError(null);
     setPendingFiles((prev) => [...prev, ...accepted]);
   };
 
-  const handleAddVideoLink = () => {
-    const safeUrl = normalizeVideoUrl(videoLinkDraft);
-    if (!safeUrl) {
-      setMessageSendError("Video links must be HTTPS and from an approved host (YouTube, Vimeo, Loom).");
-      return;
-    }
-    setMessageSendError(null);
-    setPendingVideoLinks((prev) => [...prev, safeUrl]);
-    setVideoLinkDraft("");
-  };
-
   /* ───── Send message over socket ───── */
   const handleSendMessage = async () => {
     const draft = messageDraft.trim();
-    const hasAttachments = pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0;
+    const hasAttachments = pendingFiles.length > 0 || pendingGifs.length > 0;
     if (!selectedConvId || !user || !socket) return;
     if (!token) return;
     if (!draft && !hasAttachments) return;
@@ -1623,10 +1567,6 @@ function App() {
         usedCacheKeys.push(cacheKey);
       }
 
-      for (const url of pendingVideoLinks) {
-        attachments.push({ kind: "video_link", url });
-      }
-
       for (const gif of pendingGifs) {
         const safeUrl = normalizeGifUrl(gif.url);
         const safePreview = gif.previewUrl ? (normalizeGifUrl(gif.previewUrl) ?? undefined) : undefined;
@@ -1657,7 +1597,6 @@ function App() {
 
       setMessageDraft("");
       setPendingFiles([]);
-      setPendingVideoLinks([]);
       setPendingGifs([]);
       setMessageSendError(null);
       for (const key of usedCacheKeys) {
@@ -2792,25 +2731,14 @@ function App() {
             </section>
 
             <footer className="border-t border-white/10 bg-[#1b2030]/90 px-3 py-2 backdrop-blur">
-              {(pendingFiles.length > 0 || pendingVideoLinks.length > 0 || pendingGifs.length > 0) && (
+              {(pendingFiles.length > 0 || pendingGifs.length > 0) && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, idx) => (
                     <span key={`${file.name}:${file.size}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-text">
-                      📎 {file.name}
+                      🖼️ {file.name}
                       <button
                         className="text-orbit-muted hover:text-orbit-text"
                         onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
-                      >
-                        x
-                      </button>
-                    </span>
-                  ))}
-                  {pendingVideoLinks.map((link, idx) => (
-                    <span key={`${link}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
-                      🎬 {new URL(link).hostname}
-                      <button
-                        className="text-orbit-muted hover:text-orbit-text"
-                        onClick={() => setPendingVideoLinks((prev) => prev.filter((_, i) => i !== idx))}
                       >
                         x
                       </button>
@@ -2835,11 +2763,12 @@ function App() {
                   ref={fileInputRef}
                   type="file"
                   multiple
+                  accept="image/*"
                   className="hidden"
                   onChange={(event) => handleAttachFiles(event.target.files)}
                 />
-                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Attach file">
-                  📎
+                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Attach image">
+                  🖼️
                 </button>
                 <button
                   ref={gifButtonRef}
@@ -2864,15 +2793,6 @@ function App() {
                   title="Emoji"
                 >
                   🙂
-                </button>
-                <input
-                  className="orbit-input h-8 flex-1 px-2.5 text-xs"
-                  value={videoLinkDraft}
-                  onChange={(event) => setVideoLinkDraft(event.target.value)}
-                  placeholder="Video link"
-                />
-                <button className="orbit-btn h-8 px-2.5 text-xs" onClick={handleAddVideoLink} title="Add video link">
-                  🎬
                 </button>
               </div>
 

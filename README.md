@@ -20,8 +20,7 @@ Orbit Chat combines:
 - recovery code lifecycle management (status, refresh, permanent disable with confirmation)
 - per-chat passcode lock controls (on leave, on logout, timed, inactivity)
 - two-party passcode disable approval and passcode re-enable generation flow
-- encrypted attachment handling for files and images
-- video link sharing (link-only, no direct video upload)
+- encrypted attachment handling for images
 - GIF search and attach flow (Giphy API)
 - searchable emoji picker with recents + keyboard navigation
 - client-side unread badge tracking that clears on active chat selection
@@ -44,7 +43,6 @@ Encrypted end-to-end:
 
 - direct message text payloads (DM content)
 - DM attachment metadata embedded in encrypted message envelopes
-- DM video links embedded in encrypted message envelopes
 - DM GIF links embedded in encrypted message envelopes
 - attachment file keys wrapped inside encrypted message envelopes
 - attachment file bytes uploaded as encrypted blobs
@@ -76,7 +74,7 @@ Core safety properties:
 - Server does not perform plaintext decryption of DM payloads.
 - Attachment bytes are encrypted on sender device before upload.
 - Attachment bytes are decrypted on recipient device after download.
-- Video links are sent as encrypted message data, not as a server-parsed plaintext field.
+- Pasted links are encrypted as part of the DM message body, not parsed as separate plaintext media fields.
 
 ## Cryptography Model (Plain English)
 
@@ -112,8 +110,7 @@ Runtime behavior notes:
 - If a DM key is still being prepared on first receive, UI may briefly show encrypted fallback text, then decrypt once key material is available.
 - First-time inbound DM messages are delivered in realtime without requiring a re-login refresh.
 - Realtime duplicate safety delivery can arrive through both conversation and user rooms; client message upsert is id-based to prevent duplicate rows.
-- Encrypted attachment delivery supports chunked encryption and in-session retry reuse for files already uploaded.
-- Video attachments are currently link-only by design.
+- Encrypted attachment delivery supports chunked encryption and in-session retry reuse for images already uploaded.
 - GIF picker search and selection supports keyboard navigation, active-item highlighting, and outside-click/Escape dismiss.
 - Emoji picker supports search tags, recent emoji shortcuts, and keyboard navigation.
 - Unread counters are maintained client-side and reset immediately when a conversation becomes active.
@@ -347,7 +344,6 @@ Server is not trusted for:
 - Private keys are currently stored in local app storage, not OS keychain.
 - Fingerprint verification between users is not implemented.
 - Forward secrecy and ratcheting are not implemented yet.
-- Video files are intentionally disabled for direct upload (video links only).
 - GIF discovery uses Giphy search endpoints (client-side query to external API).
 - Attachment reservation metadata is handled server-side for access control and lifecycle management.
 - Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
