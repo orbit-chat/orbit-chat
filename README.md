@@ -1,10 +1,10 @@
 # Orbit Chat Desktop
 
-Orbit Chat is a desktop direct-messaging app focused on private communication.
+Orbit Chat is a desktop messaging app focused on private communication.
 
-Current desktop package version: `0.7.4`.
+Current desktop package version: `0.8.0`.
 
-This app is designed so message text in one-to-one chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
+This app is designed so message text in direct and group chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
 ## What This Is
 
@@ -28,6 +28,9 @@ Orbit Chat combines:
 - DM fallback labels using `@username#chatId` when no custom chat name is set
 - local archive/unarchive chat workflow with conversation context menu actions
 - DM delete + unfriend flow and group leave flow with optional message wipe
+- home/recent chats as default landing view with dedicated DM, Group Chats, Friends, and Archive tabs
+- group member add flow with membership-change rekeying and history key-version access control
+- server-side owner remove-member API with membership-change event fanout
 - full-scene scroll handling for auth, lock, modal, and app-shell views
 - client URL normalization safeguards for malformed API/socket base URLs
 - avatar rendering across DM and friends surfaces with initials fallback
@@ -42,8 +45,9 @@ For local development, set `VITE_API_URL` and `VITE_SOCKET_URL` in `.env` (from 
 Encrypted end-to-end:
 
 - direct message text payloads (DM content)
-- DM attachment metadata embedded in encrypted message envelopes
-- DM GIF links embedded in encrypted message envelopes
+- group message text payloads (group content)
+- attachment metadata embedded in encrypted message envelopes
+- GIF links embedded in encrypted message envelopes
 - attachment file keys wrapped inside encrypted message envelopes
 - attachment file bytes uploaded as encrypted blobs
 
@@ -56,14 +60,14 @@ Not encrypted end-to-end:
 - profile data
 - media reservation metadata used for routing/storage (for example object key, lifecycle status, content type)
 
-In plain terms: the server can route messages and know chat structure, but should not be able to read encrypted DM text.
+In plain terms: the server can route messages and know chat structure, but should not be able to read encrypted message text.
 
 ## Why It Is Considered Safe
 
 Orbit Chat uses a layered model:
 
 1. Transport security protects data in transit.
-2. End-to-end encryption protects DM content even if transport or storage is inspected.
+2. End-to-end encryption protects chat content even if transport or storage is inspected.
 3. Device private keys remain on client devices.
 
 Core safety properties:
@@ -72,6 +76,7 @@ Core safety properties:
 - Message ciphertext is decrypted on recipient device.
 - Server stores encrypted conversation keys and encrypted messages.
 - Server does not perform plaintext decryption of DM payloads.
+- Group membership changes trigger key-version rotation and member-specific readable-version boundaries.
 - Attachment bytes are encrypted on sender device before upload.
 - Attachment bytes are decrypted on recipient device after download.
 - Pasted links are encrypted as part of the DM message body, not parsed as separate plaintext media fields.
@@ -81,7 +86,7 @@ Core safety properties:
 There are two key types:
 
 - Device keypair (public/private): one per device identity.
-- Conversation key (symmetric): shared secret used to encrypt DM messages.
+- Conversation key (symmetric): shared secret used to encrypt chat messages.
 
 How a DM key is shared:
 
@@ -89,6 +94,13 @@ How a DM key is shared:
 2. That key is sealed separately to each participant's public key.
 3. Server stores only the sealed versions.
 4. Each device opens its own sealed copy using its private key.
+
+How group key access is managed:
+
+1. Group messages carry a key version.
+2. Membership changes (add/remove/leave) rotate to a new group key version.
+3. New members receive only the current sealed group key and start with that version as their minimum readable version.
+4. History queries are constrained to each member's minimum readable key version.
 
 How a message is sent:
 
@@ -107,13 +119,16 @@ How an attachment is sent:
 
 Runtime behavior notes:
 
-- If a DM key is still being prepared on first receive, UI may briefly show encrypted fallback text, then decrypt once key material is available.
+- If a conversation key is still being prepared on first receive, UI may briefly show encrypted fallback text, then decrypt once key material is available.
 - First-time inbound DM messages are delivered in realtime without requiring a re-login refresh.
 - Realtime duplicate safety delivery can arrive through both conversation and user rooms; client message upsert is id-based to prevent duplicate rows.
+- Newer incoming key versions trigger local key refresh to keep membership-change rekeys in sync.
+- Messages older than a member's readable key-version boundary are hidden from local decrypt/render.
 - Encrypted attachment delivery supports chunked encryption and in-session retry reuse for images already uploaded.
 - GIF picker search and selection supports keyboard navigation, active-item highlighting, and outside-click/Escape dismiss.
 - Emoji picker supports search tags, recent emoji shortcuts, and keyboard navigation.
 - Unread counters are maintained client-side and reset immediately when a conversation becomes active.
+- Navigation now separates Home (recent chats), Direct Messages, Group Chats, Friends, and Archive surfaces.
 - Chat settings support custom display names and passcode/lock updates in one panel.
 - Chat settings include passcode disable-request approval and passcode re-enable generation events.
 - New chat passcodes are shown once with deferred display handling for conversation lifecycle events.
@@ -131,10 +146,12 @@ Desktop App (Electron + React)
 	|- Auth/session state
 	|- Frameless title bar + desktop window controls
 	|- Realtime socket client
-	|- Friends + archive side panels
+	|- Home/DM/Group/Friends/Archive navigation surfaces
 	|- Conversation context menu (archive/relock/delete or leave)
 	|- URL-normalized API/socket endpoint handling
 	|- E2EE key management
+	|- Membership-change rekey handling (add/remove/leave)
+	|- Per-member key-version decrypt boundary handling
 	|- Recovery code display/login/management flows
 	|- Chat passcode disable-approval + re-enable UX
 	|- GIF + emoji composer workflows
@@ -146,6 +163,8 @@ Orbit Backend (NestJS)
 	|- Auth + user profiles
 	|- Friend graph + friend request workflows
 	|- Conversation membership + message storage
+	|- Membership-change key rotation (group add/remove/leave)
+	|- Per-member minimum readable key-version enforcement on history fetch
 	|- Conversation delete/leave + optional message wipe behavior
 	|- Chat display-name updates with uniqueness validation per user
 	|- Encrypted conversation key storage
@@ -169,10 +188,12 @@ flowchart LR
 	B -->|Encrypted payload| C[Recipient Desktop Client]
 	B -->|Safety-net emit to user room| C
 	A -->|Socket send_message event| B
+	A -->|Membership change rekey payloads| B
 	A -->|GIF search query| G[Giphy API]
 	G -->|GIF URLs and previews| A
 	A -->|Sealed conversation key for sender| B
 	A -->|Sealed conversation key for recipient| B
+	B -->|History filtered by member min key version| C
 	A -->|Passcode disable/reenable requests| B
 	A -->|Encrypted attachment bytes| B
 	B -->|Encrypted attachment bytes| C
@@ -187,13 +208,14 @@ sequenceDiagram
 	participant API as Orbit Server
 	participant R as Receiver Client
 
-	S->>S: Ensure conversation key exists
+	S->>S: Ensure conversation key exists and key version is current
 	S->>S: Compose text/emoji and optional GIF link
 	S->>S: Encrypt plaintext -> ciphertext + nonce
 	S->>API: Emit send_message via Socket.IO
 	API->>R: Emit to conversation room
 	API->>R: Emit to user room safety-net
 	API-->>S: Ack + persisted metadata
+	R->>API: Fetch allowed history window by min key version
 	R->>R: Decrypt locally using conversation key
 	R->>R: Resolve chat label (custom name or username#chatId)
 	R->>R: Render plaintext in UI
@@ -240,11 +262,11 @@ flowchart TD
 	G1 --> H[Join user room and active conversation rooms]
 	H --> H1[Normalize API/socket base URLs from env config]
 	H1 --> H2[Listen for friendships_updated and realtime message events]
-	H2 --> H3[Handle conversation_created, chat_settings_updated, passcode_reenabled, conversation_deleted]
+	H2 --> H3[Handle conversation_created, member_added, member_left, member_removed, chat_settings_updated, passcode_reenabled, conversation_deleted]
 	H2 --> I[REST fetch: conversations + message history]
-	I --> J[For each DM: resolve sealed conversation key]
+	I --> J[For each conversation: resolve sealed key material]
 	J --> K[Unseal key locally with device private key]
-	K --> L[Decrypt ciphertext messages in memory]
+	K --> L[Decrypt ciphertext messages in memory when keyVersion >= member minimum]
 	L --> M[Render timeline]
 	M --> M2[Resolve chat label custom name or username#chatId]
 	M2 --> M3[Conversation context menu supports archive/relock/delete/leave]
@@ -302,7 +324,9 @@ sequenceDiagram
 	API->>RT: Emit passcode lifecycle events (passcode_reenabled, updates)
 
 	C->>API: POST conversations/:id/delete or /leave
-	API->>DB: Apply membership delete/leave + optional message wipe rules
+	API->>DB: Apply membership delete/leave/remove + optional message wipe rules
+	API->>DB: Rotate group key version on membership changes
+	API->>DB: Enforce min-readable key version constraints for each member
 	API->>RT: Emit conversation_deleted or member_left
 
 	C->>API: POST auth/login/recovery + recovery-code management endpoints
@@ -339,7 +363,7 @@ Server is not trusted for:
 
 ## Important Limits (Honest Security Notes)
 
-- Group chats are not fully E2EE in the same way as DMs.
+- Group E2EE currently depends on centralized membership enforcement and server-coordinated key distribution metadata.
 - Metadata is still visible to backend.
 - Private keys are currently stored in local app storage, not OS keychain.
 - Fingerprint verification between users is not implemented.
@@ -352,4 +376,4 @@ Server is not trusted for:
 
 ## Product Summary
 
-Orbit Chat is a desktop-first secure messaging client where DM content is encrypted on-device and decrypted on-device, with backend infrastructure focused on identity, routing, and encrypted data transport rather than plaintext access.
+Orbit Chat is a desktop-first secure messaging client where direct and group chat content is encrypted on-device and decrypted on-device, with backend infrastructure focused on identity, routing, and encrypted data transport rather than plaintext access.
