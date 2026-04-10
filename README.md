@@ -2,7 +2,7 @@
 
 Orbit Chat is a desktop direct-messaging app focused on private communication.
 
-Current desktop package version: `0.6.0`.
+Current desktop package version: `0.7.4`.
 
 This app is designed so message text in one-to-one chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
@@ -17,7 +17,9 @@ Orbit Chat combines:
 - profile viewing and editing UI (popover + settings)
 - friend requests and friend list management
 - account recovery code login and bypass flows
+- recovery code lifecycle management (status, refresh, permanent disable with confirmation)
 - per-chat passcode lock controls (on leave, on logout, timed, inactivity)
+- two-party passcode disable approval and passcode re-enable generation flow
 - encrypted attachment handling for files and images
 - video link sharing (link-only, no direct video upload)
 - GIF search and attach flow (Giphy API)
@@ -25,9 +27,12 @@ Orbit Chat combines:
 - client-side unread badge tracking that clears on active chat selection
 - chat display names editable in per-chat settings
 - DM fallback labels using `@username#chatId` when no custom chat name is set
+- local archive/unarchive chat workflow with conversation context menu actions
+- DM delete + unfriend flow and group leave flow with optional message wipe
 - full-scene scroll handling for auth, lock, modal, and app-shell views
 - client URL normalization safeguards for malformed API/socket base URLs
 - avatar rendering across DM and friends surfaces with initials fallback
+- frameless desktop shell with custom title bar window controls
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
@@ -113,18 +118,28 @@ Runtime behavior notes:
 - Emoji picker supports search tags, recent emoji shortcuts, and keyboard navigation.
 - Unread counters are maintained client-side and reset immediately when a conversation becomes active.
 - Chat settings support custom display names and passcode/lock updates in one panel.
+- Chat settings include passcode disable-request approval and passcode re-enable generation events.
+- New chat passcodes are shown once with deferred display handling for conversation lifecycle events.
 - Locked/passcode prompts include the chat label so users can match the correct passcode to the correct DM instance.
+- Friend data refreshes on focus/visibility and server `friendships_updated` events.
 - Scene containers are scroll-safe on smaller viewports (auth, passcode, main shell columns, and settings modal).
 - API and socket base URLs are normalized client-side to reduce config mistakes (for example accidental `/:port` formatting).
+- Realtime transport starts with polling and upgrades to websocket for better proxy/firewall compatibility.
+- Access tokens can be silently refreshed during API/socket auth failures to reduce forced re-logins.
 
 ## System Design
 
 ```text
 Desktop App (Electron + React)
 	|- Auth/session state
+	|- Frameless title bar + desktop window controls
 	|- Realtime socket client
+	|- Friends + archive side panels
+	|- Conversation context menu (archive/relock/delete or leave)
 	|- URL-normalized API/socket endpoint handling
 	|- E2EE key management
+	|- Recovery code display/login/management flows
+	|- Chat passcode disable-approval + re-enable UX
 	|- GIF + emoji composer workflows
 	|- Encrypt/decrypt message content
 					|
@@ -134,9 +149,11 @@ Orbit Backend (NestJS)
 	|- Auth + user profiles
 	|- Friend graph + friend request workflows
 	|- Conversation membership + message storage
+	|- Conversation delete/leave + optional message wipe behavior
 	|- Chat display-name updates with uniqueness validation per user
 	|- Encrypted conversation key storage
 	|- Chat passcode verification + lock policy enforcement
+	|- Passcode disable-request + re-enable event fanout
 	|- Recovery-code assisted passcode bypass
 	|- Media reservation, signed upload/download URL issuance, and lifecycle cleanup
 	|- Realtime fanout (Socket.IO conversation room + user room safety net)
@@ -154,10 +171,12 @@ flowchart LR
 	A[Sender Desktop Client] -->|Encrypted payload| B[Orbit Server]
 	B -->|Encrypted payload| C[Recipient Desktop Client]
 	B -->|Safety-net emit to user room| C
+	A -->|Socket send_message event| B
 	A -->|GIF search query| G[Giphy API]
 	G -->|GIF URLs and previews| A
 	A -->|Sealed conversation key for sender| B
 	A -->|Sealed conversation key for recipient| B
+	A -->|Passcode disable/reenable requests| B
 	A -->|Encrypted attachment bytes| B
 	B -->|Encrypted attachment bytes| C
 	B -. cannot decrypt payload without private keys .- B
@@ -174,9 +193,10 @@ sequenceDiagram
 	S->>S: Ensure conversation key exists
 	S->>S: Compose text/emoji and optional GIF link
 	S->>S: Encrypt plaintext -> ciphertext + nonce
-	S->>API: Send encrypted message payload
+	S->>API: Emit send_message via Socket.IO
 	API->>R: Emit to conversation room
 	API->>R: Emit to user room safety-net
+	API-->>S: Ack + persisted metadata
 	R->>R: Decrypt locally using conversation key
 	R->>R: Resolve chat label (custom name or username#chatId)
 	R->>R: Render plaintext in UI
@@ -210,31 +230,37 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-	A[App Boot: Electron window + React mount] --> B[Load persisted auth + profile cache]
+	A[App Boot: Electron window + React mount] --> A1[Initialize frameless title bar controls]
+	A1 --> B[Load persisted auth + profile cache]
 	B --> C{Access token valid?}
 	C -- No --> D[Show auth UI / login]
+	D --> D1[Support password login or recovery code login]
 	C -- Yes --> E[Hydrate stores: auth, socket, messages, profiles, e2ee]
 	E --> E2[Load friend/request state + unread counters]
 	E --> F[Initialize libsodium + device key material]
 	F --> G[Open Socket.IO session with JWT]
-	G --> H[Join user room and active conversation rooms]
+	G --> G1[Start polling transport, then upgrade websocket]
+	G1 --> H[Join user room and active conversation rooms]
 	H --> H1[Normalize API/socket base URLs from env config]
 	H1 --> H2[Listen for friendships_updated and realtime message events]
+	H2 --> H3[Handle conversation_created, chat_settings_updated, passcode_reenabled, conversation_deleted]
 	H2 --> I[REST fetch: conversations + message history]
 	I --> J[For each DM: resolve sealed conversation key]
 	J --> K[Unseal key locally with device private key]
 	K --> L[Decrypt ciphertext messages in memory]
 	L --> M[Render timeline]
 	M --> M2[Resolve chat label custom name or username#chatId]
+	M2 --> M3[Conversation context menu supports archive/relock/delete/leave]
 	M2 --> N[User sends message]
 	N --> O{Has attachment?}
 	O -- No --> P[Encrypt plaintext with conversation key and nonce]
 	O -- Yes --> P2[Encrypt attachment chunks + upload encrypted blob]
 	P2 --> P3[Embed wrapped file key and media IDs in encrypted envelope]
-	P3 --> P[POST encrypted payload]
+	P3 --> P[Emit encrypted payload over socket]
 	P --> Q[Receive socket ack/new-message events]
 	Q --> R[Update local stores + reconcile optimistic UI]
 	R --> S[Maintain scrollable scene containers and modal panels]
+	S --> T[Profile settings + recovery code management + chat passcode lifecycle controls]
 ```
 
 ## Detailed Server Processing Flow
@@ -260,21 +286,34 @@ sequenceDiagram
 	API-->>C: mediaId + signed upload URL
 	C->>OBJ: PUT encrypted media bytes
 
-	C->>API: HTTP sendMessage(ciphertext, nonce, conversationId)
-	API->>G: Validate token + conversation access
-	G-->>API: Authorized
-	API->>DB: Persist encrypted message row
-	API->>DB: Attach pending media rows by mediaId
-	API->>DB: Update conversation last activity
-	API->>RC: Update unread/presence counters (if enabled)
+	C->>RT: Socket send_message(ciphertext, nonce, keyVersion, mediaIds)
+	RT->>G: Validate token + conversation access
+	G-->>RT: Authorized
+	RT->>DB: Persist encrypted message row
+	RT->>DB: Attach pending media rows by mediaId
+	RT->>DB: Update conversation last activity
+	RT->>RT: Emit to conversation room + user-room safety net
+	RT-->>C: Ack/new_message events
+
 	C->>API: PUT conversations/:id/settings (name/passcode/lock updates)
 	API->>DB: Validate name uniqueness for request user scope
 	API->>DB: Persist updated chat display name and lock settings
-	API->>RT: Join online member sockets to conv room (first-message safety)
-	API->>RT: Emit message to conversation room
-	API->>RT: Emit same payload to each member user room
-	RT-->>C: Sender ack + fanout to online recipients
-	API-->>C: HTTP response with stored message metadata
+	API->>RT: Emit chat_settings_updated
+
+	C->>API: POST conversations/:id/request-disable-passcode or /reenable-passcode
+	API->>DB: Update passcode state and pending approvals
+	API->>RT: Emit passcode lifecycle events (passcode_reenabled, updates)
+
+	C->>API: POST conversations/:id/delete or /leave
+	API->>DB: Apply membership delete/leave + optional message wipe rules
+	API->>RT: Emit conversation_deleted or member_left
+
+	C->>API: POST auth/login/recovery + recovery-code management endpoints
+	API->>DB: Validate or rotate/disable one-time recovery codes
+
+	C->>API: GET users/friends + users/friends/requests
+	API->>RT: Emit friendships_updated on friendship mutations
+	API->>RC: Update unread/presence counters (if enabled)
 
 	Note over API,DB: Conversation keys are stored sealed per user/device
 	Note over API: Server routes ciphertext and metadata, not plaintext DM content
@@ -312,6 +351,7 @@ Server is not trusted for:
 - GIF discovery uses Giphy search endpoints (client-side query to external API).
 - Attachment reservation metadata is handled server-side for access control and lifecycle management.
 - Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
+- In-app desktop auto-update flow is not enabled yet; users still install updates from release artifacts.
 - Current build config forces `libsodium-wrappers` to its CommonJS entry due to an upstream ESM packaging issue.
 
 ## Product Summary
