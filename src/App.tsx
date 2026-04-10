@@ -502,7 +502,11 @@ function App() {
   const { user, clearSession, token, loading, error, login, signup, loginWithRecoveryCode, pendingRecoveryCodes, clearPendingRecoveryCodes } = useAuthStore();
   const { connected, connectionState, connectionError, connect, disconnect, socket } = useSocketStore();
   const { byConversation, unreadCountByConversation, upsertMessage, setActiveConversation } = useMessagesStore();
-  const profiles = useProfilesStore();
+  const profileById = useProfilesStore((state) => state.byId);
+  const profileLoadingById = useProfilesStore((state) => state.loadingById);
+  const profileErrorById = useProfilesStore((state) => state.errorById);
+  const fetchProfile = useProfilesStore((state) => state.fetchProfile);
+  const fetchMeProfile = useProfilesStore((state) => state.fetchMe);
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
@@ -730,9 +734,9 @@ function App() {
       if (!token) return;
       setProfilePopoverUserId(userId);
       setProfilePopoverAnchor(anchorEl ? anchorEl.getBoundingClientRect() : null);
-      await profiles.fetchProfile(userId, token);
+      await fetchProfile(userId, token);
     },
-    [profiles, token]
+    [fetchProfile, token]
   );
 
   const closeProfilePopover = useCallback(() => {
@@ -835,8 +839,8 @@ function App() {
 
   useEffect(() => {
     if (!token || !user) return;
-    profiles.fetchMe(token, user.id);
-  }, [token, user?.id]);
+    fetchMeProfile(token, user.id);
+  }, [fetchMeProfile, token, user?.id]);
 
   useEffect(() => {
     if (!token) return;
@@ -853,11 +857,11 @@ function App() {
     for (const result of searchResults) ids.add(result.id);
 
     ids.forEach((id) => {
-      if (!profiles.byId[id]) {
-        void profiles.fetchProfile(id, token);
+      if (!profileById[id]) {
+        void fetchProfile(id, token);
       }
     });
-  }, [token, conversations, friends, friendRequests.incoming, friendRequests.outgoing, searchResults, profiles]);
+  }, [token, conversations, friends, friendRequests.incoming, friendRequests.outgoing, searchResults, profileById, fetchProfile]);
 
   useEffect(() => {
     if (navTab !== "dm") {
@@ -1743,7 +1747,7 @@ function App() {
                     const relation = friendStatusByUserId.get(u.id);
                     const incomingRequest = friendRequests.incoming.find((request) => request.user.id === u.id);
                     const outgoingRequest = friendRequests.outgoing.find((request) => request.user.id === u.id);
-                    const avatarUrl = u.avatarUrl ?? profiles.byId[u.id]?.avatarUrl ?? null;
+                    const avatarUrl = u.avatarUrl ?? profileById[u.id]?.avatarUrl ?? null;
 
                     return (
                       <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2">
@@ -1811,7 +1815,7 @@ function App() {
                   const otherMember = conv.members.find((m) => m.user.id !== user.id);
                   const otherUserId = otherMember?.user.id ?? "";
                   const otherUsername = otherMember?.user.username ?? "dm";
-                  const avatarUrl = profiles.byId[otherUserId]?.avatarUrl ?? null;
+                  const avatarUrl = profileById[otherUserId]?.avatarUrl ?? null;
                   const convoMessages = byConversation[conv.id] ?? [];
                   const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
                   const displayName =
@@ -1910,7 +1914,7 @@ function App() {
                     const relation = friendStatusByUserId.get(u.id);
                     const incomingRequest = friendRequests.incoming.find((request) => request.user.id === u.id);
                     const outgoingRequest = friendRequests.outgoing.find((request) => request.user.id === u.id);
-                    const avatarUrl = u.avatarUrl ?? profiles.byId[u.id]?.avatarUrl ?? null;
+                    const avatarUrl = u.avatarUrl ?? profileById[u.id]?.avatarUrl ?? null;
                     return (
                       <div key={u.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
@@ -1970,8 +1974,8 @@ function App() {
                   <div key={request.id} className="rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
                     <div className="flex items-center gap-2">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
-                        {(request.user.avatarUrl ?? profiles.byId[request.user.id]?.avatarUrl) ? (
-                          <img src={(request.user.avatarUrl ?? profiles.byId[request.user.id]?.avatarUrl) ?? ""} alt={`@${request.user.username}`} className="h-full w-full object-cover" />
+                        {(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ? (
+                          <img src={(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ?? ""} alt={`@${request.user.username}`} className="h-full w-full object-cover" />
                         ) : (
                           (request.user.username[0] ?? "U").toUpperCase()
                         )}
@@ -2014,8 +2018,8 @@ function App() {
                 {friendRequests.outgoing.slice(0, 3).map((request) => (
                   <div key={request.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-orbit-panelAlt p-2.5">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
-                      {(request.user.avatarUrl ?? profiles.byId[request.user.id]?.avatarUrl) ? (
-                        <img src={(request.user.avatarUrl ?? profiles.byId[request.user.id]?.avatarUrl) ?? ""} alt={`@${request.user.username}`} className="h-full w-full object-cover" />
+                      {(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ? (
+                        <img src={(request.user.avatarUrl ?? profileById[request.user.id]?.avatarUrl) ?? ""} alt={`@${request.user.username}`} className="h-full w-full object-cover" />
                       ) : (
                         (request.user.username[0] ?? "U").toUpperCase()
                       )}
@@ -2050,8 +2054,8 @@ function App() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 flex-1 items-center gap-2">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[11px] font-semibold text-orbit-text">
-                          {(friend.user.avatarUrl ?? profiles.byId[friend.user.id]?.avatarUrl) ? (
-                            <img src={(friend.user.avatarUrl ?? profiles.byId[friend.user.id]?.avatarUrl) ?? ""} alt={`@${friend.user.username}`} className="h-full w-full object-cover" />
+                          {(friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl) ? (
+                            <img src={(friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl) ?? ""} alt={`@${friend.user.username}`} className="h-full w-full object-cover" />
                           ) : (
                             (friend.user.username[0] ?? "U").toUpperCase()
                           )}
@@ -2831,9 +2835,9 @@ function App() {
         <UserProfilePopover
           open={Boolean(profilePopoverUserId)}
           anchorRect={profilePopoverAnchor}
-          profile={profilePopoverUserId ? profiles.byId[profilePopoverUserId] ?? null : null}
-          loading={profilePopoverUserId ? profiles.loadingById[profilePopoverUserId] ?? false : false}
-          error={profilePopoverUserId ? profiles.errorById[profilePopoverUserId] ?? null : null}
+          profile={profilePopoverUserId ? profileById[profilePopoverUserId] ?? null : null}
+          loading={profilePopoverUserId ? profileLoadingById[profilePopoverUserId] ?? false : false}
+          error={profilePopoverUserId ? profileErrorById[profilePopoverUserId] ?? null : null}
           onClose={closeProfilePopover}
           canEdit={Boolean(user && profilePopoverUserId && user.id === profilePopoverUserId)}
           onEditClick={() => {

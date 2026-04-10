@@ -12,23 +12,34 @@ type RequestOptions = {
   token?: string | null;
 };
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function request<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
   let res: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     res = await fetch(`${API_BASE}${path}`, {
       method: opts.method ?? "GET",
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: controller.signal,
     });
   } catch (err: any) {
+    clearTimeout(timeout);
     const message = (err?.message ?? "").toLowerCase();
+    if (err?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s while calling ${path}`);
+    }
     if (message.includes("failed to fetch") || message.includes("networkerror")) {
       throw new Error(`Unable to reach Orbit server at ${API_BASE}. Ensure orbit-server is running and VITE_API_URL is correct.`);
     }
     throw err;
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!res.ok) {
