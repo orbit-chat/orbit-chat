@@ -1297,8 +1297,8 @@ function App() {
   }, [gifQuery, showGifPicker]);
 
   const handleAddGif = useCallback((gif: GifSearchResult) => {
-    setPendingGifs((prev) => [
-      ...prev,
+    // Keep a single selected GIF so choosing another one updates the preview.
+    setPendingGifs([
       {
         kind: "gif_link",
         url: gif.gifUrl,
@@ -2859,15 +2859,37 @@ function App() {
                     </span>
                   ))}
                   {pendingGifs.map((gif, idx) => (
-                    <span key={`${gif.url}:${idx}`} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-orbit-accent">
-                      GIF
-                      <button
-                        className="text-orbit-muted hover:text-orbit-text"
-                        onClick={() => setPendingGifs((prev) => prev.filter((_, i) => i !== idx))}
-                      >
-                        x
-                      </button>
-                    </span>
+                    <div
+                      key={`${gif.url}:${idx}`}
+                      className="group flex items-center gap-2 rounded-lg border border-white/10 bg-orbit-panelAlt p-1.5"
+                    >
+                      <img
+                        src={gif.previewUrl || gif.url}
+                        alt={gif.title || "Selected GIF"}
+                        className="h-12 w-16 rounded-md border border-white/10 object-cover"
+                        loading="lazy"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-[11px] font-semibold text-orbit-accent">GIF preview</p>
+                        <p className="truncate text-[10px] text-orbit-muted">{gif.title || "Selected from GIF picker"}</p>
+                      </div>
+                      <div className="ml-auto flex items-center gap-1">
+                        <button
+                          className="orbit-btn px-2 py-1 text-[10px]"
+                          onClick={() => toggleGifPicker()}
+                          title="Choose another GIF"
+                        >
+                          Change
+                        </button>
+                        <button
+                          className="orbit-btn px-2 py-1 text-[10px] text-rose-300 hover:bg-rose-500/15"
+                          onClick={() => setPendingGifs([])}
+                          title="Remove selected GIF"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
