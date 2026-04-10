@@ -429,6 +429,18 @@ export function leaveGroupChat(conversationId: string, wipeMessages: boolean, to
   });
 }
 
+export function addMembers(
+  conversationId: string,
+  data: { memberIds: string[]; encryptedKeys?: Record<string, string> },
+  token: string
+) {
+  return request<{ success: true }>(`/conversations/${conversationId}/members`, {
+    method: "POST",
+    body: data,
+    token,
+  });
+}
+
 export function updateChatSettings(
   conversationId: string,
   data: {

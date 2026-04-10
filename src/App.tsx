@@ -513,6 +513,21 @@ function App() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Group creation modal
+  const [groupCreationModal, setGroupCreationModal] = useState<{
+    open: boolean;
+    selectedMemberIds: Set<string>;
+    groupName: string;
+    loading: boolean;
+    error: string | null;
+  }>({
+    open: false,
+    selectedMemberIds: new Set(),
+    groupName: "",
+    loading: false,
+    error: null,
+  });
+
   // Server data
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -1566,6 +1581,80 @@ function App() {
     }
   };
 
+  /* ───── Create a new group chat ───── */
+  const startGroupChat = async () => {
+    if (!token) return;
+    if (!user) return;
+    if (groupCreationModal.selectedMemberIds.size === 0) {
+      setGroupCreationModal((prev) => ({ ...prev, error: "Select at least one member" }));
+      return;
+    }
+
+    setGroupCreationModal((prev) => ({ ...prev, loading: true, error: null }));
+
+    try {
+      const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
+      const memberIds = Array.from(groupCreationModal.selectedMemberIds);
+
+      // Get public keys for all members
+      const memberPublicKeys: Record<string, string> = {};
+      for (const memberId of memberIds) {
+        const memberKeys = await api.getUserKeys(memberId, token);
+        const publicKey = latestPublicKey(memberKeys);
+        if (!publicKey) {
+          throw new Error(`Could not get public key for member ${memberId}`);
+        }
+        memberPublicKeys[memberId] = publicKey;
+      }
+
+      // Create group secret key and encrypt for all members + creator
+      const secretKey = await generateSecretKey();
+      const encryptedKeys: Record<string, string> = {
+        [user.id]: await sealToPublicKey(secretKey, myPublicKey),
+      };
+
+      for (const memberId of memberIds) {
+        encryptedKeys[memberId] = await sealToPublicKey(secretKey, memberPublicKeys[memberId]);
+      }
+
+      // Create group conversation
+      const conv = await api.createConversation(
+        {
+          type: "group",
+          name: groupCreationModal.groupName || "New Group",
+          memberIds,
+          encryptedKeys,
+        },
+        token
+      );
+
+      setConversations((prev) => [conv, ...prev]);
+      setSelectedConvId(conv.id);
+      setMainView("chat");
+      setSearch("");
+      setSearchResults([]);
+
+      // Auto-unlock with default settings
+      chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
+
+      // Close modal and reset
+      setGroupCreationModal({
+        open: false,
+        selectedMemberIds: new Set(),
+        groupName: "",
+        loading: false,
+        error: null,
+      });
+    } catch (err: any) {
+      setGroupCreationModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: err?.message || "Failed to create group",
+      }));
+    }
+  };
+
   const handleAttachFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const accepted = Array.from(files).filter((file) => {
@@ -1588,7 +1677,7 @@ function App() {
     if (!token) return;
     if (!draft && !hasAttachments) return;
 
-    if (!selectedConversation || selectedConversation.type !== "dm") return;
+    if (!selectedConversation) return;
 
     try {
       const secretKey = await ensureConversationSecretKey({
@@ -2127,6 +2216,13 @@ function App() {
                   })}
                 </div>
               )}
+
+              <button
+                className="orbit-btn-primary mt-4 w-full px-3 py-2 text-xs font-semibold"
+                onClick={() => setGroupCreationModal((prev) => ({ ...prev, open: true }))}
+              >
+                Create Group Chat
+              </button>
 
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
@@ -3484,6 +3580,127 @@ function App() {
             </div>
           )}
         </main>
+
+        {/* Group creation modal */}
+        {groupCreationModal.open && (
+          <div
+            className="orbit-modal-overlay"
+            onClick={() => {
+              if (!groupCreationModal.loading) {
+                setGroupCreationModal((prev) => ({
+                  ...prev,
+                  open: false,
+                  selectedMemberIds: new Set(),
+                  groupName: "",
+                  error: null,
+                }));
+              }
+            }}
+          >
+            <div
+              className="orbit-modal max-w-sm"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <h3 className="text-base font-bold text-orbit-text">Create Group Chat</h3>
+              <p className="mt-1 text-xs text-orbit-muted">Add members from your friends and give the group a name.</p>
+
+              {groupCreationModal.error && (
+                <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {groupCreationModal.error}
+                </div>
+              )}
+
+              <label className="mt-4 block">
+                <span className="orbit-label">Group name</span>
+                <input
+                  className="orbit-input"
+                  placeholder="My Team"
+                  value={groupCreationModal.groupName}
+                  onChange={(e) => setGroupCreationModal((prev) => ({ ...prev, groupName: e.target.value, error: null }))}
+                  maxLength={64}
+                />
+              </label>
+
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold text-slate-400">Select members ({groupCreationModal.selectedMemberIds.size})</p>
+                <div className="max-h-48 space-y-1.5 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-2">
+                  {friends.length === 0 ? (
+                    <p className="text-center text-xs text-orbit-muted">No friends to add yet. Add some friends first.</p>
+                  ) : (
+                    friends.map((friend) => {
+                      const isSelected = groupCreationModal.selectedMemberIds.has(friend.user.id);
+                      const avatarUrl = friend.user.avatarUrl ?? profileById[friend.user.id]?.avatarUrl ?? null;
+                      return (
+                        <label
+                          key={friend.id}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 transition ${
+                            isSelected
+                              ? "border-orbit-accent/50 bg-orbit-accent/10"
+                              : "border-white/5 bg-white/[0.02] hover:border-white/10"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const newIds = new Set(groupCreationModal.selectedMemberIds);
+                              if (e.target.checked) {
+                                newIds.add(friend.user.id);
+                              } else {
+                                newIds.delete(friend.user.id);
+                              }
+                              setGroupCreationModal((prev) => ({
+                                ...prev,
+                                selectedMemberIds: newIds,
+                                error: null,
+                              }));
+                            }}
+                            className="h-4 w-4 accent-orbit-accent"
+                          />
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panel text-[10px] font-semibold text-orbit-text">
+                            {avatarUrl ? (
+                              <img src={avatarUrl} alt={`@${friend.user.username}`} className="h-full w-full object-cover" />
+                            ) : (
+                              (friend.user.username[0] ?? "U").toUpperCase()
+                            )}
+                          </div>
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">@{friend.user.username}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="orbit-btn px-3 py-2"
+                  disabled={groupCreationModal.loading}
+                  onClick={() => {
+                    setGroupCreationModal((prev) => ({
+                      ...prev,
+                      open: false,
+                      selectedMemberIds: new Set(),
+                      groupName: "",
+                      error: null,
+                    }));
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="orbit-btn-primary px-4 py-2"
+                  disabled={groupCreationModal.loading || groupCreationModal.selectedMemberIds.size === 0}
+                  onClick={() => void startGroupChat()}
+                >
+                  {groupCreationModal.loading ? "Creating..." : "Create Group"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <UserProfilePopover
           open={Boolean(profilePopoverUserId)}
