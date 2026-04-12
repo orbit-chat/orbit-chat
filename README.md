@@ -2,7 +2,7 @@
 
 Orbit Chat is a desktop messaging app focused on private communication.
 
-Current desktop package version: `0.8.0`.
+Current desktop package version: `0.9.0`.
 
 This app is designed so message text in direct and group chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
@@ -23,6 +23,13 @@ Orbit Chat combines:
 - encrypted attachment handling for images
 - GIF search and attach flow (Giphy API)
 - searchable emoji picker with recents + keyboard navigation
+- expanded reactions with emoji + `:name:` shortcode support
+- reaction details modal showing who reacted to each reaction
+- Discord-style mention autocomplete (`@username`) with keyboard navigation
+- mention highlighting with ping indicator styling in chat
+- message-level context menu actions (reply, ping, thread, react, pin/unpin)
+- chat-local message search with clickable jump-to-message results
+- per-chat pinned messages panel with jump navigation
 - client-side unread badge tracking that clears on active chat selection
 - chat display names editable in per-chat settings
 - DM fallback labels using `@username#chatId` when no custom chat name is set
@@ -35,6 +42,7 @@ Orbit Chat combines:
 - client URL normalization safeguards for malformed API/socket base URLs
 - avatar rendering across DM and friends surfaces with initials fallback
 - frameless desktop shell with custom title bar window controls
+- local pinned chat ordering and local pinned-message persistence
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
@@ -50,6 +58,7 @@ Encrypted end-to-end:
 - GIF links embedded in encrypted message envelopes
 - attachment file keys wrapped inside encrypted message envelopes
 - attachment file bytes uploaded as encrypted blobs
+- `@mention` text as part of encrypted message payloads
 
 Not encrypted end-to-end:
 
@@ -127,6 +136,11 @@ Runtime behavior notes:
 - Encrypted attachment delivery supports chunked encryption and in-session retry reuse for images already uploaded.
 - GIF picker search and selection supports keyboard navigation, active-item highlighting, and outside-click/Escape dismiss.
 - Emoji picker supports search tags, recent emoji shortcuts, and keyboard navigation.
+- Reaction input supports both direct emoji and `:name:` shortcode mapping.
+- Reaction details modal lists participants per reaction on a message.
+- Mention autocomplete supports arrow-key navigation and Enter/Tab insert.
+- Message search is scoped to the active chat and results jump to message anchors.
+- Message-level pin/unpin is available from the context menu, with a pinned panel in the chat header.
 - Unread counters are maintained client-side and reset immediately when a conversation becomes active.
 - Navigation now separates Home (recent chats), Direct Messages, Group Chats, Friends, and Archive surfaces.
 - Chat settings support custom display names and passcode/lock updates in one panel.
@@ -148,6 +162,10 @@ Desktop App (Electron + React)
 	|- Realtime socket client
 	|- Home/DM/Group/Friends/Archive navigation surfaces
 	|- Conversation context menu (archive/relock/delete or leave)
+	|- Message context menu (reply/ping/thread/react/pin)
+	|- Active-chat message search with jump-to-message results
+	|- Per-chat pinned messages panel
+	|- Mention autocomplete and ping highlighting
 	|- URL-normalized API/socket endpoint handling
 	|- E2EE key management
 	|- Membership-change rekey handling (add/remove/leave)
@@ -155,6 +173,7 @@ Desktop App (Electron + React)
 	|- Recovery code display/login/management flows
 	|- Chat passcode disable-approval + re-enable UX
 	|- GIF + emoji composer workflows
+	|- Reaction modal and emoji shortcode mapping
 	|- Encrypt/decrypt message content
 					|
 					| HTTPS + WSS
@@ -209,7 +228,7 @@ sequenceDiagram
 	participant R as Receiver Client
 
 	S->>S: Ensure conversation key exists and key version is current
-	S->>S: Compose text/emoji and optional GIF link
+	S->>S: Compose text/emoji with optional @mentions and GIF link
 	S->>S: Encrypt plaintext -> ciphertext + nonce
 	S->>API: Emit send_message via Socket.IO
 	API->>R: Emit to conversation room
@@ -218,7 +237,7 @@ sequenceDiagram
 	R->>API: Fetch allowed history window by min key version
 	R->>R: Decrypt locally using conversation key
 	R->>R: Resolve chat label (custom name or username#chatId)
-	R->>R: Render plaintext in UI
+	R->>R: Render plaintext, mentions, reactions, and pin/search state in UI
 ```
 
 ## Media Encryption Flow
@@ -268,9 +287,12 @@ flowchart TD
 	J --> K[Unseal key locally with device private key]
 	K --> L[Decrypt ciphertext messages in memory when keyVersion >= member minimum]
 	L --> M[Render timeline]
-	M --> M2[Resolve chat label custom name or username#chatId]
+	M --> M1[Apply mention highlighting + ping indicators]
+	M1 --> M2[Resolve chat label custom name or username#chatId]
 	M2 --> M3[Conversation context menu supports archive/relock/delete/leave]
-	M2 --> N[User sends message]
+	M2 --> M4[Message context menu supports reply/ping/thread/react/pin]
+	M4 --> M5[Pinned messages panel + active-chat message search jump list]
+	M5 --> N[User sends message]
 	N --> O{Has attachment?}
 	O -- No --> P[Encrypt plaintext with conversation key and nonce]
 	O -- Yes --> P2[Encrypt attachment chunks + upload encrypted blob]
@@ -370,6 +392,7 @@ Server is not trusted for:
 - Forward secrecy and ratcheting are not implemented yet.
 - GIF discovery uses Giphy search endpoints (client-side query to external API).
 - Attachment reservation metadata is handled server-side for access control and lifecycle management.
+- Pinned chats and pinned messages are currently local-only (localStorage) and are not synced across devices.
 - Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
 - In-app desktop auto-update flow is not enabled yet; users still install updates from release artifacts.
 - Current build config forces `libsodium-wrappers` to its CommonJS entry due to an upstream ESM packaging issue.
