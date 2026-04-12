@@ -486,9 +486,9 @@ async function extractMessageSearchableText(params: {
           return [attachment.name, attachment.mimeType].filter(Boolean).join(" ");
         })
         .join(" ");
-      return [messageText, attachmentText].filter(Boolean).join(" ").toLowerCase();
+      return [messageText, attachmentText].filter(Boolean).join(" ");
     } catch {
-      return text.toLowerCase();
+      return text;
     }
   } catch {
     return "";
@@ -522,6 +522,7 @@ function App() {
   const [emojiActiveIndex, setEmojiActiveIndex] = useState(0);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [focusedSearchMessageId, setFocusedSearchMessageId] = useState<string | null>(null);
   const [replyTargetMessageId, setReplyTargetMessageId] = useState<string | null>(null);
   const [threadRootMessageId, setThreadRootMessageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -533,6 +534,8 @@ function App() {
   const gifButtonRef = useRef<HTMLButtonElement | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
+  const messageElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const searchFocusTimeoutRef = useRef<number | null>(null);
 
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
   const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
@@ -714,17 +717,36 @@ function App() {
   const activeMessageSearchQuery = messageSearch.trim().toLowerCase();
 
   const visibleMessages = useMemo(() => {
-    if (!selectedConversation || !activeMessageSearchQuery) return messages;
+    return messages;
+  }, [messages]);
 
-    return messages.filter((message) => {
+  const messageSearchResults = useMemo(() => {
+    if (!selectedConversation || !activeMessageSearchQuery) return [] as Array<{
+      id: string;
+      senderLabel: string;
+      preview: string;
+      createdAt: number;
+    }>;
+
+    const results: Array<{ id: string; senderLabel: string; preview: string; createdAt: number }> = [];
+    for (const message of messages) {
       const senderProfile = profileById[message.senderId];
       const senderText = [message.sender, senderProfile?.username, senderProfile?.displayName]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       const bodyText = messageSearchIndex[message.id] ?? "";
-      return senderText.includes(activeMessageSearchQuery) || bodyText.includes(activeMessageSearchQuery);
-    });
+      const bodyTextLower = bodyText.toLowerCase();
+      if (!senderText.includes(activeMessageSearchQuery) && !bodyTextLower.includes(activeMessageSearchQuery)) {
+        continue;
+      }
+
+      const senderLabel = senderProfile?.displayName?.trim() || message.sender;
+      const preview = bodyText.trim() || "Encrypted message";
+      results.push({ id: message.id, senderLabel, preview, createdAt: message.createdAt });
+    }
+
+    return results;
   }, [activeMessageSearchQuery, messageSearchIndex, messages, profileById, selectedConversation]);
 
   const activeReplyParentMessageId = useMemo(() => {
@@ -747,7 +769,20 @@ function App() {
 
   useEffect(() => {
     setMessageSearch("");
+    setFocusedSearchMessageId(null);
+    if (searchFocusTimeoutRef.current !== null) {
+      window.clearTimeout(searchFocusTimeoutRef.current);
+      searchFocusTimeoutRef.current = null;
+    }
   }, [selectedConvId]);
+
+  useEffect(() => {
+    return () => {
+      if (searchFocusTimeoutRef.current !== null) {
+        window.clearTimeout(searchFocusTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2447,6 +2482,20 @@ function App() {
     messageInputRef.current?.focus();
   };
 
+  const jumpToMessage = useCallback((messageId: string) => {
+    const element = messageElementRefs.current[messageId];
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFocusedSearchMessageId(messageId);
+    if (searchFocusTimeoutRef.current !== null) {
+      window.clearTimeout(searchFocusTimeoutRef.current);
+    }
+    searchFocusTimeoutRef.current = window.setTimeout(() => {
+      setFocusedSearchMessageId((prev) => (prev === messageId ? null : prev));
+      searchFocusTimeoutRef.current = null;
+    }, 2200);
+  }, []);
+
   const handlePingMessageAuthor = (username: string) => {
     const mention = `@${username} `;
     setMessageDraft((prev) => {
@@ -3689,6 +3738,27 @@ function App() {
                       ✕
                     </button>
                   )}
+
+                  {activeMessageSearchQuery && (
+                    <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-1 shadow-xl shadow-black/50">
+                      {messageSearchResults.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-orbit-muted">No messages match.</p>
+                      ) : (
+                        messageSearchResults.slice(0, 12).map((result) => (
+                          <button
+                            key={`search-result:${result.id}`}
+                            className="block w-full rounded-lg px-2.5 py-2 text-left hover:bg-white/10"
+                            onClick={() => jumpToMessage(result.id)}
+                          >
+                            <p className="truncate text-[11px] font-semibold text-orbit-accent">
+                              {result.senderLabel} • {formatMessageTimestamp(result.createdAt)}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-300">{result.preview}</p>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
                 {getConversationSecretKey(selectedConversation.id) ? (
                   <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
@@ -3728,7 +3798,7 @@ function App() {
               <section className={`space-y-2 overflow-y-auto px-3 py-2 ${threadRootMessage ? "w-[65%] border-r border-white/10" : "w-full"}`}>
                 {visibleMessages.length === 0 && (
                   <p className="text-sm text-orbit-muted">
-                    {activeMessageSearchQuery ? "No messages match this search." : "No messages yet. Send your first encrypted payload."}
+                    No messages yet. Send your first encrypted payload.
                   </p>
                 )}
                 {visibleMessages.map((msg) => {
@@ -3743,8 +3813,11 @@ function App() {
 
                   return (
                     <article
+                      ref={(node) => {
+                        messageElementRefs.current[msg.id] = node;
+                      }}
                       key={msg.id}
-                      className={`group relative flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
+                      className={`group relative flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""} ${focusedSearchMessageId === msg.id ? "rounded-xl ring-2 ring-orbit-accent/60" : ""}`}
                       onMouseEnter={() => setHoveredMessageId(msg.id)}
                       onMouseLeave={() => setHoveredMessageId((prev) => (prev === msg.id ? null : prev))}
                       onContextMenu={(e) => ctxMenu.show(e, buildMessageContextMenuItems(msg, senderLabel))}
