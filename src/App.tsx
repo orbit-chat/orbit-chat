@@ -476,6 +476,7 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authValidationError, setAuthValidationError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingGifs, setPendingGifs] = useState<GifLinkAttachment[]>([]);
@@ -544,6 +545,19 @@ function App() {
   const persistArchived = useCallback((ids: Set<string>) => {
     setArchivedConvIds(ids);
     localStorage.setItem("orbit:archived", JSON.stringify([...ids]));
+  }, []);
+
+  const [pinnedConvIds, setPinnedConvIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("orbit:pinned-chats");
+      return raw ? new Set(JSON.parse(raw)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const persistPinned = useCallback((ids: Set<string>) => {
+    setPinnedConvIds(ids);
+    localStorage.setItem("orbit:pinned-chats", JSON.stringify([...ids]));
   }, []);
 
   // Context menu
@@ -736,8 +750,13 @@ function App() {
     return conversations
       .filter((c) => !archivedConvIds.has(c.id))
       .slice()
-      .sort((a, b) => getConversationLastActivity(b) - getConversationLastActivity(a));
-  }, [byConversation, conversations, archivedConvIds]);
+      .sort((a, b) => {
+        const aPinned = pinnedConvIds.has(a.id) ? 1 : 0;
+        const bPinned = pinnedConvIds.has(b.id) ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+        return getConversationLastActivity(b) - getConversationLastActivity(a);
+      });
+  }, [byConversation, conversations, archivedConvIds, pinnedConvIds]);
 
   const archivedConversations = useMemo(() => {
     return conversations.filter((c) => archivedConvIds.has(c.id));
@@ -768,6 +787,23 @@ function App() {
       return friend.user.username.toLowerCase().includes(query);
     });
   }, [friends, addMemberSearch, selectedConversation]);
+
+  const matchesChatSearch = useCallback((conv: Conversation) => {
+    const query = chatSearch.trim().toLowerCase();
+    if (!query) return true;
+
+    const members = conv.members.map((member) => member.user.username.toLowerCase());
+    const displayName = conv.name?.toLowerCase() ?? "";
+    const convoMessages = byConversation[conv.id] ?? [];
+    const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
+    const preview = lastMessage?.sender.toLowerCase() ?? "";
+
+    return (
+      displayName.includes(query) ||
+      members.some((memberName) => memberName.includes(query)) ||
+      preview.includes(query)
+    );
+  }, [byConversation, chatSearch]);
 
   const hasUnreadDm = useMemo(() => {
     return conversations.some((conv) => {
@@ -1938,6 +1974,7 @@ function App() {
   const buildConvContextMenuItems = (conv: Conversation): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
     const isArchived = archivedConvIds.has(conv.id);
+    const isPinned = pinnedConvIds.has(conv.id);
     const isLocked = conv.passcodeEnabled && !chatLock.isUnlocked(conv.id);
 
     // Re-lock
@@ -1951,6 +1988,22 @@ function App() {
         onClick: () => chatLock.lock(conv.id),
       });
     }
+
+    items.push({
+      type: "item",
+      label: isPinned ? "Unpin chat" : "Pin chat",
+      icon: (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 3l7 7-4 1-2 7-4-4-7 2 2-7-4-4 7-2 1-4z" />
+        </svg>
+      ),
+      onClick: () => {
+        const next = new Set(pinnedConvIds);
+        if (isPinned) next.delete(conv.id);
+        else next.add(conv.id);
+        persistPinned(next);
+      },
+    });
 
     // Archive / Unarchive
     items.push({
@@ -1980,8 +2033,9 @@ function App() {
 
   const renderConversationList = (conversationList: Conversation[], emptyText: string) => (
     <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
-      {conversationList.map((conv) => {
+      {conversationList.filter(matchesChatSearch).map((conv) => {
         const isSelected = conv.id === selectedConvId;
+        const isPinned = pinnedConvIds.has(conv.id);
         const otherMember = conv.members.find((m) => m.user.id !== user?.id);
         const otherUserId = otherMember?.user.id ?? "";
         const otherUsername = otherMember?.user.username ?? "dm";
@@ -2047,6 +2101,11 @@ function App() {
                   </svg>
                 )}
                 <p className="truncate text-sm font-semibold">@{displayName}</p>
+                {isPinned && (
+                  <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                    Pinned
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {unreadCount > 0 && (
@@ -2829,6 +2888,16 @@ function App() {
               <h1 className="text-lg font-semibold tracking-tight">Home</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Your recent conversations across DMs and groups</p>
 
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search chats</span>
+                <input
+                  className="orbit-input py-2"
+                  placeholder="Search chats..."
+                  value={chatSearch}
+                  onChange={(event) => setChatSearch(event.target.value)}
+                />
+              </label>
+
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
                 <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
@@ -2842,6 +2911,16 @@ function App() {
             <>
               <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
+
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search chats</span>
+                <input
+                  className="orbit-input py-2"
+                  placeholder="Search your DMs..."
+                  value={chatSearch}
+                  onChange={(event) => setChatSearch(event.target.value)}
+                />
+              </label>
 
               <label className="mt-4 block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search users</span>
@@ -2930,6 +3009,16 @@ function App() {
             <>
               <h1 className="text-lg font-semibold tracking-tight">Group Chats</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Create and manage your group conversations</p>
+
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search chats</span>
+                <input
+                  className="orbit-input py-2"
+                  placeholder="Search groups..."
+                  value={chatSearch}
+                  onChange={(event) => setChatSearch(event.target.value)}
+                />
+              </label>
 
               <button
                 className="orbit-btn-primary mt-4 w-full px-3 py-2 text-xs font-semibold"
@@ -3167,13 +3256,23 @@ function App() {
               <h1 className="text-lg font-semibold">Archive</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Archived chats are hidden from DMs but still active</p>
 
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search archived chats</span>
+                <input
+                  className="orbit-input py-2"
+                  placeholder="Search archive..."
+                  value={chatSearch}
+                  onChange={(event) => setChatSearch(event.target.value)}
+                />
+              </label>
+
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Archived</p>
                 <span className="text-xs text-orbit-muted">{archivedConversations.length}</span>
               </div>
 
               <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
-                {archivedConversations.map((conv) => {
+                {archivedConversations.filter(matchesChatSearch).map((conv) => {
                   const otherMember = conv.members.find((m) => m.user.id !== user.id);
                   const otherUserId = otherMember?.user.id ?? "";
                   const otherUsername = otherMember?.user.username ?? "dm";
