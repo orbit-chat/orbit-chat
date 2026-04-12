@@ -4018,13 +4018,10 @@ function App() {
 
           {showChatSettings && selectedConversation && (
             <div
-              className="orbit-modal-overlay"
-              onClick={() => {
-                if (!chatSettingsSaving) setShowChatSettings(false);
-              }}
+              className="orbit-modal-overlay pointer-events-none"
             >
               <div
-                className="orbit-modal"
+                className="orbit-modal pointer-events-auto"
                 onClick={(event) => event.stopPropagation()}
                 role="dialog"
                 aria-modal="true"
