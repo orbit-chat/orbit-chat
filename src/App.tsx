@@ -587,6 +587,8 @@ function App() {
   const [focusedSearchMessageId, setFocusedSearchMessageId] = useState<string | null>(null);
   const [reactionModalMessageId, setReactionModalMessageId] = useState<string | null>(null);
   const [reactionShortcodeInput, setReactionShortcodeInput] = useState(":thumbsup:");
+  const [mentionAutocomplete, setMentionAutocomplete] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const [replyTargetMessageId, setReplyTargetMessageId] = useState<string | null>(null);
   const [threadRootMessageId, setThreadRootMessageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -753,6 +755,21 @@ function App() {
     return selectedConversation.members.find((m) => m.user.id !== user.id)?.user ?? null;
   }, [selectedConversation, user]);
 
+  const mentionCandidates = useMemo(() => {
+    if (!selectedConversation || !mentionAutocomplete) return [] as string[];
+    const usernames = Array.from(
+      new Set(
+        selectedConversation.members
+          .map((member) => member.user.username)
+          .filter(Boolean)
+      )
+    );
+    const query = mentionAutocomplete.query.toLowerCase();
+    return usernames
+      .filter((username) => username.toLowerCase().startsWith(query))
+      .slice(0, 8);
+  }, [mentionAutocomplete, selectedConversation]);
+
   const messages = useMemo(
     () => (selectedConvId ? byConversation[selectedConvId] ?? [] : []),
     [byConversation, selectedConvId]
@@ -848,6 +865,8 @@ function App() {
   useEffect(() => {
     setMessageSearch("");
     setFocusedSearchMessageId(null);
+    setMentionAutocomplete(null);
+    setMentionActiveIndex(0);
     if (searchFocusTimeoutRef.current !== null) {
       window.clearTimeout(searchFocusTimeoutRef.current);
       searchFocusTimeoutRef.current = null;
@@ -908,8 +927,24 @@ function App() {
     }
   }, [socket]);
 
-  const onMessageDraftChange = useCallback((value: string) => {
+  const onMessageDraftChange = useCallback((value: string, caretPosition?: number) => {
     setMessageDraft(value);
+
+    const cursor = typeof caretPosition === "number" ? caretPosition : value.length;
+    const beforeCursor = value.slice(0, cursor);
+    const mentionMatch = /(^|\s)@([a-zA-Z0-9_]*)$/.exec(beforeCursor);
+    if (mentionMatch) {
+      const mentionQuery = mentionMatch[2] ?? "";
+      setMentionAutocomplete({
+        start: cursor - mentionQuery.length - 1,
+        end: cursor,
+        query: mentionQuery,
+      });
+      setMentionActiveIndex(0);
+    } else {
+      setMentionAutocomplete(null);
+    }
+
     if (!selectedConvId || !socket) return;
 
     const pref = chatRealtimePreferences[selectedConvId] ?? DEFAULT_CHAT_PREFERENCES;
@@ -2562,6 +2597,29 @@ function App() {
     messageInputRef.current?.focus();
   };
 
+  const applyMentionCandidate = useCallback((username: string) => {
+    if (!mentionAutocomplete) return;
+    const mentionText = `@${username} `;
+    const nextDraft =
+      `${messageDraft.slice(0, mentionAutocomplete.start)}${mentionText}${messageDraft.slice(mentionAutocomplete.end)}`;
+    const nextCursor = mentionAutocomplete.start + mentionText.length;
+    onMessageDraftChange(nextDraft, nextCursor);
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }, [mentionAutocomplete, messageDraft, onMessageDraftChange]);
+
+  useEffect(() => {
+    if (!mentionCandidates.length) {
+      if (mentionAutocomplete) setMentionActiveIndex(0);
+      return;
+    }
+    if (mentionActiveIndex >= mentionCandidates.length) {
+      setMentionActiveIndex(mentionCandidates.length - 1);
+    }
+  }, [mentionActiveIndex, mentionAutocomplete, mentionCandidates.length]);
+
   const jumpToMessage = useCallback((messageId: string) => {
     const element = messageElementRefs.current[messageId];
     if (!element) return;
@@ -2760,6 +2818,8 @@ function App() {
       emitTypingStop(selectedConvId);
 
       setMessageDraft("");
+      setMentionAutocomplete(null);
+      setMentionActiveIndex(0);
       setPendingFiles([]);
       setPendingGifs([]);
       setMessageSendError(null);
@@ -4380,13 +4440,56 @@ function App() {
                 <p className="mb-2 text-xs text-rose-300">{messageSendError}</p>
               )}
 
+              {mentionAutocomplete && mentionCandidates.length > 0 && (
+                <div className="mb-2 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-1.5">
+                  {mentionCandidates.map((username, idx) => {
+                    const active = idx === mentionActiveIndex;
+                    return (
+                      <button
+                        key={`mention:${username}`}
+                        className={`block w-full rounded-md px-2 py-1.5 text-left text-xs transition ${active ? "bg-orbit-accent/20 text-orbit-accent" : "text-slate-200 hover:bg-white/10"}`}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          applyMentionCandidate(username);
+                        }}
+                      >
+                        @{username}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="flex gap-1.5">
                 <input
                   ref={messageInputRef}
                   className="orbit-input h-9 flex-1 px-3 text-sm"
                   value={messageDraft}
-                  onChange={(event) => onMessageDraftChange(event.target.value)}
+                  onChange={(event) => onMessageDraftChange(event.target.value, event.target.selectionStart ?? undefined)}
                   onKeyDown={(event) => {
+                    if (mentionAutocomplete && mentionCandidates.length > 0) {
+                      if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        setMentionActiveIndex((prev) => (prev + 1) % mentionCandidates.length);
+                        return;
+                      }
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setMentionActiveIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+                        return;
+                      }
+                      if (event.key === "Enter" || event.key === "Tab") {
+                        event.preventDefault();
+                        const selected = mentionCandidates[mentionActiveIndex] ?? mentionCandidates[0];
+                        if (selected) applyMentionCandidate(selected);
+                        return;
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setMentionAutocomplete(null);
+                        return;
+                      }
+                    }
                     if (event.key === "Enter") {
                       event.preventDefault();
                       void handleSendMessage();
