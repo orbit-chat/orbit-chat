@@ -226,6 +226,65 @@ const EMOJI_CATALOG: Array<{ value: string; tags: string[] }> = [
   { value: "🫂", tags: ["hug", "support", "comfort"] },
 ];
 
+const REACTION_EMOJI_CATALOG = [
+  { name: "thumbsup", emoji: "👍", tags: ["yes", "approve", "like"] },
+  { name: "heart", emoji: "❤️", tags: ["love", "care"] },
+  { name: "joy", emoji: "😂", tags: ["laugh", "funny"] },
+  { name: "fire", emoji: "🔥", tags: ["lit", "hot"] },
+  { name: "eyes", emoji: "👀", tags: ["watch", "look"] },
+  { name: "clap", emoji: "👏", tags: ["nice", "applause"] },
+  { name: "party", emoji: "🎉", tags: ["celebrate", "hype"] },
+  { name: "rocket", emoji: "🚀", tags: ["ship", "launch"] },
+  { name: "thinking", emoji: "🤔", tags: ["hmm", "question"] },
+  { name: "mindblown", emoji: "🤯", tags: ["wow", "shock"] },
+  { name: "pray", emoji: "🙏", tags: ["thanks", "please"] },
+  { name: "muscle", emoji: "💪", tags: ["strong", "respect"] },
+  { name: "sparkles", emoji: "✨", tags: ["clean", "nice"] },
+  { name: "check", emoji: "✅", tags: ["done", "approved"] },
+  { name: "x", emoji: "❌", tags: ["no", "reject"] },
+] as const;
+
+const REACTION_EMOJI_SET: Set<string> = new Set(REACTION_EMOJI_CATALOG.map((entry) => entry.emoji));
+const REACTION_SHORTCODE_MAP: Map<string, string> = new Map(REACTION_EMOJI_CATALOG.map((entry) => [entry.name, entry.emoji]));
+const QUICK_REACTION_EMOJIS = REACTION_EMOJI_CATALOG.slice(0, 6).map((entry) => entry.emoji);
+
+function resolveReactionInput(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (REACTION_EMOJI_SET.has(trimmed)) return trimmed;
+
+  const shortcode = /^:([a-z0-9_+-]+):$/i.exec(trimmed);
+  if (!shortcode) return null;
+  return REACTION_SHORTCODE_MAP.get(shortcode[1]!.toLowerCase()) ?? null;
+}
+
+function hasHandleMention(text: string, username: string | undefined) {
+  if (!username) return false;
+  return new RegExp(`(^|\\s)@${username}(?=$|\\s|[.,!?;:])`, "i").test(text);
+}
+
+function renderMessageTextWithMentions(text: string, currentUsername?: string) {
+  const mentionRegex = /(@[a-zA-Z0-9_]+)/g;
+  const parts = text.split(mentionRegex);
+
+  return parts.map((part, idx) => {
+    if (!part.startsWith("@")) {
+      return <span key={`text:${idx}`}>{part}</span>;
+    }
+
+    const mentioned = part.slice(1);
+    const isPing = Boolean(currentUsername && mentioned.toLowerCase() === currentUsername.toLowerCase());
+    return (
+      <span
+        key={`mention:${idx}`}
+        className={isPing ? "rounded bg-orbit-accent/25 px-1 py-0.5 font-semibold text-orbit-accent" : "font-semibold text-sky-300"}
+      >
+        {part}
+      </span>
+    );
+  });
+}
+
 type GifSearchResult = {
   id: string;
   title: string;
@@ -374,8 +433,9 @@ function DecryptedMessageBody(props: {
   cipherText: string;
   nonce?: string;
   keyVersion?: number;
+  currentUsername?: string;
 }) {
-  const { conversationId, token, cipherText, nonce, keyVersion } = props;
+  const { conversationId, token, cipherText, nonce, keyVersion, currentUsername } = props;
   const secretKey = useE2EEStore((state) => state.getConversationSecretKeyForVersion(conversationId, keyVersion));
   const [legacyText, setLegacyText] = useState<string | null>(null);
   const [envelope, setEnvelope] = useState<MessageEnvelope | null>(null);
@@ -428,7 +488,9 @@ function DecryptedMessageBody(props: {
 
   return (
     <div className="mt-1 space-y-2">
-      {(envelope?.text ?? legacyText) && <p className="break-words text-orbit-text">{envelope?.text ?? legacyText}</p>}
+      {(envelope?.text ?? legacyText) && (
+        <p className="break-words text-orbit-text">{renderMessageTextWithMentions(envelope?.text ?? legacyText ?? "", currentUsername)}</p>
+      )}
       {(envelope?.attachments ?? []).map((attachment, idx) => {
         if (attachment.kind === "gif_link") {
           const safeUrl = normalizeGifUrl(attachment.url);
@@ -523,6 +585,8 @@ function App() {
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [focusedSearchMessageId, setFocusedSearchMessageId] = useState<string | null>(null);
+  const [reactionModalMessageId, setReactionModalMessageId] = useState<string | null>(null);
+  const [reactionShortcodeInput, setReactionShortcodeInput] = useState(":thumbsup:");
   const [replyTargetMessageId, setReplyTargetMessageId] = useState<string | null>(null);
   const [threadRootMessageId, setThreadRootMessageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -713,6 +777,20 @@ function App() {
     if (!threadRootMessageId) return [] as typeof messages;
     return messages.filter((message) => message.id === threadRootMessageId || message.parentMessageId === threadRootMessageId);
   }, [messages, threadRootMessageId]);
+
+  const reactionModalMessage = useMemo(() => {
+    if (!reactionModalMessageId) return null;
+    return messageById.get(reactionModalMessageId) ?? null;
+  }, [messageById, reactionModalMessageId]);
+
+  const getReactionUserLabel = useCallback((userId: string) => {
+    if (userId === user?.id) return "You";
+    const profile = profileById[userId];
+    if (profile?.displayName?.trim()) return profile.displayName.trim();
+    if (profile?.username) return profile.username;
+    const member = selectedConversation?.members.find((conversationMember) => conversationMember.userId === userId);
+    return member?.user.username ?? `User ${userId.slice(0, 6)}`;
+  }, [profileById, selectedConversation, user?.id]);
 
   const activeMessageSearchQuery = messageSearch.trim().toLowerCase();
 
@@ -2472,8 +2550,10 @@ function App() {
     setPendingFiles((prev) => [...prev, ...accepted]);
   };
 
-  const handleToggleReaction = (messageId: string, emoji: "👍" | "❤️" | "😂") => {
+  const handleToggleReaction = (messageId: string, reactionInput: string) => {
     if (!socket || !selectedConvId) return;
+    const emoji = resolveReactionInput(reactionInput);
+    if (!emoji) return;
     socket.emit("toggle_reaction", { messageId, emoji, conversationId: selectedConvId });
   };
 
@@ -2556,7 +2636,7 @@ function App() {
     }
 
     items.push({ type: "separator" });
-    for (const emoji of ["👍", "❤️", "😂"] as const) {
+    for (const emoji of QUICK_REACTION_EMOJIS) {
       items.push({
         type: "item",
         label: `React ${emoji}`,
@@ -2564,6 +2644,13 @@ function App() {
         onClick: () => handleToggleReaction(message.id, emoji),
       });
     }
+
+    items.push({
+      type: "item",
+      label: "View all reactions",
+      disabled: (message.reactions?.length ?? 0) === 0,
+      onClick: () => setReactionModalMessageId(message.id),
+    });
 
     return items;
   };
@@ -3810,6 +3897,7 @@ function App() {
                   const parentMessage = msg.parentMessageId ? messageById.get(msg.parentMessageId) ?? null : null;
                   const threadReplyCount = messages.filter((candidate) => candidate.parentMessageId === msg.id).length;
                   const quickActionsVisible = hoveredMessageId === msg.id;
+                  const isPingedMessage = !mine && hasHandleMention(messageSearchIndex[msg.id] ?? "", user?.username);
 
                   return (
                     <article
@@ -3839,7 +3927,9 @@ function App() {
                         className={`min-w-0 rounded-xl border px-3 py-2 text-[13px] leading-snug shadow-sm ${
                           mine
                             ? "border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
-                            : "border-white/10 bg-[#202533]"
+                            : isPingedMessage
+                              ? "border-amber-300/45 bg-amber-300/10"
+                              : "border-white/10 bg-[#202533]"
                         }`}
                       >
                         <div className="flex items-center gap-2">
@@ -3850,6 +3940,11 @@ function App() {
                             {mine ? "You" : senderLabel}
                           </button>
                           <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
+                          {isPingedMessage && (
+                            <span className="rounded-full border border-amber-300/60 bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200">
+                              Ping
+                            </span>
+                          )}
                         </div>
 
                         {parentMessage && (
@@ -3874,6 +3969,7 @@ function App() {
                               cipherText={msg.cipherText}
                               nonce={msg.nonce}
                               keyVersion={msg.keyVersion}
+                              currentUsername={user.username}
                             />
                           )}
                         </div>
@@ -3886,12 +3982,18 @@ function App() {
                                 <button
                                   key={`${msg.id}:${reaction.emoji}`}
                                   className={`rounded-full border px-2 py-0.5 text-xs ${active ? "border-orbit-accent/60 bg-orbit-accent/20 text-orbit-accent" : "border-white/10 bg-black/20 text-slate-300"}`}
-                                  onClick={() => handleToggleReaction(msg.id, reaction.emoji as "👍" | "❤️" | "😂")}
+                                  onClick={() => handleToggleReaction(msg.id, reaction.emoji)}
                                 >
                                   {reaction.emoji} {reaction.count}
                                 </button>
                               );
                             })}
+                            <button
+                              className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[11px] text-orbit-muted hover:border-white/20 hover:text-orbit-text"
+                              onClick={() => setReactionModalMessageId(msg.id)}
+                            >
+                              Details
+                            </button>
                           </div>
                         )}
 
@@ -3911,7 +4013,7 @@ function App() {
 
                       {quickActionsVisible && (
                         <div className={`absolute -top-3 flex items-center gap-1 rounded-full border border-white/10 bg-orbit-panelAlt px-1.5 py-1 shadow-lg ${mine ? "right-10" : "left-10"}`}>
-                          {(["👍", "❤️", "😂"] as const).map((emoji) => (
+                          {QUICK_REACTION_EMOJIS.map((emoji) => (
                             <button
                               key={`${msg.id}:quick:${emoji}`}
                               className="rounded-full px-1.5 py-0.5 text-sm hover:bg-white/10"
@@ -3974,6 +4076,7 @@ function App() {
                             cipherText={threadMessage.cipherText}
                             nonce={threadMessage.nonce}
                             keyVersion={threadMessage.keyVersion}
+                            currentUsername={user.username}
                           />
                         </div>
                       </div>
@@ -5004,6 +5107,94 @@ function App() {
             setSelectedConvId(null);
           }}
         />
+
+        {reactionModalMessageId && (
+          <div className="orbit-modal-overlay" onClick={() => setReactionModalMessageId(null)}>
+            <div
+              className="orbit-modal max-w-lg"
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Message reactions"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-bold text-orbit-text">Reactions</h3>
+                  <p className="mt-1 text-xs text-orbit-muted">See who reacted to this message and add more reactions.</p>
+                </div>
+                <button className="orbit-btn px-2 py-1 text-xs" onClick={() => setReactionModalMessageId(null)}>Close</button>
+              </div>
+
+              {reactionModalMessage ? (
+                <>
+                  <div className="mt-3 rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2">
+                    <p className="text-xs text-orbit-muted">Add reaction</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {REACTION_EMOJI_CATALOG.map((reaction) => (
+                        <button
+                          key={`modal:add:${reaction.name}`}
+                          className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-sm hover:border-orbit-accent/40"
+                          title={`:${reaction.name}:`}
+                          onClick={() => handleToggleReaction(reactionModalMessage.id, reaction.emoji)}
+                        >
+                          {reaction.emoji}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        className="orbit-input h-9 flex-1 text-xs"
+                        value={reactionShortcodeInput}
+                        onChange={(event) => setReactionShortcodeInput(event.target.value)}
+                        placeholder=":thumbsup:"
+                      />
+                      <button
+                        className="orbit-btn-primary px-3 py-2 text-xs"
+                        onClick={() => handleToggleReaction(reactionModalMessage.id, reactionShortcodeInput)}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {(reactionModalMessage.reactions ?? []).length === 0 ? (
+                      <p className="text-xs text-orbit-muted">No reactions yet.</p>
+                    ) : (
+                      (reactionModalMessage.reactions ?? [])
+                        .slice()
+                        .sort((a, b) => b.count - a.count)
+                        .map((reaction) => (
+                          <div key={`modal:reaction:${reactionModalMessage.id}:${reaction.emoji}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-orbit-text">
+                                {reaction.emoji} <span className="text-orbit-muted">{reaction.count}</span>
+                              </p>
+                              <button
+                                className="orbit-btn px-2 py-1 text-[11px]"
+                                onClick={() => handleToggleReaction(reactionModalMessage.id, reaction.emoji)}
+                              >
+                                Toggle mine
+                              </button>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {reaction.userIds.map((reactUserId) => (
+                                <span key={`modal:user:${reaction.emoji}:${reactUserId}`} className="rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-slate-200">
+                                  {getReactionUserLabel(reactUserId)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="mt-3 text-xs text-orbit-muted">Message not found.</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Context menu */}
         <ContextMenuPortal menu={ctxMenu.menu} onClose={ctxMenu.hide} />
