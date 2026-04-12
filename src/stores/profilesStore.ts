@@ -8,6 +8,9 @@ type ProfilesState = {
   loadingById: Record<string, boolean>;
   errorById: Record<string, string | null>;
 
+  mergeProfiles: (profiles: Array<Partial<api.UserProfile> & { id: string }>) => void;
+  mergePresence: (userId: string, presence: api.Presence, lastActiveAt?: string | null) => void;
+
   fetchProfile: (userId: string, token: string) => Promise<api.UserProfile | null>;
   fetchMe: (token: string, myUserId?: string) => Promise<api.UserProfile | null>;
 
@@ -20,6 +23,34 @@ export const useProfilesStore = create<ProfilesState>((set, get) => ({
   byId: {},
   loadingById: {},
   errorById: {},
+
+  mergeProfiles: (profiles) => {
+    if (!profiles.length) return;
+    const nextById = { ...get().byId };
+    for (const profile of profiles) {
+      const existing = nextById[profile.id] ?? { id: profile.id, username: "unknown" };
+      nextById[profile.id] = {
+        ...existing,
+        ...profile,
+      } as api.UserProfile;
+    }
+    set({ byId: nextById });
+  },
+
+  mergePresence: (userId, presence, lastActiveAt) => {
+    const existing = get().byId[userId];
+    if (!existing) return;
+    set({
+      byId: {
+        ...get().byId,
+        [userId]: {
+          ...existing,
+          presence,
+          lastActiveAt: lastActiveAt ?? existing.lastActiveAt ?? null,
+        },
+      },
+    });
+  },
 
   fetchProfile: async (userId, token) => {
     const cached = get().byId[userId];

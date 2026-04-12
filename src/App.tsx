@@ -247,6 +247,40 @@ function shortConversationId(conversationId: string) {
   return conversationId.split("-")[0] ?? conversationId.slice(0, 8);
 }
 
+type ChatRealtimePreferences = {
+  readReceipts: boolean;
+  typingIndicators: boolean;
+};
+
+const DEFAULT_CHAT_PREFERENCES: ChatRealtimePreferences = {
+  readReceipts: true,
+  typingIndicators: true,
+};
+
+const CHAT_PREFERENCES_STORAGE_KEY = "orbit:chat-realtime-preferences";
+
+function loadChatPreferences(): Record<string, ChatRealtimePreferences> {
+  try {
+    const raw = localStorage.getItem(CHAT_PREFERENCES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, Partial<ChatRealtimePreferences>>;
+    const normalized: Record<string, ChatRealtimePreferences> = {};
+    for (const [conversationId, pref] of Object.entries(parsed)) {
+      normalized[conversationId] = {
+        readReceipts: pref.readReceipts ?? true,
+        typingIndicators: pref.typingIndicators ?? true,
+      };
+    }
+    return normalized;
+  } catch {
+    return {};
+  }
+}
+
+function persistChatPreferences(value: Record<string, ChatRealtimePreferences>) {
+  localStorage.setItem(CHAT_PREFERENCES_STORAGE_KEY, JSON.stringify(value));
+}
+
 function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
   if (!keys.length) return null;
   return keys
@@ -485,8 +519,17 @@ function App() {
   const [chatSettingsLength, setChatSettingsLength] = useState(2);
   const [chatSettingsLockMode, setChatSettingsLockMode] = useState<api.ChatLockMode>("on_leave");
   const [chatSettingsTimeout, setChatSettingsTimeout] = useState("");
+  const [chatSettingsReadReceipts, setChatSettingsReadReceipts] = useState(true);
+  const [chatSettingsTypingIndicators, setChatSettingsTypingIndicators] = useState(true);
   const [chatSettingsError, setChatSettingsError] = useState<string | null>(null);
   const [chatSettingsSaving, setChatSettingsSaving] = useState(false);
+  const [chatRealtimePreferences, setChatRealtimePreferences] = useState<Record<string, ChatRealtimePreferences>>(() => loadChatPreferences());
+  const [typingByConversation, setTypingByConversation] = useState<Record<string, string[]>>({});
+  const [seenByMessageId, setSeenByMessageId] = useState<Record<string, string[]>>({});
+  const typingStopTimerRef = useRef<number | null>(null);
+  const typingSentConversationRef = useRef<string | null>(null);
+  const seenSentRef = useRef<Set<string>>(new Set());
+  const typingIndicatorTimeoutsRef = useRef<Record<string, number>>({});
 
   // Archive (client-side, persisted per-user via localStorage)
   const [archivedConvIds, setArchivedConvIds] = useState<Set<string>>(() => {
@@ -563,6 +606,8 @@ function App() {
   const profileErrorById = useProfilesStore((state) => state.errorById);
   const fetchProfile = useProfilesStore((state) => state.fetchProfile);
   const fetchMeProfile = useProfilesStore((state) => state.fetchMe);
+  const mergeProfiles = useProfilesStore((state) => state.mergeProfiles);
+  const mergePresence = useProfilesStore((state) => state.mergePresence);
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
@@ -597,6 +642,58 @@ function App() {
     () => (selectedConvId ? byConversation[selectedConvId] ?? [] : []),
     [byConversation, selectedConvId]
   );
+
+  const selectedConversationPreferences = useMemo(() => {
+    if (!selectedConversation) return DEFAULT_CHAT_PREFERENCES;
+    return chatRealtimePreferences[selectedConversation.id] ?? DEFAULT_CHAT_PREFERENCES;
+  }, [chatRealtimePreferences, selectedConversation]);
+
+  const setRealtimePreferencesForConversation = useCallback((conversationId: string, nextPref: ChatRealtimePreferences) => {
+    setChatRealtimePreferences((prev) => {
+      const next = { ...prev, [conversationId]: nextPref };
+      persistChatPreferences(next);
+      return next;
+    });
+  }, []);
+
+  const emitTypingStop = useCallback((conversationId?: string | null) => {
+    const activeConversationId = conversationId ?? typingSentConversationRef.current;
+    if (!activeConversationId || !socket) return;
+    socket.emit("typing_stop", { conversationId: activeConversationId });
+    if (typingStopTimerRef.current !== null) {
+      window.clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
+    if (typingSentConversationRef.current === activeConversationId) {
+      typingSentConversationRef.current = null;
+    }
+  }, [socket]);
+
+  const onMessageDraftChange = useCallback((value: string) => {
+    setMessageDraft(value);
+    if (!selectedConvId || !socket) return;
+
+    const pref = chatRealtimePreferences[selectedConvId] ?? DEFAULT_CHAT_PREFERENCES;
+    if (!pref.typingIndicators || !value.trim()) {
+      emitTypingStop(selectedConvId);
+      return;
+    }
+
+    if (typingSentConversationRef.current !== selectedConvId) {
+      if (typingSentConversationRef.current && typingSentConversationRef.current !== selectedConvId) {
+        emitTypingStop(typingSentConversationRef.current);
+      }
+      socket.emit("typing_start", { conversationId: selectedConvId });
+      typingSentConversationRef.current = selectedConvId;
+    }
+
+    if (typingStopTimerRef.current !== null) {
+      window.clearTimeout(typingStopTimerRef.current);
+    }
+    typingStopTimerRef.current = window.setTimeout(() => {
+      emitTypingStop(selectedConvId);
+    }, 1200);
+  }, [chatRealtimePreferences, emitTypingStop, selectedConvId, socket]);
 
   const myMinReadableKeyVersion = useMemo(() => {
     if (!selectedConversation || !user) return 1;
@@ -750,6 +847,19 @@ function App() {
     return `${partnerUsername}#${shortConversationId(selectedConversation.id)}`;
   }, [selectedConversation, user]);
 
+  const typingDisplayNames = useMemo(() => {
+    if (!selectedConversation || !user) return [] as string[];
+    const typingUserIds = (typingByConversation[selectedConversation.id] ?? []).filter((id) => id !== user.id);
+    return typingUserIds
+      .map((userId) => {
+        const profile = profileById[userId];
+        if (profile?.displayName?.trim()) return profile.displayName.trim();
+        if (profile?.username) return profile.username;
+        return selectedConversation.members.find((member) => member.userId === userId)?.user.username ?? null;
+      })
+      .filter((name): name is string => Boolean(name));
+  }, [profileById, selectedConversation, typingByConversation, user]);
+
   const friendStatusByUserId = useMemo(() => {
     const map = new Map<string, "friend" | "incoming" | "outgoing">();
     for (const friend of friends) map.set(friend.user.id, "friend");
@@ -778,9 +888,35 @@ function App() {
       api.getFriends(token),
       api.getFriendRequests(token),
     ]);
+
+    const profileUpdates: Array<Partial<api.UserProfile> & { id: string }> = [];
+    for (const friend of friendList) {
+      profileUpdates.push({
+        id: friend.user.id,
+        username: friend.user.username,
+        displayName: friend.user.displayName ?? null,
+        avatarUrl: friend.user.avatarUrl ?? null,
+        presence: friend.user.presence ?? "offline",
+        statusText: friend.user.statusText ?? null,
+        statusEmoji: friend.user.statusEmoji ?? null,
+      });
+    }
+    for (const request of [...requests.incoming, ...requests.outgoing]) {
+      profileUpdates.push({
+        id: request.user.id,
+        username: request.user.username,
+        displayName: request.user.displayName ?? null,
+        avatarUrl: request.user.avatarUrl ?? null,
+        presence: request.user.presence ?? "offline",
+        statusText: request.user.statusText ?? null,
+        statusEmoji: request.user.statusEmoji ?? null,
+      });
+    }
+
+    mergeProfiles(profileUpdates);
     setFriends(friendList);
     setFriendRequests(requests);
-  }, [token]);
+  }, [token, mergeProfiles]);
 
   const sendFriendRequest = useCallback(async (targetUserId: string) => {
     if (!token) return;
@@ -921,6 +1057,130 @@ function App() {
       socket?.off("friendships_updated", onFriendshipsUpdated);
     };
   }, [loadFriendsData, socket, token]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const onPresenceUpdated = (data: { userId: string; presence: api.Presence; lastActiveAt: string | null }) => {
+      mergePresence(data.userId, data.presence, data.lastActiveAt);
+
+      setFriends((prev) =>
+        prev.map((friend) =>
+          friend.user.id === data.userId
+            ? { ...friend, user: { ...friend.user, presence: data.presence } }
+            : friend,
+        ),
+      );
+
+      setFriendRequests((prev) => ({
+        incoming: prev.incoming.map((request) =>
+          request.user.id === data.userId
+            ? { ...request, user: { ...request.user, presence: data.presence } }
+            : request,
+        ),
+        outgoing: prev.outgoing.map((request) =>
+          request.user.id === data.userId
+            ? { ...request, user: { ...request.user, presence: data.presence } }
+            : request,
+        ),
+      }));
+    };
+
+    socket.on("presence_updated", onPresenceUpdated);
+    return () => {
+      socket.off("presence_updated", onPresenceUpdated);
+    };
+  }, [mergePresence, socket]);
+
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const removeTypingUser = (conversationId: string, userId: string) => {
+      const timerKey = `${conversationId}:${userId}`;
+      const existingTimer = typingIndicatorTimeoutsRef.current[timerKey];
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+        delete typingIndicatorTimeoutsRef.current[timerKey];
+      }
+
+      setTypingByConversation((prev) => {
+        const current = prev[conversationId] ?? [];
+        if (!current.includes(userId)) return prev;
+        const nextUsers = current.filter((id) => id !== userId);
+        if (!nextUsers.length) {
+          const { [conversationId]: _removed, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, [conversationId]: nextUsers };
+      });
+    };
+
+    const onTypingStart = (data: { userId: string; conversationId: string }) => {
+      if (data.userId === user.id) return;
+
+      const pref = chatRealtimePreferences[data.conversationId] ?? DEFAULT_CHAT_PREFERENCES;
+      if (!pref.typingIndicators) return;
+
+      setTypingByConversation((prev) => {
+        const current = prev[data.conversationId] ?? [];
+        if (current.includes(data.userId)) return prev;
+        return { ...prev, [data.conversationId]: [...current, data.userId] };
+      });
+
+      const timerKey = `${data.conversationId}:${data.userId}`;
+      const existingTimer = typingIndicatorTimeoutsRef.current[timerKey];
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+      }
+      typingIndicatorTimeoutsRef.current[timerKey] = window.setTimeout(() => {
+        removeTypingUser(data.conversationId, data.userId);
+      }, 5000);
+    };
+
+    const onTypingStop = (data: { userId: string; conversationId: string }) => {
+      if (data.userId === user.id) return;
+      removeTypingUser(data.conversationId, data.userId);
+    };
+
+    const onMessageSeen = (data: { messageId: string; userId: string }) => {
+      setSeenByMessageId((prev) => {
+        const current = prev[data.messageId] ?? [];
+        if (current.includes(data.userId)) return prev;
+        return { ...prev, [data.messageId]: [...current, data.userId] };
+      });
+    };
+
+    socket.on("typing_start", onTypingStart);
+    socket.on("typing_stop", onTypingStop);
+    socket.on("message_seen", onMessageSeen);
+
+    return () => {
+      socket.off("typing_start", onTypingStart);
+      socket.off("typing_stop", onTypingStop);
+      socket.off("message_seen", onMessageSeen);
+
+      for (const timeoutId of Object.values(typingIndicatorTimeoutsRef.current)) {
+        window.clearTimeout(timeoutId);
+      }
+      typingIndicatorTimeoutsRef.current = {};
+    };
+  }, [chatRealtimePreferences, socket, user]);
+
+  useEffect(() => {
+    if (!socket || !selectedConvId || !user) return;
+    if (selectedConversation?.passcodeEnabled && !chatLock.isUnlocked(selectedConvId)) return;
+    const pref = chatRealtimePreferences[selectedConvId] ?? DEFAULT_CHAT_PREFERENCES;
+    if (!pref.readReceipts) return;
+
+    const conversationMessages = byConversation[selectedConvId] ?? [];
+    for (const message of conversationMessages) {
+      if (message.senderId === user.id) continue;
+      const dedupeKey = `${selectedConvId}:${message.id}`;
+      if (seenSentRef.current.has(dedupeKey)) continue;
+      socket.emit("message_seen", { messageId: message.id, conversationId: selectedConvId });
+      seenSentRef.current.add(dedupeKey);
+    }
+  }, [byConversation, chatLock, chatRealtimePreferences, selectedConvId, selectedConversation, socket, user]);
 
   useEffect(() => {
     if (!token) return;
@@ -1105,6 +1365,18 @@ function App() {
       }
     };
   }, [selectedConvId]);
+
+  useEffect(() => {
+    if (!typingSentConversationRef.current) return;
+    if (selectedConvId === typingSentConversationRef.current) return;
+    emitTypingStop(typingSentConversationRef.current);
+  }, [emitTypingStop, selectedConvId]);
+
+  useEffect(() => {
+    return () => {
+      emitTypingStop(typingSentConversationRef.current);
+    };
+  }, [emitTypingStop]);
 
   useEffect(() => {
     if (!selectedConvId || !token) return;
@@ -2106,6 +2378,8 @@ function App() {
         mediaIds,
         type: attachments.length ? "media" : "text",
       });
+
+      emitTypingStop(selectedConvId);
 
       setMessageDraft("");
       setPendingFiles([]);
@@ -3145,7 +3419,11 @@ function App() {
                 >
                   @{dmPartnerName}
                 </button>
-                <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
+                <p className={`text-xs ${typingDisplayNames.length ? "text-orbit-accent" : "text-orbit-muted"}`}>
+                  {typingDisplayNames.length
+                    ? `${typingDisplayNames.length === 1 ? typingDisplayNames[0] : `${typingDisplayNames.length} people`} typing...`
+                    : "Direct encrypted chat"}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 {getConversationSecretKey(selectedConversation.id) ? (
@@ -3160,10 +3438,13 @@ function App() {
                   onClick={() => {
                     setShowChatSettings(!showChatSettings);
                     if (!showChatSettings) {
+                      const realtimePref = chatRealtimePreferences[selectedConversation.id] ?? DEFAULT_CHAT_PREFERENCES;
                       setChatSettingsName(selectedConversation.name ?? "");
                       setChatSettingsLength(selectedConversation.passcodeLength);
                       setChatSettingsLockMode(selectedConversation.lockMode);
                       setChatSettingsTimeout(selectedConversation.lockTimeoutSeconds?.toString() ?? "");
+                      setChatSettingsReadReceipts(realtimePref.readReceipts);
+                      setChatSettingsTypingIndicators(realtimePref.typingIndicators);
                       setChatSettingsPasscode("");
                       setChatSettingsError(null);
                     }
@@ -3238,6 +3519,9 @@ function App() {
                           />
                         )}
                       </div>
+                      {mine && (seenByMessageId[msg.id] ?? []).some((seenUserId) => seenUserId !== user.id) && (
+                        <p className="mt-1 text-right text-[10px] uppercase tracking-wide text-orbit-muted">Seen</p>
+                      )}
                     </div>
                   </article>
                 );
@@ -3519,7 +3803,7 @@ function App() {
                   ref={messageInputRef}
                   className="orbit-input h-9 flex-1 px-3 text-sm"
                   value={messageDraft}
-                  onChange={(event) => setMessageDraft(event.target.value)}
+                  onChange={(event) => onMessageDraftChange(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
@@ -3630,6 +3914,37 @@ function App() {
                         <option value="after_inactivity">After Inactivity</option>
                       </select>
                     </label>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Realtime</p>
+                    <div className="space-y-2">
+                      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-orbit-panel px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={chatSettingsReadReceipts}
+                          onChange={(e) => setChatSettingsReadReceipts(e.target.checked)}
+                          className="h-4 w-4 accent-orbit-accent"
+                        />
+                        <div>
+                          <p className="text-sm text-slate-200">Send read receipts</p>
+                          <p className="text-[11px] text-orbit-muted">When enabled, your client sends "seen" updates for this chat.</p>
+                        </div>
+                      </label>
+
+                      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-orbit-panel px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={chatSettingsTypingIndicators}
+                          onChange={(e) => setChatSettingsTypingIndicators(e.target.checked)}
+                          className="h-4 w-4 accent-orbit-accent"
+                        />
+                        <div>
+                          <p className="text-sm text-slate-200">Show typing indicators</p>
+                          <p className="text-[11px] text-orbit-muted">When disabled, you won’t send or display typing activity for this chat.</p>
+                        </div>
+                      </label>
+                    </div>
                   </div>
 
                   {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
@@ -3919,6 +4234,17 @@ function App() {
                           }
                           const updated = await api.updateChatSettings(selectedConversation.id, data, token);
                           setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                          setRealtimePreferencesForConversation(selectedConversation.id, {
+                            readReceipts: chatSettingsReadReceipts,
+                            typingIndicators: chatSettingsTypingIndicators,
+                          });
+                          if (!chatSettingsTypingIndicators) {
+                            emitTypingStop(selectedConversation.id);
+                            setTypingByConversation((prev) => {
+                              const { [selectedConversation.id]: _removed, ...rest } = prev;
+                              return rest;
+                            });
+                          }
                           chatLock.unlock(updated.id, updated.lockMode, updated.lockTimeoutSeconds);
                           setShowChatSettings(false);
                         } catch (err: any) {
