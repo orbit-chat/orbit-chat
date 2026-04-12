@@ -490,6 +490,9 @@ function App() {
   const [gifActiveIndex, setGifActiveIndex] = useState(0);
   const [emojiActiveIndex, setEmojiActiveIndex] = useState(0);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [replyTargetMessageId, setReplyTargetMessageId] = useState<string | null>(null);
+  const [threadRootMessageId, setThreadRootMessageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
   const gifPickerRef = useRef<HTMLDivElement | null>(null);
@@ -642,6 +645,29 @@ function App() {
     () => (selectedConvId ? byConversation[selectedConvId] ?? [] : []),
     [byConversation, selectedConvId]
   );
+
+  const messageById = useMemo(() => {
+    const map = new Map<string, (typeof messages)[number]>();
+    for (const message of messages) {
+      map.set(message.id, message);
+    }
+    return map;
+  }, [messages]);
+
+  const threadRootMessage = useMemo(() => {
+    if (!threadRootMessageId) return null;
+    return messageById.get(threadRootMessageId) ?? null;
+  }, [messageById, threadRootMessageId]);
+
+  const threadMessages = useMemo(() => {
+    if (!threadRootMessageId) return [] as typeof messages;
+    return messages.filter((message) => message.id === threadRootMessageId || message.parentMessageId === threadRootMessageId);
+  }, [messages, threadRootMessageId]);
+
+  const activeReplyParentMessageId = useMemo(() => {
+    if (threadRootMessageId) return threadRootMessageId;
+    return replyTargetMessageId;
+  }, [replyTargetMessageId, threadRootMessageId]);
 
   const selectedConversationPreferences = useMemo(() => {
     if (!selectedConversation) return DEFAULT_CHAT_PREFERENCES;
@@ -1241,6 +1267,9 @@ function App() {
     setGifActiveIndex(0);
     setEmojiActiveIndex(0);
     setMessageSendError(null);
+    setReplyTargetMessageId(null);
+    setThreadRootMessageId(null);
+    setHoveredMessageId(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [selectedConvId]);
 
@@ -1390,10 +1419,12 @@ function App() {
           id: m.id,
           senderId: m.sender.id,
           sender: m.sender.username,
+          parentMessageId: m.parentMessageId,
           cipherText: m.ciphertext,
           keyVersion: m.keyVersion,
           nonce: m.nonce,
           mediaIds: m.mediaIds ?? [],
+          reactions: m.reactions ?? [],
           createdAt: new Date(m.createdAt).getTime(),
         }, { currentUserId: user?.id, markAsRead: true });
       }
@@ -2278,6 +2309,24 @@ function App() {
     setPendingFiles((prev) => [...prev, ...accepted]);
   };
 
+  const handleToggleReaction = (messageId: string, emoji: "👍" | "❤️" | "😂") => {
+    if (!socket || !selectedConvId) return;
+    socket.emit("toggle_reaction", { messageId, emoji, conversationId: selectedConvId });
+  };
+
+  const handleQuickReply = (messageId: string) => {
+    setReplyTargetMessageId(messageId);
+    messageInputRef.current?.focus();
+  };
+
+  const openThreadView = (messageId: string) => {
+    const message = messageById.get(messageId);
+    const rootId = message?.parentMessageId ?? messageId;
+    setThreadRootMessageId(rootId);
+    setReplyTargetMessageId(rootId);
+    messageInputRef.current?.focus();
+  };
+
   /* ───── Send message over socket ───── */
   const handleSendMessage = async () => {
     const draft = messageDraft.trim();
@@ -2374,6 +2423,7 @@ function App() {
         conversationId: selectedConvId,
         ciphertext: cipherText,
         nonce,
+        parentMessageId: activeReplyParentMessageId ?? undefined,
         keyVersion: getConversationKeyVersion(selectedConvId) ?? 1,
         mediaIds,
         type: attachments.length ? "media" : "text",
@@ -2385,6 +2435,9 @@ function App() {
       setPendingFiles([]);
       setPendingGifs([]);
       setMessageSendError(null);
+      if (!threadRootMessageId) {
+        setReplyTargetMessageId(null);
+      }
       for (const key of usedCacheKeys) {
         delete uploadedAttachmentCacheRef.current[key];
       }
@@ -3460,75 +3513,214 @@ function App() {
               </div>
             </header>
 
-            <section className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
-              {messages.length === 0 && (
-                <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
-              )}
-              {messages.map((msg) => {
-                const mine = msg.sender === user.username;
-                const senderProfile = profileById[msg.senderId] ?? null;
-                const senderLabel = senderProfile?.displayName?.trim() || msg.sender;
-                const senderAvatar = senderProfile?.avatarUrl ?? null;
-                const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
-                return (
-                  <article
-                    key={msg.id}
-                    className={`flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
-                  >
-                    <button
-                      className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text"
-                      onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
-                      aria-label={`Open profile for ${senderLabel}`}
-                      title={senderLabel}
-                    >
-                      {senderAvatar ? (
-                        <img src={senderAvatar} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <span className="flex h-full w-full items-center justify-center">{senderInitial}</span>
-                      )}
-                    </button>
+            <div className="flex min-h-0 flex-1">
+              <section className={`space-y-2 overflow-y-auto px-3 py-2 ${threadRootMessage ? "w-[65%] border-r border-white/10" : "w-full"}`}>
+                {messages.length === 0 && (
+                  <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
+                )}
+                {messages.map((msg) => {
+                  const mine = msg.sender === user.username;
+                  const senderProfile = profileById[msg.senderId] ?? null;
+                  const senderLabel = senderProfile?.displayName?.trim() || msg.sender;
+                  const senderAvatar = senderProfile?.avatarUrl ?? null;
+                  const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
+                  const parentMessage = msg.parentMessageId ? messageById.get(msg.parentMessageId) ?? null : null;
+                  const threadReplyCount = messages.filter((candidate) => candidate.parentMessageId === msg.id).length;
+                  const quickActionsVisible = hoveredMessageId === msg.id;
 
-                    <div
-                      className={`min-w-0 rounded-xl border px-3 py-2 text-[13px] leading-snug shadow-sm ${
-                        mine
-                          ? "border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
-                          : "border-white/10 bg-[#202533]"
-                      }`}
+                  return (
+                    <article
+                      key={msg.id}
+                      className={`group relative flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
+                      onMouseEnter={() => setHoveredMessageId(msg.id)}
+                      onMouseLeave={() => setHoveredMessageId((prev) => (prev === msg.id ? null : prev))}
                     >
-                      <div className="flex items-center gap-2">
-                        <button
-                          className="max-w-[180px] truncate text-[11px] font-semibold text-orbit-accent hover:underline"
-                          onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
-                        >
-                          {mine ? "You" : senderLabel}
-                        </button>
-                        <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
-                      </div>
-                      <div className="mt-1">
-                        {typeof msg.keyVersion === "number" && msg.keyVersion < myMinReadableKeyVersion ? (
-                          <p className="break-words text-orbit-muted">
-                            Encrypted message unavailable (sent before you joined this key version).
-                          </p>
+                      <button
+                        className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text"
+                        onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                        aria-label={`Open profile for ${senderLabel}`}
+                        title={senderLabel}
+                      >
+                        {senderAvatar ? (
+                          <img src={senderAvatar} alt="" className="h-full w-full object-cover" />
                         ) : (
+                          <span className="flex h-full w-full items-center justify-center">{senderInitial}</span>
+                        )}
+                      </button>
+
+                      <div
+                        className={`min-w-0 rounded-xl border px-3 py-2 text-[13px] leading-snug shadow-sm ${
+                          mine
+                            ? "border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
+                            : "border-white/10 bg-[#202533]"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="max-w-[180px] truncate text-[11px] font-semibold text-orbit-accent hover:underline"
+                            onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                          >
+                            {mine ? "You" : senderLabel}
+                          </button>
+                          <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
+                        </div>
+
+                        {parentMessage && (
+                          <button
+                            className="mt-1 flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-left text-[11px] text-orbit-muted hover:border-white/20"
+                            onClick={() => openThreadView(parentMessage.id)}
+                          >
+                            <span className="font-semibold text-orbit-accent">Replying to {parentMessage.sender}</span>
+                            <span className="truncate">in thread</span>
+                          </button>
+                        )}
+
+                        <div className="mt-1">
+                          {typeof msg.keyVersion === "number" && msg.keyVersion < myMinReadableKeyVersion ? (
+                            <p className="break-words text-orbit-muted">
+                              Encrypted message unavailable (sent before you joined this key version).
+                            </p>
+                          ) : (
+                            <DecryptedMessageBody
+                              conversationId={selectedConversation.id}
+                              token={token}
+                              cipherText={msg.cipherText}
+                              nonce={msg.nonce}
+                              keyVersion={msg.keyVersion}
+                            />
+                          )}
+                        </div>
+
+                        {(msg.reactions ?? []).length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {(msg.reactions ?? []).map((reaction) => {
+                              const active = reaction.userIds.includes(user.id);
+                              return (
+                                <button
+                                  key={`${msg.id}:${reaction.emoji}`}
+                                  className={`rounded-full border px-2 py-0.5 text-xs ${active ? "border-orbit-accent/60 bg-orbit-accent/20 text-orbit-accent" : "border-white/10 bg-black/20 text-slate-300"}`}
+                                  onClick={() => handleToggleReaction(msg.id, reaction.emoji as "👍" | "❤️" | "😂")}
+                                >
+                                  {reaction.emoji} {reaction.count}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {threadReplyCount > 0 && (
+                          <button
+                            className="mt-2 text-[11px] text-orbit-muted hover:text-orbit-accent"
+                            onClick={() => openThreadView(msg.id)}
+                          >
+                            {threadReplyCount} {threadReplyCount === 1 ? "reply" : "replies"} in thread
+                          </button>
+                        )}
+
+                        {mine && (seenByMessageId[msg.id] ?? []).some((seenUserId) => seenUserId !== user.id) && (
+                          <p className="mt-1 text-right text-[10px] uppercase tracking-wide text-orbit-muted">Seen</p>
+                        )}
+                      </div>
+
+                      {quickActionsVisible && (
+                        <div className={`absolute -top-3 flex items-center gap-1 rounded-full border border-white/10 bg-orbit-panelAlt px-1.5 py-1 shadow-lg ${mine ? "right-10" : "left-10"}`}>
+                          {(["👍", "❤️", "😂"] as const).map((emoji) => (
+                            <button
+                              key={`${msg.id}:quick:${emoji}`}
+                              className="rounded-full px-1.5 py-0.5 text-sm hover:bg-white/10"
+                              onClick={() => handleToggleReaction(msg.id, emoji)}
+                              title={`React ${emoji}`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                          <button
+                            className="rounded-full px-2 py-0.5 text-[11px] text-orbit-muted hover:bg-white/10 hover:text-orbit-text"
+                            onClick={() => handleQuickReply(msg.id)}
+                            title="Quick reply"
+                          >
+                            Reply
+                          </button>
+                          <button
+                            className="rounded-full px-2 py-0.5 text-[11px] text-orbit-muted hover:bg-white/10 hover:text-orbit-text"
+                            onClick={() => openThreadView(msg.id)}
+                            title="Open thread"
+                          >
+                            Thread
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </section>
+
+              {threadRootMessage && (
+                <aside className="flex w-[35%] min-w-[280px] flex-col bg-[#171b27]/80">
+                  <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Thread</p>
+                      <p className="text-xs text-orbit-muted">{threadMessages.length - 1} replies</p>
+                    </div>
+                    <button
+                      className="orbit-btn px-2 py-1 text-xs"
+                      onClick={() => {
+                        setThreadRootMessageId(null);
+                        setReplyTargetMessageId(null);
+                      }}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
+                    {threadMessages.map((threadMessage) => (
+                      <div key={`thread:${threadMessage.id}`} className="rounded-lg border border-white/10 bg-orbit-panelAlt px-2.5 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-orbit-accent">{threadMessage.sender}</span>
+                          <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(threadMessage.createdAt)}</span>
+                        </div>
+                        <div className="mt-1 text-xs">
                           <DecryptedMessageBody
                             conversationId={selectedConversation.id}
                             token={token}
-                            cipherText={msg.cipherText}
-                            nonce={msg.nonce}
-                            keyVersion={msg.keyVersion}
+                            cipherText={threadMessage.cipherText}
+                            nonce={threadMessage.nonce}
+                            keyVersion={threadMessage.keyVersion}
                           />
-                        )}
+                        </div>
                       </div>
-                      {mine && (seenByMessageId[msg.id] ?? []).some((seenUserId) => seenUserId !== user.id) && (
-                        <p className="mt-1 text-right text-[10px] uppercase tracking-wide text-orbit-muted">Seen</p>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </section>
+                    ))}
+                  </div>
+                </aside>
+              )}
+            </div>
 
             <footer className="border-t border-white/10 bg-[#1b2030]/90 px-3 py-2 backdrop-blur">
+              {(activeReplyParentMessageId || threadRootMessage) && (
+                <div className="mb-2 flex items-center justify-between rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-orbit-accent">
+                      {threadRootMessage ? "Replying in thread" : "Quick reply"}
+                    </p>
+                    <p className="truncate text-[11px] text-orbit-muted">
+                      {activeReplyParentMessageId ? `Linked to message ${activeReplyParentMessageId.slice(0, 8)}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    className="orbit-btn px-2 py-1 text-xs"
+                    onClick={() => {
+                      if (threadRootMessage) {
+                        setThreadRootMessageId(null);
+                      }
+                      setReplyTargetMessageId(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
               {(pendingFiles.length > 0 || pendingGifs.length > 0) && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, idx) => (

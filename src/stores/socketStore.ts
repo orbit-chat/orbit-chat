@@ -140,6 +140,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       conversationId: string;
       sender: string;
       senderId: string;
+      parentMessageId: string | null;
       ciphertext: string;
       nonce: string;
       keyVersion: number;
@@ -147,6 +148,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       type: string;
       expiresAt: string | null;
       maxViews: number | null;
+      reactions?: Array<{ emoji: string; count: number; userIds: string[] }>;
       createdAt: number;
     }) => {
       const currentUserId = useAuthStore.getState().user?.id;
@@ -154,12 +156,24 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         id: data.id,
         senderId: data.senderId,
         sender: data.sender,
+        parentMessageId: data.parentMessageId,
         cipherText: data.ciphertext,
         createdAt: data.createdAt,
         nonce: data.nonce,
         keyVersion: data.keyVersion,
         mediaIds: data.mediaIds ?? [],
+        reactions: data.reactions ?? [],
       }, { currentUserId });
+    });
+
+    socket.on("message_reaction_updated", (data: {
+      messageId: string;
+      conversationId: string;
+      reactions: Array<{ emoji: string; count: number; userIds: string[] }>;
+    }) => {
+      useMessagesStore.getState().updateMessage(data.conversationId, data.messageId, {
+        reactions: data.reactions,
+      });
     });
 
     socket.on("message_delivered", (data: { messageId: string; userId: string }) => {

@@ -555,6 +555,7 @@ export type ServerMessage = {
   id: string;
   conversationId: string;
   senderId: string;
+  parentMessageId: string | null;
   ciphertext: string;
   nonce: string;
   keyVersion: number;
@@ -563,6 +564,7 @@ export type ServerMessage = {
   expiresAt: string | null;
   maxViews: number | null;
   currentViews: number;
+  reactions?: Array<{ emoji: string; count: number; userIds: string[] }>;
   createdAt: string;
   sender: { id: string; username: string };
 };
@@ -573,7 +575,7 @@ export function getMessages(conversationId: string, token: string, cursor?: stri
 }
 
 export function sendMessage(
-  data: { conversationId: string; ciphertext: string; nonce: string; keyVersion?: number; mediaIds?: string[] },
+  data: { conversationId: string; ciphertext: string; nonce: string; parentMessageId?: string; keyVersion?: number; mediaIds?: string[] },
   token: string
 ) {
   return request<ServerMessage>("/messages", { method: "POST", body: data, token });

@@ -4,10 +4,12 @@ export type ChatMessage = {
   id: string;
   senderId: string;
   sender: string;
+  parentMessageId?: string | null;
   cipherText: string;
   nonce?: string;
   keyVersion?: number;
   mediaIds?: string[];
+  reactions?: Array<{ emoji: string; count: number; userIds: string[] }>;
   createdAt: number;
   ttlSeconds?: number;
 };
@@ -21,6 +23,11 @@ type MessagesState = {
     conversationId: string,
     message: ChatMessage,
     options?: { currentUserId?: string; markAsRead?: boolean }
+  ) => void;
+  updateMessage: (
+    conversationId: string,
+    messageId: string,
+    patch: Partial<ChatMessage>
   ) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
 };
@@ -59,6 +66,17 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
       unreadCountByConversation: {
         ...get().unreadCountByConversation,
         [conversationId]: shouldCountUnread ? currentUnread + 1 : currentUnread,
+      },
+    });
+  },
+  updateMessage: (conversationId, messageId, patch) => {
+    const current = get().byConversation[conversationId] ?? [];
+    set({
+      byConversation: {
+        ...get().byConversation,
+        [conversationId]: current.map((message) =>
+          message.id === messageId ? { ...message, ...patch } : message,
+        ),
       },
     });
   },
