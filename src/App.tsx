@@ -317,6 +317,7 @@ const DEFAULT_CHAT_PREFERENCES: ChatRealtimePreferences = {
 };
 
 const CHAT_PREFERENCES_STORAGE_KEY = "orbit:chat-realtime-preferences";
+const PINNED_MESSAGES_STORAGE_KEY = "orbit:pinned-messages";
 
 function loadChatPreferences(): Record<string, ChatRealtimePreferences> {
   try {
@@ -338,6 +339,25 @@ function loadChatPreferences(): Record<string, ChatRealtimePreferences> {
 
 function persistChatPreferences(value: Record<string, ChatRealtimePreferences>) {
   localStorage.setItem(CHAT_PREFERENCES_STORAGE_KEY, JSON.stringify(value));
+}
+
+function loadPinnedMessagesByConversation(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(PINNED_MESSAGES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, string[]>;
+    const normalized: Record<string, string[]> = {};
+    for (const [conversationId, ids] of Object.entries(parsed)) {
+      normalized[conversationId] = Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [];
+    }
+    return normalized;
+  } catch {
+    return {};
+  }
+}
+
+function persistPinnedMessagesByConversation(value: Record<string, string[]>) {
+  localStorage.setItem(PINNED_MESSAGES_STORAGE_KEY, JSON.stringify(value));
 }
 
 function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
@@ -587,6 +607,8 @@ function App() {
   const [focusedSearchMessageId, setFocusedSearchMessageId] = useState<string | null>(null);
   const [reactionModalMessageId, setReactionModalMessageId] = useState<string | null>(null);
   const [reactionShortcodeInput, setReactionShortcodeInput] = useState(":thumbsup:");
+  const [showPinnedMessagesPanel, setShowPinnedMessagesPanel] = useState(false);
+  const [pinnedMessageIdsByConversation, setPinnedMessageIdsByConversation] = useState<Record<string, string[]>>(() => loadPinnedMessagesByConversation());
   const [mentionAutocomplete, setMentionAutocomplete] = useState<{ start: number; end: number; query: string } | null>(null);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const [replyTargetMessageId, setReplyTargetMessageId] = useState<string | null>(null);
@@ -795,6 +817,19 @@ function App() {
     return messages.filter((message) => message.id === threadRootMessageId || message.parentMessageId === threadRootMessageId);
   }, [messages, threadRootMessageId]);
 
+  const pinnedMessageIdsForSelectedConversation = useMemo(() => {
+    if (!selectedConversation) return [] as string[];
+    return pinnedMessageIdsByConversation[selectedConversation.id] ?? [];
+  }, [pinnedMessageIdsByConversation, selectedConversation]);
+
+  const pinnedMessagesForSelectedConversation = useMemo(() => {
+    if (!pinnedMessageIdsForSelectedConversation.length) return [] as typeof messages;
+    const collected = pinnedMessageIdsForSelectedConversation
+      .map((messageId) => messageById.get(messageId) ?? null)
+      .filter((message): message is (typeof messages)[number] => Boolean(message));
+    return collected;
+  }, [messageById, pinnedMessageIdsForSelectedConversation]);
+
   const reactionModalMessage = useMemo(() => {
     if (!reactionModalMessageId) return null;
     return messageById.get(reactionModalMessageId) ?? null;
@@ -867,11 +902,30 @@ function App() {
     setFocusedSearchMessageId(null);
     setMentionAutocomplete(null);
     setMentionActiveIndex(0);
+    setShowPinnedMessagesPanel(false);
     if (searchFocusTimeoutRef.current !== null) {
       window.clearTimeout(searchFocusTimeoutRef.current);
       searchFocusTimeoutRef.current = null;
     }
   }, [selectedConvId]);
+
+  useEffect(() => {
+    if (!selectedConversation) return;
+    const currentPinnedIds = pinnedMessageIdsByConversation[selectedConversation.id] ?? [];
+    if (!currentPinnedIds.length) return;
+    const existingIds = new Set(messages.map((message) => message.id));
+    const filtered = currentPinnedIds.filter((messageId) => existingIds.has(messageId));
+    if (filtered.length !== currentPinnedIds.length) {
+      setPinnedMessageIdsByConversation((prev) => {
+        const next = { ...prev, [selectedConversation.id]: filtered };
+        if (filtered.length === 0) {
+          delete next[selectedConversation.id];
+        }
+        persistPinnedMessagesByConversation(next);
+        return next;
+      });
+    }
+  }, [messages, pinnedMessageIdsByConversation, selectedConversation]);
 
   useEffect(() => {
     return () => {
@@ -2634,6 +2688,26 @@ function App() {
     }, 2200);
   }, []);
 
+  const updatePinnedMessageIds = useCallback((conversationId: string, nextIds: string[]) => {
+    setPinnedMessageIdsByConversation((prev) => {
+      const next = { ...prev, [conversationId]: nextIds };
+      if (nextIds.length === 0) {
+        delete next[conversationId];
+      }
+      persistPinnedMessagesByConversation(next);
+      return next;
+    });
+  }, []);
+
+  const togglePinnedMessage = useCallback((conversationId: string, messageId: string) => {
+    const current = pinnedMessageIdsByConversation[conversationId] ?? [];
+    const alreadyPinned = current.includes(messageId);
+    const next = alreadyPinned
+      ? current.filter((id) => id !== messageId)
+      : [messageId, ...current];
+    updatePinnedMessageIds(conversationId, next);
+  }, [pinnedMessageIdsByConversation, updatePinnedMessageIds]);
+
   const handlePingMessageAuthor = (username: string) => {
     const mention = `@${username} `;
     setMessageDraft((prev) => {
@@ -2652,6 +2726,10 @@ function App() {
   };
 
   const buildMessageContextMenuItems = (message: (typeof messages)[number], senderLabel: string): ContextMenuItem[] => {
+    const isPinnedMessage = selectedConversation
+      ? (pinnedMessageIdsByConversation[selectedConversation.id] ?? []).includes(message.id)
+      : false;
+
     const items: ContextMenuItem[] = [
       {
         type: "item",
@@ -2675,6 +2753,20 @@ function App() {
           </svg>
         ),
         onClick: () => openThreadView(message.id),
+      },
+      {
+        type: "item",
+        label: isPinnedMessage ? "Unpin message" : "Pin message",
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 3l7 7-4 1-2 7-4-4-7 2 2-7-4-4 7-2 1-4z" />
+          </svg>
+        ),
+        disabled: !selectedConversation,
+        onClick: () => {
+          if (!selectedConversation) return;
+          togglePinnedMessage(selectedConversation.id, message.id);
+        },
       },
     ];
 
@@ -3914,6 +4006,45 @@ function App() {
                 ) : (
                   <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
                 )}
+                <div className="relative">
+                  <button
+                    className={`orbit-btn h-9 px-2.5 text-xs ${showPinnedMessagesPanel ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                    onClick={() => setShowPinnedMessagesPanel((prev) => !prev)}
+                    aria-label="Pinned messages"
+                    title="Pinned messages"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M14 3l7 7-4 1-2 7-4-4-7 2 2-7-4-4 7-2 1-4z" />
+                      </svg>
+                      {pinnedMessagesForSelectedConversation.length}
+                    </span>
+                  </button>
+
+                  {showPinnedMessagesPanel && (
+                    <div className="absolute right-0 top-[calc(100%+6px)] z-30 max-h-72 w-80 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-1.5 shadow-xl shadow-black/50">
+                      {pinnedMessagesForSelectedConversation.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-orbit-muted">No pinned messages in this chat.</p>
+                      ) : (
+                        pinnedMessagesForSelectedConversation.map((pinnedMessage) => (
+                          <button
+                            key={`pinned-message:${pinnedMessage.id}`}
+                            className="mb-1 block w-full rounded-lg px-2.5 py-2 text-left hover:bg-white/10"
+                            onClick={() => {
+                              jumpToMessage(pinnedMessage.id);
+                              setShowPinnedMessagesPanel(false);
+                            }}
+                          >
+                            <p className="truncate text-[11px] font-semibold text-orbit-accent">
+                              {pinnedMessage.sender} • {formatMessageTimestamp(pinnedMessage.createdAt)}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-300">{(messageSearchIndex[pinnedMessage.id] ?? "Encrypted message").trim() || "Encrypted message"}</p>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
                 <button
                   className="orbit-btn h-9 w-9 p-0"
                   onClick={() => {
@@ -3958,6 +4089,7 @@ function App() {
                   const threadReplyCount = messages.filter((candidate) => candidate.parentMessageId === msg.id).length;
                   const quickActionsVisible = hoveredMessageId === msg.id;
                   const isPingedMessage = !mine && hasHandleMention(messageSearchIndex[msg.id] ?? "", user?.username);
+                  const isPinnedMessage = pinnedMessageIdsForSelectedConversation.includes(msg.id);
 
                   return (
                     <article
@@ -4003,6 +4135,11 @@ function App() {
                           {isPingedMessage && (
                             <span className="rounded-full border border-amber-300/60 bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200">
                               Ping
+                            </span>
+                          )}
+                          {isPinnedMessage && (
+                            <span className="rounded-full border border-orbit-accent/40 bg-orbit-accent/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-orbit-accent">
+                              Pinned
                             </span>
                           )}
                         </div>
