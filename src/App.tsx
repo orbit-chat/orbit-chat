@@ -465,6 +465,36 @@ function DecryptedMessageBody(props: {
   );
 }
 
+async function extractMessageSearchableText(params: {
+  secretKey: string | null;
+  cipherText: string;
+  nonce?: string;
+}) {
+  const { secretKey, cipherText, nonce } = params;
+  if (!secretKey || !nonce) return "";
+
+  try {
+    const text = await decryptMessage(cipherText, nonce, secretKey);
+    try {
+      const parsed = JSON.parse(text) as MessageEnvelope;
+      const messageText = parsed?.text?.trim() ?? "";
+      const attachmentText = (parsed?.attachments ?? [])
+        .map((attachment) => {
+          if (attachment.kind === "gif_link") {
+            return [attachment.title, attachment.url].filter(Boolean).join(" ");
+          }
+          return [attachment.name, attachment.mimeType].filter(Boolean).join(" ");
+        })
+        .join(" ");
+      return [messageText, attachmentText].filter(Boolean).join(" ").toLowerCase();
+    } catch {
+      return text.toLowerCase();
+    }
+  } catch {
+    return "";
+  }
+}
+
 function App() {
   const [appVersion, setAppVersion] = useState("-");
   const [authMode, setAuthMode] = useState<"login" | "signup" | "recovery">("login");
@@ -476,7 +506,7 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authValidationError, setAuthValidationError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [chatSearch, setChatSearch] = useState("");
+  const [messageSearch, setMessageSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingGifs, setPendingGifs] = useState<GifLinkAttachment[]>([]);
@@ -628,6 +658,7 @@ function App() {
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
+  const getConversationSecretKeyForVersion = useE2EEStore((state) => state.getConversationSecretKeyForVersion);
   const getConversationKeyVersion = useE2EEStore((state) => state.getConversationKeyVersion);
   const setConversationSecretKeyVersion = useE2EEStore((state) => state.setConversationSecretKeyVersion);
   const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
@@ -660,6 +691,8 @@ function App() {
     [byConversation, selectedConvId]
   );
 
+  const [messageSearchIndex, setMessageSearchIndex] = useState<Record<string, string>>({});
+
   const messageById = useMemo(() => {
     const map = new Map<string, (typeof messages)[number]>();
     for (const message of messages) {
@@ -678,6 +711,22 @@ function App() {
     return messages.filter((message) => message.id === threadRootMessageId || message.parentMessageId === threadRootMessageId);
   }, [messages, threadRootMessageId]);
 
+  const activeMessageSearchQuery = messageSearch.trim().toLowerCase();
+
+  const visibleMessages = useMemo(() => {
+    if (!selectedConversation || !activeMessageSearchQuery) return messages;
+
+    return messages.filter((message) => {
+      const senderProfile = profileById[message.senderId];
+      const senderText = [message.sender, senderProfile?.username, senderProfile?.displayName]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const bodyText = messageSearchIndex[message.id] ?? "";
+      return senderText.includes(activeMessageSearchQuery) || bodyText.includes(activeMessageSearchQuery);
+    });
+  }, [activeMessageSearchQuery, messageSearchIndex, messages, profileById, selectedConversation]);
+
   const activeReplyParentMessageId = useMemo(() => {
     if (threadRootMessageId) return threadRootMessageId;
     return replyTargetMessageId;
@@ -695,6 +744,43 @@ function App() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    setMessageSearch("");
+  }, [selectedConvId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedConversation || !token || messages.length === 0) {
+      setMessageSearchIndex({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      const entries = await Promise.all(
+        messages.map(async (message) => {
+          const secretKey = getConversationSecretKeyForVersion(selectedConversation.id, message.keyVersion);
+          const searchableText = await extractMessageSearchableText({
+            secretKey,
+            cipherText: message.cipherText,
+            nonce: message.nonce,
+          });
+          return [message.id, searchableText] as const;
+        })
+      );
+
+      if (!cancelled) {
+        setMessageSearchIndex(Object.fromEntries(entries));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getConversationSecretKeyForVersion, messages, selectedConversation, token]);
 
   const emitTypingStop = useCallback((conversationId?: string | null) => {
     const activeConversationId = conversationId ?? typingSentConversationRef.current;
@@ -787,23 +873,6 @@ function App() {
       return friend.user.username.toLowerCase().includes(query);
     });
   }, [friends, addMemberSearch, selectedConversation]);
-
-  const matchesChatSearch = useCallback((conv: Conversation) => {
-    const query = chatSearch.trim().toLowerCase();
-    if (!query) return true;
-
-    const members = conv.members.map((member) => member.user.username.toLowerCase());
-    const displayName = conv.name?.toLowerCase() ?? "";
-    const convoMessages = byConversation[conv.id] ?? [];
-    const lastMessage = convoMessages.length ? convoMessages[convoMessages.length - 1] : null;
-    const preview = lastMessage?.sender.toLowerCase() ?? "";
-
-    return (
-      displayName.includes(query) ||
-      members.some((memberName) => memberName.includes(query)) ||
-      preview.includes(query)
-    );
-  }, [byConversation, chatSearch]);
 
   const hasUnreadDm = useMemo(() => {
     return conversations.some((conv) => {
@@ -2033,7 +2102,7 @@ function App() {
 
   const renderConversationList = (conversationList: Conversation[], emptyText: string) => (
     <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
-      {conversationList.filter(matchesChatSearch).map((conv) => {
+      {conversationList.map((conv) => {
         const isSelected = conv.id === selectedConvId;
         const isPinned = pinnedConvIds.has(conv.id);
         const otherMember = conv.members.find((m) => m.user.id !== user?.id);
@@ -2378,12 +2447,76 @@ function App() {
     messageInputRef.current?.focus();
   };
 
+  const handlePingMessageAuthor = (username: string) => {
+    const mention = `@${username} `;
+    setMessageDraft((prev) => {
+      if (prev.startsWith(mention)) return prev;
+      return `${mention}${prev}`;
+    });
+    messageInputRef.current?.focus();
+  };
+
   const openThreadView = (messageId: string) => {
     const message = messageById.get(messageId);
     const rootId = message?.parentMessageId ?? messageId;
     setThreadRootMessageId(rootId);
     setReplyTargetMessageId(rootId);
     messageInputRef.current?.focus();
+  };
+
+  const buildMessageContextMenuItems = (message: (typeof messages)[number], senderLabel: string): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [
+      {
+        type: "item",
+        label: `Reply to ${senderLabel}`,
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 17l-5-5 5-5" />
+            <path d="M5 12h9a4 4 0 0 1 4 4v3" />
+          </svg>
+        ),
+        onClick: () => handleQuickReply(message.id),
+      },
+      {
+        type: "item",
+        label: `Open thread`,
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 6h14" />
+            <path d="M5 12h10" />
+            <path d="M5 18h6" />
+          </svg>
+        ),
+        onClick: () => openThreadView(message.id),
+      },
+    ];
+
+    if (message.senderId !== user?.id) {
+      items.splice(1, 0, {
+        type: "item",
+        label: `Ping @${message.sender}`,
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M16 4v5a2 2 0 0 0 2 2h3" />
+            <path d="M5 20h14" />
+            <path d="M7 20V8a4 4 0 0 1 4-4h5" />
+          </svg>
+        ),
+        onClick: () => handlePingMessageAuthor(message.sender),
+      });
+    }
+
+    items.push({ type: "separator" });
+    for (const emoji of ["👍", "❤️", "😂"] as const) {
+      items.push({
+        type: "item",
+        label: `React ${emoji}`,
+        icon: <span className="text-sm leading-none">{emoji}</span>,
+        onClick: () => handleToggleReaction(message.id, emoji),
+      });
+    }
+
+    return items;
   };
 
   /* ───── Send message over socket ───── */
@@ -2888,16 +3021,6 @@ function App() {
               <h1 className="text-lg font-semibold tracking-tight">Home</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Your recent conversations across DMs and groups</p>
 
-              <label className="mt-4 block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search chats</span>
-                <input
-                  className="orbit-input py-2"
-                  placeholder="Search chats..."
-                  value={chatSearch}
-                  onChange={(event) => setChatSearch(event.target.value)}
-                />
-              </label>
-
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent chats</p>
                 <span className="text-xs text-orbit-muted">{sortedConversations.length}</span>
@@ -2911,16 +3034,6 @@ function App() {
             <>
               <h1 className="text-lg font-semibold tracking-tight">Direct Messages</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Search users and start secure chats</p>
-
-              <label className="mt-4 block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search chats</span>
-                <input
-                  className="orbit-input py-2"
-                  placeholder="Search your DMs..."
-                  value={chatSearch}
-                  onChange={(event) => setChatSearch(event.target.value)}
-                />
-              </label>
 
               <label className="mt-4 block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search users</span>
@@ -3009,16 +3122,6 @@ function App() {
             <>
               <h1 className="text-lg font-semibold tracking-tight">Group Chats</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Create and manage your group conversations</p>
-
-              <label className="mt-4 block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search chats</span>
-                <input
-                  className="orbit-input py-2"
-                  placeholder="Search groups..."
-                  value={chatSearch}
-                  onChange={(event) => setChatSearch(event.target.value)}
-                />
-              </label>
 
               <button
                 className="orbit-btn-primary mt-4 w-full px-3 py-2 text-xs font-semibold"
@@ -3256,23 +3359,13 @@ function App() {
               <h1 className="text-lg font-semibold">Archive</h1>
               <p className="mt-1 text-[13px] text-orbit-muted">Archived chats are hidden from DMs but still active</p>
 
-              <label className="mt-4 block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Search archived chats</span>
-                <input
-                  className="orbit-input py-2"
-                  placeholder="Search archive..."
-                  value={chatSearch}
-                  onChange={(event) => setChatSearch(event.target.value)}
-                />
-              </label>
-
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Archived</p>
                 <span className="text-xs text-orbit-muted">{archivedConversations.length}</span>
               </div>
 
-              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
-                {archivedConversations.filter(matchesChatSearch).map((conv) => {
+              <div className="mt-2 space-y-2">
+                {archivedConversations.map((conv) => {
                   const otherMember = conv.members.find((m) => m.user.id !== user.id);
                   const otherUserId = otherMember?.user.id ?? "";
                   const otherUsername = otherMember?.user.username ?? "dm";
@@ -3281,6 +3374,7 @@ function App() {
                     conv.type === "dm"
                       ? (conv.name?.trim() ? conv.name.trim() : `${otherUsername}#${shortConversationId(conv.id)}`)
                       : conv.name ?? "Group";
+
                   return (
                     <div key={conv.id} className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#202533] p-3">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
@@ -3578,6 +3672,24 @@ function App() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <div className="relative w-[280px] max-w-[36vw]">
+                  <input
+                    className="orbit-input h-9 pr-8 text-xs"
+                    value={messageSearch}
+                    onChange={(event) => setMessageSearch(event.target.value)}
+                    placeholder="Search this chat"
+                  />
+                  {messageSearch && (
+                    <button
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-orbit-muted hover:text-orbit-text"
+                      onClick={() => setMessageSearch("")}
+                      aria-label="Clear chat search"
+                      title="Clear chat search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
                 {getConversationSecretKey(selectedConversation.id) ? (
                   <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
                 ) : loadingByConversationId[selectedConversation.id] ? (
@@ -3614,10 +3726,12 @@ function App() {
 
             <div className="flex min-h-0 flex-1">
               <section className={`space-y-2 overflow-y-auto px-3 py-2 ${threadRootMessage ? "w-[65%] border-r border-white/10" : "w-full"}`}>
-                {messages.length === 0 && (
-                  <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
+                {visibleMessages.length === 0 && (
+                  <p className="text-sm text-orbit-muted">
+                    {activeMessageSearchQuery ? "No messages match this search." : "No messages yet. Send your first encrypted payload."}
+                  </p>
                 )}
-                {messages.map((msg) => {
+                {visibleMessages.map((msg) => {
                   const mine = msg.sender === user.username;
                   const senderProfile = profileById[msg.senderId] ?? null;
                   const senderLabel = senderProfile?.displayName?.trim() || msg.sender;
@@ -3633,6 +3747,7 @@ function App() {
                       className={`group relative flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
                       onMouseEnter={() => setHoveredMessageId(msg.id)}
                       onMouseLeave={() => setHoveredMessageId((prev) => (prev === msg.id ? null : prev))}
+                      onContextMenu={(e) => ctxMenu.show(e, buildMessageContextMenuItems(msg, senderLabel))}
                     >
                       <button
                         className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text"
