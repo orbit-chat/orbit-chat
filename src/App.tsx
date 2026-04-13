@@ -59,9 +59,11 @@ function TitleBar() {
 function UpdateBanner({
   updateStatus,
   onInstall,
+  installLabel,
 }: {
   updateStatus: UpdaterStatusPayload | null;
   onInstall: () => void;
+  installLabel: string;
 }) {
   if (!updateStatus) return null;
 
@@ -85,7 +87,7 @@ function UpdateBanner({
       </div>
       {isDownloaded && (
         <button className="orbit-btn-primary px-3 py-1.5 text-xs" onClick={onInstall}>
-          Restart & Install
+          {installLabel}
         </button>
       )}
     </div>
@@ -615,6 +617,7 @@ async function extractMessageSearchableText(params: {
 
 function App() {
   const [appVersion, setAppVersion] = useState("-");
+  const [isMacPlatform, setIsMacPlatform] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdaterStatusPayload | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup" | "recovery">("login");
   const [recoveryCode, setRecoveryCode] = useState("");
@@ -1361,6 +1364,7 @@ function App() {
   /* ───── Electron version ───── */
   useEffect(() => {
     window.electronAPI?.getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
+    window.electronAPI?.getPlatform().then((platform) => setIsMacPlatform(platform === "darwin")).catch(() => setIsMacPlatform(false));
   }, []);
 
   useEffect(() => {
@@ -2999,7 +3003,17 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
-        <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
+        <UpdateBanner
+          updateStatus={updateStatus}
+          installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+          onInstall={() => {
+            if (isMacPlatform) {
+              void window.electronAPI?.openReleasesPage();
+              return;
+            }
+            void window.electronAPI?.quitAndInstallUpdate();
+          }}
+        />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-md rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
@@ -3051,7 +3065,17 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
-        <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
+        <UpdateBanner
+          updateStatus={updateStatus}
+          installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+          onInstall={() => {
+            if (isMacPlatform) {
+              void window.electronAPI?.openReleasesPage();
+              return;
+            }
+            void window.electronAPI?.quitAndInstallUpdate();
+          }}
+        />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-lg rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
@@ -3103,7 +3127,17 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
-        <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
+        <UpdateBanner
+          updateStatus={updateStatus}
+          installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+          onInstall={() => {
+            if (isMacPlatform) {
+              void window.electronAPI?.openReleasesPage();
+              return;
+            }
+            void window.electronAPI?.quitAndInstallUpdate();
+          }}
+        />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
@@ -3273,7 +3307,17 @@ function App() {
   return (
     <div className="orbit-shell">
       <TitleBar />
-      <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
+      <UpdateBanner
+        updateStatus={updateStatus}
+        installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+        onInstall={() => {
+          if (isMacPlatform) {
+            void window.electronAPI?.openReleasesPage();
+            return;
+          }
+          void window.electronAPI?.quitAndInstallUpdate();
+        }}
+      />
       <div className="grid h-full grid-cols-[68px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
         <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#141822] p-2">

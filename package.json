@@ -65,6 +65,7 @@
       "package.json"
     ],
     "win": {
+      "artifactName": "Orbit-Chat-Setup-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -75,6 +76,7 @@
       ]
     },
     "mac": {
+      "artifactName": "Orbit-Chat-${version}-${arch}-mac.${ext}",
       "category": "public.app-category.social-networking",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

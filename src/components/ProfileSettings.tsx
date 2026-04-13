@@ -63,6 +63,9 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
       } else if (payload.status === "checking") {
         setUpdateMessageTone("info");
         setUpdateMessage(payload.message ?? "Checking for updates...");
+      } else if (payload.status === "downloaded") {
+        setUpdateMessageTone("info");
+        setUpdateMessage(payload.message ?? "Update ready. Download from Releases on macOS.");
       } else if (payload.status === "not-available" || payload.status === "available" || payload.status === "downloaded") {
         setUpdateMessageTone("info");
         setUpdateMessage(payload.message ?? "Update status changed.");

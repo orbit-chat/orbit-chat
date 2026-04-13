@@ -11,8 +11,10 @@ type UpdaterStatusPayload = {
 
 const electronAPI = {
   getVersion: () => ipcRenderer.invoke("app:getVersion") as Promise<string>,
+  getPlatform: () => ipcRenderer.invoke("app:getPlatform") as Promise<string>,
   checkForUpdates: () => ipcRenderer.invoke("updater:checkForUpdates") as Promise<{ ok: boolean; reason?: string }>,
-  quitAndInstallUpdate: () => ipcRenderer.invoke("updater:quitAndInstall") as Promise<void>,
+  quitAndInstallUpdate: () => ipcRenderer.invoke("updater:quitAndInstall") as Promise<{ mode: "install" | "manual-download" }>,
+  openReleasesPage: () => ipcRenderer.invoke("updater:openReleases") as Promise<{ ok: boolean }>,
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),
   close: () => ipcRenderer.send("window:close"),

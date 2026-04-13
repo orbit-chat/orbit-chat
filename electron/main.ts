@@ -4,6 +4,7 @@ import { autoUpdater } from "electron-updater";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const appIcon = path.join(app.getAppPath(), "logo.png");
+const RELEASES_URL = "https://github.com/orbit-chat/orbit-chat/releases/latest";
 
 type UpdaterStatus =
   | "idle"
@@ -92,6 +93,13 @@ function setupAutoUpdater(mainWindow: BrowserWindow) {
     mainWindow.webContents.send("updater:status", payload);
   };
 
+  ipcMain.handle("app:getPlatform", () => process.platform);
+
+  ipcMain.handle("updater:openReleases", async () => {
+    await shell.openExternal(RELEASES_URL);
+    return { ok: true };
+  });
+
   ipcMain.handle("updater:checkForUpdates", async () => {
     if (isDev) {
       sendStatus({ status: "idle", message: "Auto-update is disabled in development." });
@@ -106,8 +114,13 @@ function setupAutoUpdater(mainWindow: BrowserWindow) {
     }
   });
 
-  ipcMain.handle("updater:quitAndInstall", () => {
+  ipcMain.handle("updater:quitAndInstall", async () => {
+    if (process.platform === "darwin") {
+      await shell.openExternal(RELEASES_URL);
+      return { mode: "manual-download" as const };
+    }
     autoUpdater.quitAndInstall();
+    return { mode: "install" as const };
   });
 
   autoUpdater.autoDownload = true;
@@ -141,7 +154,9 @@ function setupAutoUpdater(mainWindow: BrowserWindow) {
     sendStatus({
       status: "downloaded",
       version: info.version,
-      message: `Update ${info.version} downloaded. Restart to install.`,
+      message: process.platform === "darwin"
+        ? `Update ${info.version} is ready. Download and install from Releases.`
+        : `Update ${info.version} downloaded. Restart to install.`,
     });
   });
 

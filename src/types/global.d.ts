@@ -13,8 +13,10 @@ declare global {
   interface Window {
     electronAPI: {
       getVersion: () => Promise<string>;
+      getPlatform: () => Promise<string>;
       checkForUpdates: () => Promise<{ ok: boolean; reason?: string }>;
-      quitAndInstallUpdate: () => Promise<void>;
+      quitAndInstallUpdate: () => Promise<{ mode: "install" | "manual-download" }>;
+      openReleasesPage: () => Promise<{ ok: boolean }>;
       minimize: () => void;
       maximize: () => void;
       close: () => void;
