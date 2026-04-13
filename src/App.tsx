@@ -2487,15 +2487,19 @@ function App() {
       setSearch("");
       setSearchResults([]);
 
-      // Existing DM returned — just navigate, no passcode
+      // Existing DM returned. Respect lock state for passcode-protected chats.
       if (conv.created === false) {
-        chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+        if (!conv.passcodeEnabled) {
+          chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+        }
         await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
         return;
       }
 
-      // Newly created DM — no passcode for DMs, just auto-unlock
-      chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      // Newly created DM: auto-unlock only if passcode is not enabled.
+      if (!conv.passcodeEnabled) {
+        chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      }
 
       await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
     } catch {
