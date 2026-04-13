@@ -35,8 +35,10 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [deleteMessagesOnUnfriend, setDeleteMessagesOnUnfriend] = useState(true);
   const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
+  const [downloadLatestLoading, setDownloadLatestLoading] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateMessageTone, setUpdateMessageTone] = useState<"info" | "error">("info");
+  const [isMacPlatform, setIsMacPlatform] = useState(false);
 
   useEffect(() => {
     fetchMe(token, myUserId);
@@ -74,6 +76,12 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
     return () => {
       unsub?.();
     };
+  }, []);
+
+  useEffect(() => {
+    window.electronAPI?.getPlatform()
+      .then((platform) => setIsMacPlatform(platform === "darwin"))
+      .catch(() => setIsMacPlatform(false));
   }, []);
 
   const bannerStyle = useMemo(() => {
@@ -337,40 +345,70 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">App Updates</p>
                   <p className="mt-1 text-[11px] text-orbit-muted">Manually check for the latest desktop version if automatic checks are delayed.</p>
                 </div>
-                <button
-                  type="button"
-                  className="orbit-btn px-3 py-1.5 text-xs"
-                  disabled={updateCheckLoading}
-                  onClick={async () => {
-                    if (!window.electronAPI?.checkForUpdates) {
-                      setUpdateMessageTone("error");
-                      setUpdateMessage("Update checks are only available in the desktop app.");
-                      return;
-                    }
+                <div className="flex items-center gap-2">
+                  {isMacPlatform && (
+                    <button
+                      type="button"
+                      className="orbit-btn px-3 py-1.5 text-xs"
+                      disabled={downloadLatestLoading}
+                      onClick={async () => {
+                        if (!window.electronAPI?.openReleasesPage) {
+                          setUpdateMessageTone("error");
+                          setUpdateMessage("Download links are only available in the desktop app.");
+                          return;
+                        }
 
-                    setUpdateCheckLoading(true);
-                    setUpdateMessageTone("info");
-                    setUpdateMessage("Checking for updates...");
-
-                    try {
-                      const result = await window.electronAPI.checkForUpdates();
-                      if (!result?.ok) {
-                        const reason = result?.reason === "dev-mode"
-                          ? "Auto-update is disabled in development builds."
-                          : "Unable to start update check.";
+                        setDownloadLatestLoading(true);
+                        try {
+                          await window.electronAPI.openReleasesPage();
+                          setUpdateMessageTone("info");
+                          setUpdateMessage("Opened GitHub Releases. Download the latest macOS build there.");
+                        } catch (err: any) {
+                          setUpdateMessageTone("error");
+                          setUpdateMessage(err?.message ?? "Unable to open releases page.");
+                        } finally {
+                          setDownloadLatestLoading(false);
+                        }
+                      }}
+                    >
+                      {downloadLatestLoading ? "Opening..." : "Download Latest"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="orbit-btn px-3 py-1.5 text-xs"
+                    disabled={updateCheckLoading}
+                    onClick={async () => {
+                      if (!window.electronAPI?.checkForUpdates) {
                         setUpdateMessageTone("error");
-                        setUpdateMessage(reason);
+                        setUpdateMessage("Update checks are only available in the desktop app.");
+                        return;
                       }
-                    } catch (err: any) {
-                      setUpdateMessageTone("error");
-                      setUpdateMessage(err?.message ?? "Unable to start update check.");
-                    } finally {
-                      setUpdateCheckLoading(false);
-                    }
-                  }}
-                >
-                  {updateCheckLoading ? "Checking..." : "Check for Updates"}
-                </button>
+
+                      setUpdateCheckLoading(true);
+                      setUpdateMessageTone("info");
+                      setUpdateMessage("Checking for updates...");
+
+                      try {
+                        const result = await window.electronAPI.checkForUpdates();
+                        if (!result?.ok) {
+                          const reason = result?.reason === "dev-mode"
+                            ? "Auto-update is disabled in development builds."
+                            : "Unable to start update check.";
+                          setUpdateMessageTone("error");
+                          setUpdateMessage(reason);
+                        }
+                      } catch (err: any) {
+                        setUpdateMessageTone("error");
+                        setUpdateMessage(err?.message ?? "Unable to start update check.");
+                      } finally {
+                        setUpdateCheckLoading(false);
+                      }
+                    }}
+                  >
+                    {updateCheckLoading ? "Checking..." : "Check for Updates"}
+                  </button>
+                </div>
               </div>
               {updateMessage && (
                 <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${updateMessageTone === "error" ? "border-rose-500/30 bg-rose-500/10 text-rose-300" : "border-white/10 bg-orbit-panel text-slate-200"}`}>
