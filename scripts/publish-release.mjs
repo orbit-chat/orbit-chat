@@ -43,6 +43,39 @@ function run(command, args, options = {}) {
   return result.stdout.trim();
 }
 
+function parseExpectedPathFromYml(fileName) {
+  const ymlPath = path.resolve(releaseDir, fileName);
+  if (!existsSync(ymlPath)) return null;
+  const raw = readFileSync(ymlPath, "utf8");
+  const match = raw.match(/^path:\s*(.+)$/m);
+  if (!match) return null;
+  return match[1].trim();
+}
+
+function normalizeNameForMatch(name) {
+  return name.toLowerCase().replace(/[\s._-]+/g, "");
+}
+
+function ensureExpectedAssetName(files, expectedName, predicate) {
+  if (!expectedName) return;
+  const expectedPath = path.resolve(releaseDir, expectedName);
+  if (existsSync(expectedPath)) return;
+
+  const expectedNormalized = normalizeNameForMatch(expectedName);
+  const candidate = files.find((name) => {
+    if (!predicate(name)) return false;
+    return normalizeNameForMatch(name) === expectedNormalized;
+  });
+
+  if (candidate) {
+    copyFileSync(path.resolve(releaseDir, candidate), expectedPath);
+    const candidateBlockmap = path.resolve(releaseDir, `${candidate}.blockmap`);
+    if (existsSync(candidateBlockmap)) {
+      copyFileSync(candidateBlockmap, path.resolve(releaseDir, `${expectedName}.blockmap`));
+    }
+  }
+}
+
 function selectArtifacts(version) {
   if (!existsSync(releaseDir)) {
     fail(`Release directory not found: ${releaseDir}. Run a dist build first.`);
@@ -53,7 +86,18 @@ function selectArtifacts(version) {
     return existsSync(fullPath) && statSync(fullPath).isFile();
   });
 
-  const distributableFiles = files.filter((name) => !name.endsWith(".blockmap") && !name.endsWith(".yml") && !name.endsWith(".yaml"));
+  const expectedMacPath = parseExpectedPathFromYml("latest-mac.yml");
+  const expectedWinPath = parseExpectedPathFromYml("latest.yml");
+
+  ensureExpectedAssetName(files, expectedMacPath, (name) => name.includes(version) && name.endsWith("-mac.zip"));
+  ensureExpectedAssetName(files, expectedWinPath, (name) => name.includes(version) && name.endsWith(".exe"));
+
+  const refreshedFiles = readdirSync(releaseDir).filter((name) => {
+    const fullPath = path.resolve(releaseDir, name);
+    return existsSync(fullPath) && statSync(fullPath).isFile();
+  });
+
+  const distributableFiles = refreshedFiles.filter((name) => !name.endsWith(".blockmap") && !name.endsWith(".yml") && !name.endsWith(".yaml"));
 
   const expectedWindows = `Orbit Chat Setup ${version}.exe`;
   const expectedMac = `Orbit Chat-${version}-arm64-mac.zip`;
@@ -68,7 +112,7 @@ function selectArtifacts(version) {
   return {
     windows,
     mac,
-    uploadFiles: files
+    uploadFiles: refreshedFiles
       .filter((name) => name.includes(version) || name === "latest.yml" || name === "latest-mac.yml")
       .map((name) => path.resolve(releaseDir, name)),
   };
