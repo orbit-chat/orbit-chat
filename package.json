@@ -9,12 +9,16 @@
     "build": "tsc -b && vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "dist:win:prod": "npm run dist:win",
     "dist:mac": "npm run build && electron-builder --mac zip",
+    "dist:mac:prod": "npm run build && electron-builder --mac zip --publish never",
     "release:publish": "node scripts/publish-release.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build"
   },
-  "dependencies": {},
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
     "@types/libsodium-wrappers": "^0.7.14",
     "@types/node": "^22.12.0",
@@ -22,6 +26,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "@hookform/resolvers": "^3.10.0",
+    "@electron/notarize": "^3.1.0",
     "@tanstack/react-query": "^5.67.3",
     "autoprefixer": "^10.4.20",
     "electron": "^34.0.1",
@@ -71,9 +76,19 @@
     },
     "mac": {
       "category": "public.app-category.social-networking",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
       "target": [
         "zip"
       ]
+    },
+    "afterSign": "scripts/notarize.cjs",
+    "publish": {
+      "provider": "github",
+      "owner": "orbit-chat",
+      "repo": "orbit-chat"
     }
   }
 }

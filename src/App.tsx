@@ -56,6 +56,42 @@ function TitleBar() {
   );
 }
 
+function UpdateBanner({
+  updateStatus,
+  onInstall,
+}: {
+  updateStatus: UpdaterStatusPayload | null;
+  onInstall: () => void;
+}) {
+  if (!updateStatus) return null;
+
+  const visibleStatuses: UpdaterStatus[] = ["available", "downloading", "downloaded", "error"];
+  if (!visibleStatuses.includes(updateStatus.status)) return null;
+
+  const isError = updateStatus.status === "error";
+  const isDownloaded = updateStatus.status === "downloaded";
+
+  return (
+    <div className={`flex items-center justify-between gap-3 border-b px-3 py-2 text-xs ${isError ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-orbit-accent/25 bg-orbit-accent/10 text-orbit-text"}`}>
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="truncate font-semibold">
+          {updateStatus.message ?? "Update status changed."}
+        </span>
+        {typeof updateStatus.progress === "number" && (
+          <div className="h-1.5 w-48 overflow-hidden rounded-full border border-white/15 bg-black/25">
+            <div className="h-full bg-orbit-accent transition-all" style={{ width: `${Math.max(0, Math.min(100, updateStatus.progress))}%` }} />
+          </div>
+        )}
+      </div>
+      {isDownloaded && (
+        <button className="orbit-btn-primary px-3 py-1.5 text-xs" onClick={onInstall}>
+          Restart & Install
+        </button>
+      )}
+    </div>
+  );
+}
+
 type UploadedAttachment = {
   kind: "image" | "file";
   mediaId: string;
@@ -579,6 +615,7 @@ async function extractMessageSearchableText(params: {
 
 function App() {
   const [appVersion, setAppVersion] = useState("-");
+  const [updateStatus, setUpdateStatus] = useState<UpdaterStatusPayload | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup" | "recovery">("login");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
@@ -1322,6 +1359,13 @@ function App() {
   /* ───── Electron version ───── */
   useEffect(() => {
     window.electronAPI?.getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
+  }, []);
+
+  useEffect(() => {
+    const unsub = window.electronAPI?.onUpdaterStatus((payload) => setUpdateStatus(payload));
+    return () => {
+      unsub?.();
+    };
   }, []);
 
   /* ───── Connect socket when token changes ───── */
@@ -2934,6 +2978,7 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
+        <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-md rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
@@ -2985,6 +3030,7 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
+        <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-lg rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
@@ -3036,6 +3082,7 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
+        <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
@@ -3205,6 +3252,7 @@ function App() {
   return (
     <div className="orbit-shell">
       <TitleBar />
+      <UpdateBanner updateStatus={updateStatus} onInstall={() => { void window.electronAPI?.quitAndInstallUpdate(); }} />
       <div className="grid h-full grid-cols-[68px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
         <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#141822] p-2">

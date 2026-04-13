@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readdirSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, copyFileSync, writeFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -50,14 +50,16 @@ function selectArtifacts(version) {
 
   const files = readdirSync(releaseDir).filter((name) => {
     const fullPath = path.resolve(releaseDir, name);
-    return existsSync(fullPath) && !name.endsWith(".blockmap") && !name.endsWith(".yml") && !name.endsWith(".yaml");
+    return existsSync(fullPath) && statSync(fullPath).isFile();
   });
+
+  const distributableFiles = files.filter((name) => !name.endsWith(".blockmap") && !name.endsWith(".yml") && !name.endsWith(".yaml"));
 
   const expectedWindows = `Orbit Chat Setup ${version}.exe`;
   const expectedMac = `Orbit Chat-${version}-arm64-mac.zip`;
 
-  const windows = files.find((name) => name === expectedWindows) || files.find((name) => name.endsWith(".exe") && name.includes(version));
-  const mac = files.find((name) => name === expectedMac) || files.find((name) => name.endsWith("-mac.zip") && name.includes(version));
+  const windows = distributableFiles.find((name) => name === expectedWindows) || distributableFiles.find((name) => name.endsWith(".exe") && name.includes(version));
+  const mac = distributableFiles.find((name) => name === expectedMac) || distributableFiles.find((name) => name.endsWith("-mac.zip") && name.includes(version));
 
   if (!windows && !mac) {
     fail(`No release artifacts found for version ${version} in ${releaseDir}.`);
@@ -66,7 +68,9 @@ function selectArtifacts(version) {
   return {
     windows,
     mac,
-    uploadFiles: files.filter((name) => name.includes(version)).map((name) => path.resolve(releaseDir, name)),
+    uploadFiles: files
+      .filter((name) => name.includes(version) || name === "latest.yml" || name === "latest-mac.yml")
+      .map((name) => path.resolve(releaseDir, name)),
   };
 }
 

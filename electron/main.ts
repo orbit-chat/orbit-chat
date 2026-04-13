@@ -1,8 +1,25 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import path from "node:path";
+import { autoUpdater } from "electron-updater";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const appIcon = path.join(app.getAppPath(), "logo.png");
+
+type UpdaterStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+type UpdaterStatusPayload = {
+  status: UpdaterStatus;
+  version?: string;
+  progress?: number;
+  message?: string;
+};
 
 // Remove the default application menu (File, Edit, View, Window, Help)
 Menu.setApplicationMenu(null);
@@ -65,6 +82,74 @@ function createWindow() {
     }
     return { action: "deny" };
   });
+
+  return mainWindow;
+}
+
+function setupAutoUpdater(mainWindow: BrowserWindow) {
+  const sendStatus = (payload: UpdaterStatusPayload) => {
+    if (mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("updater:status", payload);
+  };
+
+  ipcMain.handle("updater:checkForUpdates", async () => {
+    if (isDev) {
+      sendStatus({ status: "idle", message: "Auto-update is disabled in development." });
+      return { ok: false, reason: "dev-mode" };
+    }
+    try {
+      await autoUpdater.checkForUpdates();
+      return { ok: true };
+    } catch (error: any) {
+      sendStatus({ status: "error", message: error?.message ?? "Failed to check for updates." });
+      return { ok: false, reason: error?.message ?? "unknown-error" };
+    }
+  });
+
+  ipcMain.handle("updater:quitAndInstall", () => {
+    autoUpdater.quitAndInstall();
+  });
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    sendStatus({ status: "checking", message: "Checking for updates..." });
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    sendStatus({
+      status: "available",
+      version: info.version,
+      message: `Update ${info.version} available. Downloading in background...`,
+    });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    sendStatus({ status: "not-available", message: "You are up to date." });
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    sendStatus({
+      status: "downloading",
+      progress: progress.percent,
+      message: `Downloading update (${Math.round(progress.percent)}%)`,
+    });
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    sendStatus({
+      status: "downloaded",
+      version: info.version,
+      message: `Update ${info.version} downloaded. Restart to install.`,
+    });
+  });
+
+  autoUpdater.on("error", (error) => {
+    sendStatus({ status: "error", message: error?.message ?? "Auto-update failed." });
+  });
+
+  void autoUpdater.checkForUpdates();
 }
 
 // Helps notifications + taskbar grouping on Windows.
@@ -83,7 +168,8 @@ if (!gotLock) {
   });
   app.whenReady().then(() => {
     ipcMain.handle("app:getVersion", () => app.getVersion());
-    createWindow();
+    const mainWindow = createWindow();
+    setupAutoUpdater(mainWindow);
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
