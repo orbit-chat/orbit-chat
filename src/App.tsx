@@ -1399,6 +1399,40 @@ function App() {
     loadConversations();
   }, [loadConversations]);
 
+  /* ───── Auto-load all messages on app start to recover from storage loss ───── */
+  useEffect(() => {
+    if (!token || !conversations.length) return;
+
+    const autoLoadMessages = async () => {
+      for (const conversation of conversations) {
+        // Skip if messages already exist in store for this conversation
+        if (byConversation[conversation.id]?.length > 0) continue;
+
+        try {
+          const msgs = await api.getMessages(conversation.id, token);
+          for (const m of msgs) {
+            upsertMessage(conversation.id, {
+              id: m.id,
+              senderId: m.sender.id,
+              sender: m.sender.username,
+              parentMessageId: m.parentMessageId,
+              cipherText: m.ciphertext,
+              keyVersion: m.keyVersion,
+              nonce: m.nonce,
+              mediaIds: m.mediaIds ?? [],
+              reactions: m.reactions ?? [],
+              createdAt: new Date(m.createdAt).getTime(),
+            }, { currentUserId: user?.id });
+          }
+        } catch {
+          // Silently fail per conversation — one failure shouldn't block others
+        }
+      }
+    };
+
+    autoLoadMessages();
+  }, [conversations, token, byConversation, upsertMessage, user?.id]);
+
   useEffect(() => {
     if (!token) {
       setFriends([]);
