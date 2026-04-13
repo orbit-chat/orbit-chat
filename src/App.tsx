@@ -943,7 +943,6 @@ function App() {
         if (filtered.length === 0) {
           delete next[selectedConversation.id];
         }
-        persistPinnedMessagesByConversation(next);
         return next;
       });
     }
@@ -2838,6 +2837,16 @@ function App() {
     });
   }, []);
 
+  const syncPinnedMessageIdsFromMessages = useCallback(
+    (conversationId: string, msgs: Array<{ id: string; isPinned?: boolean }>) => {
+      updatePinnedMessageIds(
+        conversationId,
+        msgs.filter((message) => message.isPinned).map((message) => message.id)
+      );
+    },
+    [updatePinnedMessageIds]
+  );
+
   const togglePinnedMessage = useCallback((conversationId: string, messageId: string) => {
     const current = pinnedMessageIdsByConversation[conversationId] ?? [];
     const alreadyPinned = current.includes(messageId);
@@ -2847,10 +2856,6 @@ function App() {
     updatePinnedMessageIds(conversationId, next);
     socket?.emit("toggle_message_pin", { conversationId, messageId });
   }, [pinnedMessageIdsByConversation, socket, updatePinnedMessageIds]);
-
-  const syncPinnedMessageIdsFromMessages = useCallback((conversationId: string, msgs: Array<{ id: string; isPinned?: boolean }>) => {
-    updatePinnedMessageIds(conversationId, msgs.filter((message) => message.isPinned).map((message) => message.id));
-  }, [updatePinnedMessageIds]);
 
   const handlePingMessageAuthor = (username: string) => {
     const mention = `@${username} `;
