@@ -1404,7 +1404,16 @@ function App() {
               createdAt: new Date(m.createdAt).getTime(),
             }, { currentUserId: user?.id });
           }
-          syncPinnedMessageIdsFromMessages(conversation.id, msgs);
+          const pinnedIds = msgs.filter((message) => message.isPinned).map((message) => message.id);
+          setPinnedMessageIdsByConversation((prev) => {
+            const next = { ...prev };
+            if (pinnedIds.length === 0) {
+              delete next[conversation.id];
+            } else {
+              next[conversation.id] = pinnedIds;
+            }
+            return next;
+          });
         } catch {
           // Silently fail per conversation — one failure shouldn't block others
         }
@@ -1412,7 +1421,7 @@ function App() {
     };
 
     autoLoadMessages();
-  }, [conversations, syncPinnedMessageIdsFromMessages, token, upsertMessage, user?.id]);
+  }, [conversations, token, upsertMessage, user?.id]);
 
   useEffect(() => {
     if (!token) {
@@ -1801,12 +1810,21 @@ function App() {
           createdAt: new Date(m.createdAt).getTime(),
         }, { currentUserId: user?.id, markAsRead: true });
       }
-      syncPinnedMessageIdsFromMessages(selectedConvId, msgs);
+      const pinnedIds = msgs.filter((message) => message.isPinned).map((message) => message.id);
+      setPinnedMessageIdsByConversation((prev) => {
+        const next = { ...prev };
+        if (pinnedIds.length === 0) {
+          delete next[selectedConvId];
+        } else {
+          next[selectedConvId] = pinnedIds;
+        }
+        return next;
+      });
     }).catch(() => {});
 
     // Join the room via socket
     socket?.emit("join_conversation", { conversationId: selectedConvId });
-  }, [selectedConvId, syncPinnedMessageIdsFromMessages, socket, token, upsertMessage, user?.id]);
+  }, [selectedConvId, socket, token, upsertMessage, user?.id]);
 
   /* ───── Refresh conversations on first inbound message ───── */
   useEffect(() => {
@@ -2836,16 +2854,6 @@ function App() {
       return next;
     });
   }, []);
-
-  const syncPinnedMessageIdsFromMessages = useCallback(
-    (conversationId: string, msgs: Array<{ id: string; isPinned?: boolean }>) => {
-      updatePinnedMessageIds(
-        conversationId,
-        msgs.filter((message) => message.isPinned).map((message) => message.id)
-      );
-    },
-    [updatePinnedMessageIds]
-  );
 
   const togglePinnedMessage = useCallback((conversationId: string, messageId: string) => {
     const current = pinnedMessageIdsByConversation[conversationId] ?? [];
