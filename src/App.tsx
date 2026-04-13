@@ -660,6 +660,8 @@ function App() {
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
   const messageElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const messageListRef = useRef<HTMLElement | null>(null);
+  const pendingSendScrollRef = useRef(false);
   const searchFocusTimeoutRef = useRef<number | null>(null);
 
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
@@ -2736,6 +2738,20 @@ function App() {
     }, 2200);
   }, []);
 
+  const scrollMainTimelineToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const list = messageListRef.current;
+    if (!list) return;
+    list.scrollTo({ top: list.scrollHeight, behavior });
+  }, []);
+
+  useEffect(() => {
+    if (!pendingSendScrollRef.current) return;
+    pendingSendScrollRef.current = false;
+    requestAnimationFrame(() => {
+      scrollMainTimelineToBottom("smooth");
+    });
+  }, [messages.length, scrollMainTimelineToBottom]);
+
   const updatePinnedMessageIds = useCallback((conversationId: string, nextIds: string[]) => {
     setPinnedMessageIdsByConversation((prev) => {
       const next = { ...prev, [conversationId]: nextIds };
@@ -2954,6 +2970,7 @@ function App() {
         mediaIds,
         type: attachments.length ? "media" : "text",
       });
+      pendingSendScrollRef.current = true;
 
       emitTypingStop(selectedConvId);
 
@@ -4125,7 +4142,10 @@ function App() {
             </header>
 
             <div className="flex min-h-0 flex-1">
-              <section className={`space-y-2 overflow-y-auto px-3 py-2 ${threadRootMessage ? "w-[65%] border-r border-white/10" : "w-full"}`}>
+              <section
+                ref={messageListRef}
+                className={`space-y-2 overflow-y-auto px-3 py-2 ${threadRootMessage ? "w-[65%] border-r border-white/10" : "w-full"}`}
+              >
                 {visibleMessages.length === 0 && (
                   <p className="text-sm text-orbit-muted">
                     No messages yet. Send your first encrypted payload.
