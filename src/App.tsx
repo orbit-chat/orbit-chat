@@ -2455,6 +2455,32 @@ function App() {
     setMainView("chat");
     setNavTab("dm");
 
+    const existingDm = conversations.find(
+      (conversation) =>
+        conversation.type === "dm" &&
+        conversation.members.some((member) => member.user.id === targetUser.id),
+    );
+
+    if (existingDm) {
+      if (archivedConvIds.has(existingDm.id)) {
+        const next = new Set(archivedConvIds);
+        next.delete(existingDm.id);
+        persistArchived(next);
+      }
+
+      setSelectedConvId(existingDm.id);
+      setMainView("chat");
+      setSearch("");
+      setSearchResults([]);
+
+      if (!existingDm.passcodeEnabled) {
+        chatLock.unlock(existingDm.id, existingDm.lockMode, existingDm.lockTimeoutSeconds);
+      }
+
+      await ensureConversationSecretKey({ conversation: existingDm, token, myUserId: user.id });
+      return;
+    }
+
     try {
       const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
       const otherKeys = await api.getUserKeys(targetUser.id, token);
@@ -2475,18 +2501,12 @@ function App() {
       const mergedConversations = [conv, ...conversations.filter((existingConv) => existingConv.id !== conv.id)];
       setConversations(mergedConversations);
 
-      // Keep exactly one active DM thread per user: unarchive the selected DM, archive older duplicates.
-      const dmThreadsWithTarget = mergedConversations.filter(
-        (c) => c.type === "dm" && c.members.some((m) => m.user.id === targetUser.id)
-      );
-      const nextArchived = new Set(archivedConvIds);
-      nextArchived.delete(conv.id);
-      for (const thread of dmThreadsWithTarget) {
-        if (thread.id !== conv.id) {
-          nextArchived.add(thread.id);
-        }
+      // Ensure the selected DM remains visible.
+      if (archivedConvIds.has(conv.id)) {
+        const next = new Set(archivedConvIds);
+        next.delete(conv.id);
+        persistArchived(next);
       }
-      persistArchived(nextArchived);
 
       setSelectedConvId(conv.id);
       setMainView("chat");
