@@ -627,7 +627,7 @@ function App() {
   const [focusedSearchMessageId, setFocusedSearchMessageId] = useState<string | null>(null);
   const [reactionModalMessageId, setReactionModalMessageId] = useState<string | null>(null);
   const [reactionShortcodeInput, setReactionShortcodeInput] = useState(":thumbsup:");
-  const [showPinnedMessagesPanel, setShowPinnedMessagesPanel] = useState(false);
+  const [activeTimelinePopup, setActiveTimelinePopup] = useState<"search" | "pins" | null>(null);
   const [pinnedMessageIdsByConversation, setPinnedMessageIdsByConversation] = useState<Record<string, string[]>>({});
   const [mentionAutocomplete, setMentionAutocomplete] = useState<{ start: number; end: number; query: string } | null>(null);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
@@ -635,6 +635,7 @@ function App() {
   const [threadRootMessageId, setThreadRootMessageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const messageSearchPopupInputRef = useRef<HTMLInputElement | null>(null);
   const gifPickerRef = useRef<HTMLDivElement | null>(null);
   const gifSearchInputRef = useRef<HTMLInputElement | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
@@ -867,6 +868,8 @@ function App() {
   }, [profileById, selectedConversation, user?.id]);
 
   const activeMessageSearchQuery = messageSearch.trim().toLowerCase();
+  const isSearchPopupOpen = activeTimelinePopup === "search";
+  const isPinsPopupOpen = activeTimelinePopup === "pins";
 
   const visibleMessages = useMemo(() => {
     return messages;
@@ -924,7 +927,7 @@ function App() {
     setFocusedSearchMessageId(null);
     setMentionAutocomplete(null);
     setMentionActiveIndex(0);
-    setShowPinnedMessagesPanel(false);
+    setActiveTimelinePopup(null);
     if (searchFocusTimeoutRef.current !== null) {
       window.clearTimeout(searchFocusTimeoutRef.current);
       searchFocusTimeoutRef.current = null;
@@ -932,10 +935,29 @@ function App() {
   }, [selectedConvId]);
 
   useEffect(() => {
-    if (showPinnedMessagesPanel || showChatSettings || Boolean(activeMessageSearchQuery)) {
+    if (activeTimelinePopup || showChatSettings) {
       setHoveredMessageId(null);
     }
-  }, [activeMessageSearchQuery, showChatSettings, showPinnedMessagesPanel]);
+  }, [activeTimelinePopup, showChatSettings]);
+
+  useEffect(() => {
+    if (!isSearchPopupOpen) return;
+    requestAnimationFrame(() => {
+      messageSearchPopupInputRef.current?.focus();
+      messageSearchPopupInputRef.current?.select();
+    });
+  }, [isSearchPopupOpen]);
+
+  useEffect(() => {
+    if (!activeTimelinePopup) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveTimelinePopup(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTimelinePopup]);
 
   useEffect(() => {
     if (!selectedConversation) return;
@@ -2825,6 +2847,16 @@ function App() {
     const element = messageElementRefs.current[messageId];
     if (!element) return;
     element.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (typeof element.animate === "function") {
+      element.animate(
+        [
+          { transform: "translateY(0)", offset: 0 },
+          { transform: "translateY(-2px)", offset: 0.45 },
+          { transform: "translateY(0)", offset: 1 },
+        ],
+        { duration: 380, easing: "ease-out" }
+      );
+    }
     setFocusedSearchMessageId(messageId);
     if (searchFocusTimeoutRef.current !== null) {
       window.clearTimeout(searchFocusTimeoutRef.current);
@@ -2832,7 +2864,7 @@ function App() {
     searchFocusTimeoutRef.current = window.setTimeout(() => {
       setFocusedSearchMessageId((prev) => (prev === messageId ? null : prev));
       searchFocusTimeoutRef.current = null;
-    }, 2200);
+    }, 3200);
   }, []);
 
   const scrollMainTimelineToBottom = useCallback((behavior: ScrollBehavior = "smooth", extraOffset = 36) => {
@@ -4170,51 +4202,28 @@ function App() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <div className="relative w-[280px] max-w-[36vw]">
-                  <input
-                    className="orbit-input h-9 pr-8 text-xs"
-                    value={messageSearch}
-                    onChange={(event) => {
-                      setHoveredMessageId(null);
-                      setMessageSearch(event.target.value);
-                    }}
-                    placeholder="Search this chat"
-                  />
-                  {messageSearch && (
-                    <button
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-orbit-muted hover:text-orbit-text"
-                      onClick={() => setMessageSearch("")}
-                      aria-label="Clear chat search"
-                      title="Clear chat search"
-                    >
-                      ✕
-                    </button>
-                  )}
-
-                  {activeMessageSearchQuery && (
-                    <div
-                      className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-1.5 shadow-xl shadow-black/50"
-                      onMouseEnter={() => setHoveredMessageId(null)}
-                    >
-                      {messageSearchResults.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-orbit-muted">No messages match.</p>
-                      ) : (
-                        messageSearchResults.slice(0, 12).map((result) => (
-                          <button
-                            key={`search-result:${result.id}`}
-                            className="group mb-1 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
-                            onClick={() => jumpToMessage(result.id)}
-                          >
-                            <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
-                              {result.senderLabel} • {formatMessageTimestamp(result.createdAt)}
-                            </p>
-                            <p className="truncate text-[11px] text-slate-300">{result.preview}</p>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
+                <button
+                  className={`orbit-btn h-9 px-2.5 text-xs ${isSearchPopupOpen ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  onClick={() => {
+                    setHoveredMessageId(null);
+                    setActiveTimelinePopup((prev) => (prev === "search" ? null : "search"));
+                  }}
+                  aria-label="Search messages"
+                  title="Search messages"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="M20 20l-3.5-3.5" />
+                    </svg>
+                    Search
+                    {activeMessageSearchQuery && (
+                      <span className="rounded-full border border-orbit-accent/45 bg-orbit-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                        {Math.min(messageSearchResults.length, 99)}
+                      </span>
+                    )}
+                  </span>
+                </button>
                 {getConversationSecretKey(selectedConversation.id) ? (
                   <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
                 ) : loadingByConversationId[selectedConversation.id] ? (
@@ -4224,10 +4233,10 @@ function App() {
                 )}
                 <div className="relative">
                   <button
-                    className={`orbit-btn h-9 px-2.5 text-xs ${showPinnedMessagesPanel ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                    className={`orbit-btn h-9 px-2.5 text-xs ${isPinsPopupOpen ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
                     onClick={() => {
                       setHoveredMessageId(null);
-                      setShowPinnedMessagesPanel((prev) => !prev);
+                      setActiveTimelinePopup((prev) => (prev === "pins" ? null : "pins"));
                     }}
                     aria-label="Pinned messages"
                     title="Pinned messages"
@@ -4239,44 +4248,116 @@ function App() {
                       {pinnedMessagesForSelectedConversation.length}
                     </span>
                   </button>
-
-                  {showPinnedMessagesPanel && (
+                </div>
+                {activeTimelinePopup && (
+                  <>
+                    <button
+                      className="fixed inset-0 z-20 cursor-default bg-transparent"
+                      onClick={() => setActiveTimelinePopup(null)}
+                      aria-label="Close popup"
+                    />
                     <div
-                      className="absolute right-0 top-[calc(100%+6px)] z-30 max-h-80 w-80 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-2 shadow-xl shadow-black/50"
+                      className="absolute right-[7.5rem] top-[calc(100%+8px)] z-30 max-h-[min(70vh,30rem)] w-[min(34rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-[#1c2030]/95 shadow-xl shadow-black/50 backdrop-blur"
                       onMouseEnter={() => setHoveredMessageId(null)}
                     >
-                      <div className="mb-2 flex items-center justify-between border-b border-white/10 px-2 py-1">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">Pinned Messages</p>
-                        <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
-                          {pinnedMessagesForSelectedConversation.length}
-                        </span>
-                      </div>
-                      {pinnedMessagesForSelectedConversation.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-orbit-muted">No pinned messages in this chat.</p>
+                      {isSearchPopupOpen ? (
+                        <div className="flex max-h-[min(70vh,30rem)] flex-col">
+                          <div className="border-b border-white/10 p-3">
+                            <div className="mb-2 flex items-center justify-between">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">Search Messages</p>
+                              {activeMessageSearchQuery && (
+                                <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                                  {messageSearchResults.length} result{messageSearchResults.length === 1 ? "" : "s"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="relative">
+                              <input
+                                ref={messageSearchPopupInputRef}
+                                className="orbit-input h-10 pr-8 text-sm"
+                                value={messageSearch}
+                                onChange={(event) => setMessageSearch(event.target.value)}
+                                placeholder="Type to search this chat"
+                              />
+                              {messageSearch && (
+                                <button
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-orbit-muted hover:text-orbit-text"
+                                  onClick={() => setMessageSearch("")}
+                                  aria-label="Clear chat search"
+                                  title="Clear chat search"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="max-h-[24rem] overflow-y-auto p-2">
+                            {!activeMessageSearchQuery ? (
+                              <p className="px-3 py-2 text-xs text-orbit-muted">Type a keyword, username, or phrase to find a message.</p>
+                            ) : messageSearchResults.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-orbit-muted">No messages match.</p>
+                            ) : (
+                              messageSearchResults.slice(0, 16).map((result) => (
+                                <button
+                                  key={`search-result:${result.id}`}
+                                  className="group mb-1.5 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2.5 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
+                                  onClick={() => {
+                                    jumpToMessage(result.id);
+                                    setActiveTimelinePopup(null);
+                                  }}
+                                >
+                                  <div className="mb-1 flex items-center justify-between gap-2">
+                                    <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
+                                      {result.senderLabel} • {formatMessageTimestamp(result.createdAt)}
+                                    </p>
+                                    <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold text-slate-200">Jump</span>
+                                  </div>
+                                  <p className="line-clamp-2 text-xs text-slate-300">{result.preview}</p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
                       ) : (
-                        pinnedMessagesForSelectedConversation.map((pinnedMessage) => (
-                          <button
-                            key={`pinned-message:${pinnedMessage.id}`}
-                            className="group mb-1 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
-                            onClick={() => {
-                              jumpToMessage(pinnedMessage.id);
-                              setShowPinnedMessagesPanel(false);
-                            }}
-                          >
-                            <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
-                              {pinnedMessage.sender} • {formatMessageTimestamp(pinnedMessage.createdAt)}
-                            </p>
-                            <p className="truncate text-[11px] text-slate-300">{(messageSearchIndex[pinnedMessage.id] ?? "Encrypted message").trim() || "Encrypted message"}</p>
-                          </button>
-                        ))
+                        <div className="max-h-[min(70vh,30rem)] overflow-y-auto p-2">
+                          <div className="mb-2 flex items-center justify-between border-b border-white/10 px-2 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">Pinned Messages</p>
+                            <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                              {pinnedMessagesForSelectedConversation.length}
+                            </span>
+                          </div>
+                          {pinnedMessagesForSelectedConversation.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-orbit-muted">No pinned messages in this chat.</p>
+                          ) : (
+                            pinnedMessagesForSelectedConversation.map((pinnedMessage) => (
+                              <button
+                                key={`pinned-message:${pinnedMessage.id}`}
+                                className="group mb-1.5 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2.5 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
+                                onClick={() => {
+                                  jumpToMessage(pinnedMessage.id);
+                                  setActiveTimelinePopup(null);
+                                }}
+                              >
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
+                                    {pinnedMessage.sender} • {formatMessageTimestamp(pinnedMessage.createdAt)}
+                                  </p>
+                                  <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold text-slate-200">Jump</span>
+                                </div>
+                                <p className="line-clamp-2 text-xs text-slate-300">{(messageSearchIndex[pinnedMessage.id] ?? "Encrypted message").trim() || "Encrypted message"}</p>
+                              </button>
+                            ))
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
                 <button
                   className="orbit-btn h-9 w-9 p-0"
                   onClick={() => {
                     setHoveredMessageId(null);
+                    setActiveTimelinePopup(null);
                     setShowChatSettings(!showChatSettings);
                     if (!showChatSettings) {
                       const realtimePref = chatRealtimePreferences[selectedConversation.id] ?? DEFAULT_CHAT_PREFERENCES;
@@ -4319,7 +4400,7 @@ function App() {
                   const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
                   const parentMessage = msg.parentMessageId ? messageById.get(msg.parentMessageId) ?? null : null;
                   const threadReplyCount = messages.filter((candidate) => candidate.parentMessageId === msg.id).length;
-                  const menusOpen = showPinnedMessagesPanel || Boolean(activeMessageSearchQuery) || showChatSettings;
+                  const menusOpen = Boolean(activeTimelinePopup) || showChatSettings;
                   const quickActionsVisible = hoveredMessageId === msg.id && !menusOpen;
                   const isPingedMessage = !mine && hasHandleMention(messageSearchIndex[msg.id] ?? "", user?.username);
                   const isPinnedMessage = pinnedMessageIdsForSelectedConversation.includes(msg.id);
