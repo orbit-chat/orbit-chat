@@ -932,6 +932,12 @@ function App() {
   }, [selectedConvId]);
 
   useEffect(() => {
+    if (showPinnedMessagesPanel || showChatSettings || Boolean(activeMessageSearchQuery)) {
+      setHoveredMessageId(null);
+    }
+  }, [activeMessageSearchQuery, showChatSettings, showPinnedMessagesPanel]);
+
+  useEffect(() => {
     if (!selectedConversation) return;
     const currentPinnedIds = pinnedMessageIdsByConversation[selectedConversation.id] ?? [];
     if (!currentPinnedIds.length) return;
@@ -2829,17 +2835,19 @@ function App() {
     }, 2200);
   }, []);
 
-  const scrollMainTimelineToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+  const scrollMainTimelineToBottom = useCallback((behavior: ScrollBehavior = "smooth", extraOffset = 36) => {
     const list = messageListRef.current;
     if (!list) return;
-    list.scrollTo({ top: list.scrollHeight, behavior });
+    list.scrollTo({ top: list.scrollHeight + extraOffset, behavior });
   }, []);
 
   useEffect(() => {
     if (!pendingSendScrollRef.current) return;
     pendingSendScrollRef.current = false;
     requestAnimationFrame(() => {
-      scrollMainTimelineToBottom("smooth");
+      requestAnimationFrame(() => {
+        scrollMainTimelineToBottom("smooth", 56);
+      });
     });
   }, [messages.length, scrollMainTimelineToBottom]);
 
@@ -4166,7 +4174,10 @@ function App() {
                   <input
                     className="orbit-input h-9 pr-8 text-xs"
                     value={messageSearch}
-                    onChange={(event) => setMessageSearch(event.target.value)}
+                    onChange={(event) => {
+                      setHoveredMessageId(null);
+                      setMessageSearch(event.target.value);
+                    }}
                     placeholder="Search this chat"
                   />
                   {messageSearch && (
@@ -4181,17 +4192,20 @@ function App() {
                   )}
 
                   {activeMessageSearchQuery && (
-                    <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-1 shadow-xl shadow-black/50">
+                    <div
+                      className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-1.5 shadow-xl shadow-black/50"
+                      onMouseEnter={() => setHoveredMessageId(null)}
+                    >
                       {messageSearchResults.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-orbit-muted">No messages match.</p>
                       ) : (
                         messageSearchResults.slice(0, 12).map((result) => (
                           <button
                             key={`search-result:${result.id}`}
-                            className="block w-full rounded-lg px-2.5 py-2 text-left hover:bg-white/10"
+                            className="group mb-1 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
                             onClick={() => jumpToMessage(result.id)}
                           >
-                            <p className="truncate text-[11px] font-semibold text-orbit-accent">
+                            <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
                               {result.senderLabel} • {formatMessageTimestamp(result.createdAt)}
                             </p>
                             <p className="truncate text-[11px] text-slate-300">{result.preview}</p>
@@ -4211,7 +4225,10 @@ function App() {
                 <div className="relative">
                   <button
                     className={`orbit-btn h-9 px-2.5 text-xs ${showPinnedMessagesPanel ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
-                    onClick={() => setShowPinnedMessagesPanel((prev) => !prev)}
+                    onClick={() => {
+                      setHoveredMessageId(null);
+                      setShowPinnedMessagesPanel((prev) => !prev);
+                    }}
                     aria-label="Pinned messages"
                     title="Pinned messages"
                   >
@@ -4224,20 +4241,29 @@ function App() {
                   </button>
 
                   {showPinnedMessagesPanel && (
-                    <div className="absolute right-0 top-[calc(100%+6px)] z-30 max-h-72 w-80 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-1.5 shadow-xl shadow-black/50">
+                    <div
+                      className="absolute right-0 top-[calc(100%+6px)] z-30 max-h-80 w-80 overflow-y-auto rounded-xl border border-white/10 bg-[#1c2030] p-2 shadow-xl shadow-black/50"
+                      onMouseEnter={() => setHoveredMessageId(null)}
+                    >
+                      <div className="mb-2 flex items-center justify-between border-b border-white/10 px-2 py-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">Pinned Messages</p>
+                        <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                          {pinnedMessagesForSelectedConversation.length}
+                        </span>
+                      </div>
                       {pinnedMessagesForSelectedConversation.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-orbit-muted">No pinned messages in this chat.</p>
                       ) : (
                         pinnedMessagesForSelectedConversation.map((pinnedMessage) => (
                           <button
                             key={`pinned-message:${pinnedMessage.id}`}
-                            className="mb-1 block w-full rounded-lg px-2.5 py-2 text-left hover:bg-white/10"
+                            className="group mb-1 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
                             onClick={() => {
                               jumpToMessage(pinnedMessage.id);
                               setShowPinnedMessagesPanel(false);
                             }}
                           >
-                            <p className="truncate text-[11px] font-semibold text-orbit-accent">
+                            <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
                               {pinnedMessage.sender} • {formatMessageTimestamp(pinnedMessage.createdAt)}
                             </p>
                             <p className="truncate text-[11px] text-slate-300">{(messageSearchIndex[pinnedMessage.id] ?? "Encrypted message").trim() || "Encrypted message"}</p>
@@ -4250,6 +4276,7 @@ function App() {
                 <button
                   className="orbit-btn h-9 w-9 p-0"
                   onClick={() => {
+                    setHoveredMessageId(null);
                     setShowChatSettings(!showChatSettings);
                     if (!showChatSettings) {
                       const realtimePref = chatRealtimePreferences[selectedConversation.id] ?? DEFAULT_CHAT_PREFERENCES;
@@ -4292,9 +4319,11 @@ function App() {
                   const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
                   const parentMessage = msg.parentMessageId ? messageById.get(msg.parentMessageId) ?? null : null;
                   const threadReplyCount = messages.filter((candidate) => candidate.parentMessageId === msg.id).length;
-                  const quickActionsVisible = hoveredMessageId === msg.id;
+                  const menusOpen = showPinnedMessagesPanel || Boolean(activeMessageSearchQuery) || showChatSettings;
+                  const quickActionsVisible = hoveredMessageId === msg.id && !menusOpen;
                   const isPingedMessage = !mine && hasHandleMention(messageSearchIndex[msg.id] ?? "", user?.username);
                   const isPinnedMessage = pinnedMessageIdsForSelectedConversation.includes(msg.id);
+                  const seenByOthers = (seenByMessageId[msg.id] ?? []).filter((seenUserId) => seenUserId !== user.id);
 
                   return (
                     <article
@@ -4302,9 +4331,7 @@ function App() {
                         messageElementRefs.current[msg.id] = node;
                       }}
                       key={msg.id}
-                      className={`group relative flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""} ${focusedSearchMessageId === msg.id ? "rounded-xl ring-2 ring-orbit-accent/60" : ""}`}
-                      onMouseEnter={() => setHoveredMessageId(msg.id)}
-                      onMouseLeave={() => setHoveredMessageId((prev) => (prev === msg.id ? null : prev))}
+                      className={`group relative flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
                       onContextMenu={(e) => ctxMenu.show(e, buildMessageContextMenuItems(msg, senderLabel))}
                     >
                       <button
@@ -4327,7 +4354,9 @@ function App() {
                             : isPingedMessage
                               ? "border-amber-300/45 bg-amber-300/10"
                               : "border-white/10 bg-[#202533]"
-                        }`}
+                        } ${focusedSearchMessageId === msg.id ? "ring-2 ring-orbit-accent/60" : ""}`}
+                        onMouseEnter={() => setHoveredMessageId(msg.id)}
+                        onMouseLeave={() => setHoveredMessageId((prev) => (prev === msg.id ? null : prev))}
                       >
                         <div className="flex items-center gap-2">
                           <button
@@ -4392,8 +4421,14 @@ function App() {
                             <button
                               className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[11px] text-orbit-muted hover:border-white/20 hover:text-orbit-text"
                               onClick={() => setReactionModalMessageId(msg.id)}
+                              aria-label="Message options"
+                              title="Message options"
                             >
-                              Details
+                              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+                                <circle cx="5" cy="12" r="1.8" />
+                                <circle cx="12" cy="12" r="1.8" />
+                                <circle cx="19" cy="12" r="1.8" />
+                              </svg>
                             </button>
                           </div>
                         )}
@@ -4407,8 +4442,15 @@ function App() {
                           </button>
                         )}
 
-                        {mine && (seenByMessageId[msg.id] ?? []).some((seenUserId) => seenUserId !== user.id) && (
-                          <p className="mt-1 text-right text-[10px] uppercase tracking-wide text-orbit-muted">Seen</p>
+                        {mine && seenByOthers.length > 0 && (
+                          <div className="mt-1 flex justify-end">
+                            <p className="inline-flex items-center gap-1 rounded-full border border-emerald-300/35 bg-emerald-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
+                              <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M20 6L9 17l-5-5" />
+                              </svg>
+                              Seen by {seenByOthers.length}
+                            </p>
+                          </div>
                         )}
                       </div>
 
