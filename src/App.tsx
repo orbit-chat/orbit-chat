@@ -355,7 +355,6 @@ const DEFAULT_CHAT_PREFERENCES: ChatRealtimePreferences = {
 };
 
 const CHAT_PREFERENCES_STORAGE_KEY = "orbit:chat-realtime-preferences";
-const PINNED_MESSAGES_STORAGE_KEY = "orbit:pinned-messages";
 
 function loadChatPreferences(): Record<string, ChatRealtimePreferences> {
   try {
@@ -377,25 +376,6 @@ function loadChatPreferences(): Record<string, ChatRealtimePreferences> {
 
 function persistChatPreferences(value: Record<string, ChatRealtimePreferences>) {
   localStorage.setItem(CHAT_PREFERENCES_STORAGE_KEY, JSON.stringify(value));
-}
-
-function loadPinnedMessagesByConversation(): Record<string, string[]> {
-  try {
-    const raw = localStorage.getItem(PINNED_MESSAGES_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, string[]>;
-    const normalized: Record<string, string[]> = {};
-    for (const [conversationId, ids] of Object.entries(parsed)) {
-      normalized[conversationId] = Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [];
-    }
-    return normalized;
-  } catch {
-    return {};
-  }
-}
-
-function persistPinnedMessagesByConversation(value: Record<string, string[]>) {
-  localStorage.setItem(PINNED_MESSAGES_STORAGE_KEY, JSON.stringify(value));
 }
 
 function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
@@ -648,7 +628,7 @@ function App() {
   const [reactionModalMessageId, setReactionModalMessageId] = useState<string | null>(null);
   const [reactionShortcodeInput, setReactionShortcodeInput] = useState(":thumbsup:");
   const [showPinnedMessagesPanel, setShowPinnedMessagesPanel] = useState(false);
-  const [pinnedMessageIdsByConversation, setPinnedMessageIdsByConversation] = useState<Record<string, string[]>>(() => loadPinnedMessagesByConversation());
+  const [pinnedMessageIdsByConversation, setPinnedMessageIdsByConversation] = useState<Record<string, string[]>>({});
   const [mentionAutocomplete, setMentionAutocomplete] = useState<{ start: number; end: number; query: string } | null>(null);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const [replyTargetMessageId, setReplyTargetMessageId] = useState<string | null>(null);
@@ -1421,9 +1401,11 @@ function App() {
               nonce: m.nonce,
               mediaIds: m.mediaIds ?? [],
               reactions: m.reactions ?? [],
+              isPinned: m.isPinned ?? false,
               createdAt: new Date(m.createdAt).getTime(),
             }, { currentUserId: user?.id });
           }
+          syncPinnedMessageIdsFromMessages(conversation.id, msgs);
         } catch {
           // Silently fail per conversation — one failure shouldn't block others
         }
@@ -1431,7 +1413,7 @@ function App() {
     };
 
     autoLoadMessages();
-  }, [conversations, token, byConversation, upsertMessage, user?.id]);
+  }, [conversations, syncPinnedMessageIdsFromMessages, token, upsertMessage, user?.id]);
 
   useEffect(() => {
     if (!token) {
@@ -1816,14 +1798,16 @@ function App() {
           nonce: m.nonce,
           mediaIds: m.mediaIds ?? [],
           reactions: m.reactions ?? [],
+          isPinned: m.isPinned ?? false,
           createdAt: new Date(m.createdAt).getTime(),
         }, { currentUserId: user?.id, markAsRead: true });
       }
+      syncPinnedMessageIdsFromMessages(selectedConvId, msgs);
     }).catch(() => {});
 
     // Join the room via socket
     socket?.emit("join_conversation", { conversationId: selectedConvId });
-  }, [selectedConvId, token, socket, upsertMessage, user?.id]);
+  }, [selectedConvId, syncPinnedMessageIdsFromMessages, socket, token, upsertMessage, user?.id]);
 
   /* ───── Refresh conversations on first inbound message ───── */
   useEffect(() => {
@@ -1854,6 +1838,38 @@ function App() {
       socket.off("new_message", handleNewMessage);
     };
   }, [socket, token, loadConversations, ensureConversationSecretKey, getConversationKeyVersion, user]);
+
+  /* ───── Handle pinned message sync across users ───── */
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleMessagePinUpdated = (data: { conversationId: string; messageId: string; isPinned: boolean }) => {
+      setPinnedMessageIdsByConversation((prev) => {
+        const current = prev[data.conversationId] ?? [];
+        const nextIds = data.isPinned
+          ? current.includes(data.messageId)
+            ? current
+            : [data.messageId, ...current]
+          : current.filter((id) => id !== data.messageId);
+
+        if (nextIds.length === 0) {
+          const next = { ...prev };
+          delete next[data.conversationId];
+          return next;
+        }
+
+        return {
+          ...prev,
+          [data.conversationId]: nextIds,
+        };
+      });
+    };
+
+    socket.on("message_pin_updated", handleMessagePinUpdated);
+    return () => {
+      socket.off("message_pin_updated", handleMessagePinUpdated);
+    };
+  }, [socket]);
 
   /* ───── Handle conversation_created: show passcode to recipient ───── */
   useEffect(() => {
@@ -2812,11 +2828,12 @@ function App() {
 
   const updatePinnedMessageIds = useCallback((conversationId: string, nextIds: string[]) => {
     setPinnedMessageIdsByConversation((prev) => {
-      const next = { ...prev, [conversationId]: nextIds };
+      const next = { ...prev };
       if (nextIds.length === 0) {
         delete next[conversationId];
+      } else {
+        next[conversationId] = nextIds;
       }
-      persistPinnedMessagesByConversation(next);
       return next;
     });
   }, []);
@@ -2828,7 +2845,12 @@ function App() {
       ? current.filter((id) => id !== messageId)
       : [messageId, ...current];
     updatePinnedMessageIds(conversationId, next);
-  }, [pinnedMessageIdsByConversation, updatePinnedMessageIds]);
+    socket?.emit("toggle_message_pin", { conversationId, messageId });
+  }, [pinnedMessageIdsByConversation, socket, updatePinnedMessageIds]);
+
+  const syncPinnedMessageIdsFromMessages = useCallback((conversationId: string, msgs: Array<{ id: string; isPinned?: boolean }>) => {
+    updatePinnedMessageIds(conversationId, msgs.filter((message) => message.isPinned).map((message) => message.id));
+  }, [updatePinnedMessageIds]);
 
   const handlePingMessageAuthor = (username: string) => {
     const mention = `@${username} `;
@@ -4348,7 +4370,6 @@ function App() {
                               return (
                                 <button
                                   key={`${msg.id}:${reaction.emoji}`}
-                                  className={`rounded-full border px-2 py-0.5 text-xs ${active ? "border-orbit-accent/60 bg-orbit-accent/20 text-orbit-accent" : "border-white/10 bg-black/20 text-slate-300"}`}
                                   onClick={() => handleToggleReaction(msg.id, reaction.emoji)}
                                 >
                                   {reaction.emoji} {reaction.count}

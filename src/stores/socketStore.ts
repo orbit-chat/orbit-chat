@@ -149,6 +149,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       expiresAt: string | null;
       maxViews: number | null;
       reactions?: Array<{ emoji: string; count: number; userIds: string[] }>;
+      isPinned?: boolean;
       createdAt: number;
     }) => {
       const currentUserId = useAuthStore.getState().user?.id;
@@ -163,6 +164,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         keyVersion: data.keyVersion,
         mediaIds: data.mediaIds ?? [],
         reactions: data.reactions ?? [],
+        isPinned: data.isPinned ?? false,
       }, { currentUserId });
     });
 
@@ -173,6 +175,16 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     }) => {
       useMessagesStore.getState().updateMessage(data.conversationId, data.messageId, {
         reactions: data.reactions,
+      });
+    });
+
+    socket.on("message_pin_updated", (data: {
+      messageId: string;
+      conversationId: string;
+      isPinned: boolean;
+    }) => {
+      useMessagesStore.getState().updateMessage(data.conversationId, data.messageId, {
+        isPinned: data.isPinned,
       });
     });
 

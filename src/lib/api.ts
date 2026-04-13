@@ -565,6 +565,7 @@ export type ServerMessage = {
   maxViews: number | null;
   currentViews: number;
   reactions?: Array<{ emoji: string; count: number; userIds: string[] }>;
+  isPinned?: boolean;
   createdAt: string;
   sender: { id: string; username: string };
 };

@@ -11,6 +11,7 @@ export type ChatMessage = {
   keyVersion?: number;
   mediaIds?: string[];
   reactions?: Array<{ emoji: string; count: number; userIds: string[] }>;
+  isPinned?: boolean;
   createdAt: number;
   ttlSeconds?: number;
 };
