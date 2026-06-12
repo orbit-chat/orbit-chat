@@ -394,8 +394,16 @@ Server is not trusted for:
 - Attachment reservation metadata is handled server-side for access control and lifecycle management.
 - Pinned chats and pinned messages are currently local-only (localStorage) and are not synced across devices.
 - Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
-- In-app desktop auto-update flow is not enabled yet; users still install updates from release artifacts.
+- In-app desktop auto-update depends on signed GitHub Release assets and matching `latest.yml` / `latest-mac.yml` metadata from the release workflow.
 - Current build config forces `libsodium-wrappers` to its CommonJS entry due to an upstream ESM packaging issue.
+
+## CI/CD And Production Trust
+
+- Desktop CI runs typechecking and production builds on Linux, macOS, and Windows through `.github/workflows/ci.yml`.
+- Version tags such as `v0.9.4` run `.github/workflows/release.yml`, which requires signing/notarization secrets before producing draft GitHub Release assets.
+- Dependency and GitHub Actions update PRs are managed by `.github/dependabot.yml`.
+- Security disclosure guidance lives in `SECURITY.md`.
+- Signing, auto-update, crash reporting, recovery, and audit readiness are tracked in `docs/production-trust.md`.
 
 ## Product Summary
 
