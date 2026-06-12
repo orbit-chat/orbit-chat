@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      desktop-runtime:
+        patterns:
+          - electron
+          - electron-builder
+          - electron-updater
+          - "@electron/*"
+      react-stack:
+        patterns:
+          - react
+          - react-dom
+          - "@types/react*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+

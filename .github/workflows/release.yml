@@ -1,0 +1,123 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            command: npm run dist:win:prod
+            artifact_name: orbit-chat-windows
+            artifact_glob: |
+              release/*.exe
+              release/latest.yml
+          - name: macOS arm64/x64
+            os: macos-latest
+            command: npm run dist:mac:prod
+            artifact_name: orbit-chat-macos
+            artifact_glob: |
+              release/*.zip
+              release/latest-mac.yml
+
+    env:
+      VITE_API_URL: ${{ vars.VITE_API_URL || 'https://api.orbitchat.example' }}
+      VITE_SOCKET_URL: ${{ vars.VITE_SOCKET_URL || 'https://api.orbitchat.example' }}
+      VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
+      CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_LINK || secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_KEY_PASSWORD || secrets.WINDOWS_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Require production signing secrets
+        shell: bash
+        run: |
+          missing=0
+          if [ -z "$CSC_LINK" ]; then
+            echo "::error::CSC_LINK is required for production desktop releases."
+            missing=1
+          fi
+          if [ -z "$CSC_KEY_PASSWORD" ]; then
+            echo "::error::CSC_KEY_PASSWORD is required for production desktop releases."
+            missing=1
+          fi
+          if [ "$VITE_API_URL" = "https://api.orbitchat.example" ] || [ -z "$VITE_API_URL" ]; then
+            echo "::error::Set the VITE_API_URL repository variable before production release."
+            missing=1
+          fi
+          if [ "$VITE_SOCKET_URL" = "https://api.orbitchat.example" ] || [ -z "$VITE_SOCKET_URL" ]; then
+            echo "::error::Set the VITE_SOCKET_URL repository variable before production release."
+            missing=1
+          fi
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            for name in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              if [ -z "${!name}" ]; then
+                echo "::error::$name is required for macOS notarization."
+                missing=1
+              fi
+            done
+          fi
+          exit "$missing"
+
+      - name: Build signed desktop package
+        run: ${{ matrix.command }}
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            artifacts/**/*Setup*.exe
+            artifacts/**/*.zip
+            artifacts/**/latest.yml
+            artifacts/**/latest-mac.yml

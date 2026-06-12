@@ -34,6 +34,11 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
   const [statusEmoji, setStatusEmoji] = useState("");
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [deleteMessagesOnUnfriend, setDeleteMessagesOnUnfriend] = useState(true);
+  const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
+  const [downloadLatestLoading, setDownloadLatestLoading] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [updateMessageTone, setUpdateMessageTone] = useState<"info" | "error">("info");
+  const [isMacPlatform, setIsMacPlatform] = useState(false);
 
   useEffect(() => {
     fetchMe(token, myUserId);
@@ -51,6 +56,33 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
     setLinks(safeLinks(profile.links));
     setDeleteMessagesOnUnfriend(profile.deleteMessagesOnUnfriend ?? true);
   }, [profile?.id]);
+
+  useEffect(() => {
+    const unsub = window.electronAPI?.onUpdaterStatus((payload) => {
+      if (payload.status === "error") {
+        setUpdateMessageTone("error");
+        setUpdateMessage(payload.message ?? "Update check failed.");
+      } else if (payload.status === "checking") {
+        setUpdateMessageTone("info");
+        setUpdateMessage(payload.message ?? "Checking for updates...");
+      } else if (payload.status === "downloaded") {
+        setUpdateMessageTone("info");
+        setUpdateMessage(payload.message ?? "Update ready. Download from Releases on macOS.");
+      } else if (payload.status === "not-available" || payload.status === "available") {
+        setUpdateMessageTone("info");
+        setUpdateMessage(payload.message ?? "Update status changed.");
+      }
+    });
+    return () => {
+      unsub?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    window.electronAPI?.getPlatform()
+      .then((platform) => setIsMacPlatform(platform === "darwin"))
+      .catch(() => setIsMacPlatform(false));
+  }, []);
 
   const bannerStyle = useMemo(() => {
     if (profile?.bannerUrl) {
@@ -305,6 +337,84 @@ export function ProfileSettings({ token, myUserId, onClose }: Props) {
                   <span className="font-mono text-[11px] text-orbit-muted">Enter</span>
                 </div>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">App Updates</p>
+                  <p className="mt-1 text-[11px] text-orbit-muted">Manually check for the latest desktop version if automatic checks are delayed.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isMacPlatform && (
+                    <button
+                      type="button"
+                      className="orbit-btn px-3 py-1.5 text-xs"
+                      disabled={downloadLatestLoading}
+                      onClick={async () => {
+                        if (!window.electronAPI?.openReleasesPage) {
+                          setUpdateMessageTone("error");
+                          setUpdateMessage("Download links are only available in the desktop app.");
+                          return;
+                        }
+
+                        setDownloadLatestLoading(true);
+                        try {
+                          await window.electronAPI.openReleasesPage();
+                          setUpdateMessageTone("info");
+                          setUpdateMessage("Opened GitHub Releases. Download the latest macOS build there.");
+                        } catch (err: any) {
+                          setUpdateMessageTone("error");
+                          setUpdateMessage(err?.message ?? "Unable to open releases page.");
+                        } finally {
+                          setDownloadLatestLoading(false);
+                        }
+                      }}
+                    >
+                      {downloadLatestLoading ? "Opening..." : "Download Latest"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="orbit-btn px-3 py-1.5 text-xs"
+                    disabled={updateCheckLoading}
+                    onClick={async () => {
+                      if (!window.electronAPI?.checkForUpdates) {
+                        setUpdateMessageTone("error");
+                        setUpdateMessage("Update checks are only available in the desktop app.");
+                        return;
+                      }
+
+                      setUpdateCheckLoading(true);
+                      setUpdateMessageTone("info");
+                      setUpdateMessage("Checking for updates...");
+
+                      try {
+                        const result = await window.electronAPI.checkForUpdates();
+                        if (!result?.ok) {
+                          const reason = result?.reason === "dev-mode"
+                            ? "Auto-update is disabled in development builds."
+                            : "Unable to start update check.";
+                          setUpdateMessageTone("error");
+                          setUpdateMessage(reason);
+                        }
+                      } catch (err: any) {
+                        setUpdateMessageTone("error");
+                        setUpdateMessage(err?.message ?? "Unable to start update check.");
+                      } finally {
+                        setUpdateCheckLoading(false);
+                      }
+                    }}
+                  >
+                    {updateCheckLoading ? "Checking..." : "Check for Updates"}
+                  </button>
+                </div>
+              </div>
+              {updateMessage && (
+                <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${updateMessageTone === "error" ? "border-rose-500/30 bg-rose-500/10 text-rose-300" : "border-white/10 bg-orbit-panel text-slate-200"}`}>
+                  {updateMessage}
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-white/10 bg-orbit-panelAlt p-3">

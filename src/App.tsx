@@ -56,6 +56,44 @@ function TitleBar() {
   );
 }
 
+function UpdateBanner({
+  updateStatus,
+  onInstall,
+  installLabel,
+}: {
+  updateStatus: UpdaterStatusPayload | null;
+  onInstall: () => void;
+  installLabel: string;
+}) {
+  if (!updateStatus) return null;
+
+  const visibleStatuses: UpdaterStatus[] = ["available", "downloading", "downloaded", "error"];
+  if (!visibleStatuses.includes(updateStatus.status)) return null;
+
+  const isError = updateStatus.status === "error";
+  const isDownloaded = updateStatus.status === "downloaded";
+
+  return (
+    <div className={`flex items-center justify-between gap-3 border-b px-3 py-2 text-xs ${isError ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-orbit-accent/25 bg-orbit-accent/10 text-orbit-text"}`}>
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="truncate font-semibold">
+          {updateStatus.message ?? "Update status changed."}
+        </span>
+        {typeof updateStatus.progress === "number" && (
+          <div className="h-1.5 w-48 overflow-hidden rounded-full border border-white/15 bg-black/25">
+            <div className="h-full bg-orbit-accent transition-all" style={{ width: `${Math.max(0, Math.min(100, updateStatus.progress))}%` }} />
+          </div>
+        )}
+      </div>
+      {isDownloaded && (
+        <button className="orbit-btn-primary px-3 py-1.5 text-xs" onClick={onInstall}>
+          {installLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 type UploadedAttachment = {
   kind: "image" | "file";
   mediaId: string;
@@ -226,6 +264,65 @@ const EMOJI_CATALOG: Array<{ value: string; tags: string[] }> = [
   { value: "🫂", tags: ["hug", "support", "comfort"] },
 ];
 
+const REACTION_EMOJI_CATALOG = [
+  { name: "thumbsup", emoji: "👍", tags: ["yes", "approve", "like"] },
+  { name: "heart", emoji: "❤️", tags: ["love", "care"] },
+  { name: "joy", emoji: "😂", tags: ["laugh", "funny"] },
+  { name: "fire", emoji: "🔥", tags: ["lit", "hot"] },
+  { name: "eyes", emoji: "👀", tags: ["watch", "look"] },
+  { name: "clap", emoji: "👏", tags: ["nice", "applause"] },
+  { name: "party", emoji: "🎉", tags: ["celebrate", "hype"] },
+  { name: "rocket", emoji: "🚀", tags: ["ship", "launch"] },
+  { name: "thinking", emoji: "🤔", tags: ["hmm", "question"] },
+  { name: "mindblown", emoji: "🤯", tags: ["wow", "shock"] },
+  { name: "pray", emoji: "🙏", tags: ["thanks", "please"] },
+  { name: "muscle", emoji: "💪", tags: ["strong", "respect"] },
+  { name: "sparkles", emoji: "✨", tags: ["clean", "nice"] },
+  { name: "check", emoji: "✅", tags: ["done", "approved"] },
+  { name: "x", emoji: "❌", tags: ["no", "reject"] },
+] as const;
+
+const REACTION_EMOJI_SET: Set<string> = new Set(REACTION_EMOJI_CATALOG.map((entry) => entry.emoji));
+const REACTION_SHORTCODE_MAP: Map<string, string> = new Map(REACTION_EMOJI_CATALOG.map((entry) => [entry.name, entry.emoji]));
+const QUICK_REACTION_EMOJIS = REACTION_EMOJI_CATALOG.slice(0, 6).map((entry) => entry.emoji);
+
+function resolveReactionInput(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (REACTION_EMOJI_SET.has(trimmed)) return trimmed;
+
+  const shortcode = /^:([a-z0-9_+-]+):$/i.exec(trimmed);
+  if (!shortcode) return null;
+  return REACTION_SHORTCODE_MAP.get(shortcode[1]!.toLowerCase()) ?? null;
+}
+
+function hasHandleMention(text: string, username: string | undefined) {
+  if (!username) return false;
+  return new RegExp(`(^|\\s)@${username}(?=$|\\s|[.,!?;:])`, "i").test(text);
+}
+
+function renderMessageTextWithMentions(text: string, currentUsername?: string) {
+  const mentionRegex = /(@[a-zA-Z0-9_]+)/g;
+  const parts = text.split(mentionRegex);
+
+  return parts.map((part, idx) => {
+    if (!part.startsWith("@")) {
+      return <span key={`text:${idx}`}>{part}</span>;
+    }
+
+    const mentioned = part.slice(1);
+    const isPing = Boolean(currentUsername && mentioned.toLowerCase() === currentUsername.toLowerCase());
+    return (
+      <span
+        key={`mention:${idx}`}
+        className={isPing ? "rounded bg-orbit-accent/25 px-1 py-0.5 font-semibold text-orbit-accent" : "font-semibold text-sky-300"}
+      >
+        {part}
+      </span>
+    );
+  });
+}
+
 type GifSearchResult = {
   id: string;
   title: string;
@@ -245,6 +342,40 @@ function normalizeGifUrl(input: string) {
 
 function shortConversationId(conversationId: string) {
   return conversationId.split("-")[0] ?? conversationId.slice(0, 8);
+}
+
+type ChatRealtimePreferences = {
+  readReceipts: boolean;
+  typingIndicators: boolean;
+};
+
+const DEFAULT_CHAT_PREFERENCES: ChatRealtimePreferences = {
+  readReceipts: true,
+  typingIndicators: true,
+};
+
+const CHAT_PREFERENCES_STORAGE_KEY = "orbit:chat-realtime-preferences";
+
+function loadChatPreferences(): Record<string, ChatRealtimePreferences> {
+  try {
+    const raw = localStorage.getItem(CHAT_PREFERENCES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, Partial<ChatRealtimePreferences>>;
+    const normalized: Record<string, ChatRealtimePreferences> = {};
+    for (const [conversationId, pref] of Object.entries(parsed)) {
+      normalized[conversationId] = {
+        readReceipts: pref.readReceipts ?? true,
+        typingIndicators: pref.typingIndicators ?? true,
+      };
+    }
+    return normalized;
+  } catch {
+    return {};
+  }
+}
+
+function persistChatPreferences(value: Record<string, ChatRealtimePreferences>) {
+  localStorage.setItem(CHAT_PREFERENCES_STORAGE_KEY, JSON.stringify(value));
 }
 
 function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
@@ -340,8 +471,9 @@ function DecryptedMessageBody(props: {
   cipherText: string;
   nonce?: string;
   keyVersion?: number;
+  currentUsername?: string;
 }) {
-  const { conversationId, token, cipherText, nonce, keyVersion } = props;
+  const { conversationId, token, cipherText, nonce, keyVersion, currentUsername } = props;
   const secretKey = useE2EEStore((state) => state.getConversationSecretKeyForVersion(conversationId, keyVersion));
   const [legacyText, setLegacyText] = useState<string | null>(null);
   const [envelope, setEnvelope] = useState<MessageEnvelope | null>(null);
@@ -394,7 +526,9 @@ function DecryptedMessageBody(props: {
 
   return (
     <div className="mt-1 space-y-2">
-      {(envelope?.text ?? legacyText) && <p className="break-words text-orbit-text">{envelope?.text ?? legacyText}</p>}
+      {(envelope?.text ?? legacyText) && (
+        <p className="break-words text-orbit-text">{renderMessageTextWithMentions(envelope?.text ?? legacyText ?? "", currentUsername)}</p>
+      )}
       {(envelope?.attachments ?? []).map((attachment, idx) => {
         if (attachment.kind === "gif_link") {
           const safeUrl = normalizeGifUrl(attachment.url);
@@ -431,8 +565,40 @@ function DecryptedMessageBody(props: {
   );
 }
 
+async function extractMessageSearchableText(params: {
+  secretKey: string | null;
+  cipherText: string;
+  nonce?: string;
+}) {
+  const { secretKey, cipherText, nonce } = params;
+  if (!secretKey || !nonce) return "";
+
+  try {
+    const text = await decryptMessage(cipherText, nonce, secretKey);
+    try {
+      const parsed = JSON.parse(text) as MessageEnvelope;
+      const messageText = parsed?.text?.trim() ?? "";
+      const attachmentText = (parsed?.attachments ?? [])
+        .map((attachment) => {
+          if (attachment.kind === "gif_link") {
+            return [attachment.title, attachment.url].filter(Boolean).join(" ");
+          }
+          return [attachment.name, attachment.mimeType].filter(Boolean).join(" ");
+        })
+        .join(" ");
+      return [messageText, attachmentText].filter(Boolean).join(" ");
+    } catch {
+      return text;
+    }
+  } catch {
+    return "";
+  }
+}
+
 function App() {
   const [appVersion, setAppVersion] = useState("-");
+  const [isMacPlatform, setIsMacPlatform] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdaterStatusPayload | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup" | "recovery">("login");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [mainView, setMainView] = useState<"chat" | "profile-settings">("chat");
@@ -442,6 +608,7 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authValidationError, setAuthValidationError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [messageSearch, setMessageSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingGifs, setPendingGifs] = useState<GifLinkAttachment[]>([]);
@@ -456,8 +623,19 @@ function App() {
   const [gifActiveIndex, setGifActiveIndex] = useState(0);
   const [emojiActiveIndex, setEmojiActiveIndex] = useState(0);
   const [messageSendError, setMessageSendError] = useState<string | null>(null);
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [focusedSearchMessageId, setFocusedSearchMessageId] = useState<string | null>(null);
+  const [reactionModalMessageId, setReactionModalMessageId] = useState<string | null>(null);
+  const [reactionShortcodeInput, setReactionShortcodeInput] = useState(":thumbsup:");
+  const [activeTimelinePopup, setActiveTimelinePopup] = useState<"search" | "pins" | null>(null);
+  const [pinnedMessageIdsByConversation, setPinnedMessageIdsByConversation] = useState<Record<string, string[]>>({});
+  const [mentionAutocomplete, setMentionAutocomplete] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  const [replyTargetMessageId, setReplyTargetMessageId] = useState<string | null>(null);
+  const [threadRootMessageId, setThreadRootMessageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const messageSearchPopupInputRef = useRef<HTMLInputElement | null>(null);
   const gifPickerRef = useRef<HTMLDivElement | null>(null);
   const gifSearchInputRef = useRef<HTMLInputElement | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
@@ -465,6 +643,10 @@ function App() {
   const gifButtonRef = useRef<HTMLButtonElement | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const uploadedAttachmentCacheRef = useRef<Record<string, UploadedAttachment>>({});
+  const messageElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const messageListRef = useRef<HTMLElement | null>(null);
+  const pendingSendScrollRef = useRef(false);
+  const searchFocusTimeoutRef = useRef<number | null>(null);
 
   const [profilePopoverUserId, setProfilePopoverUserId] = useState<string | null>(null);
   const [profilePopoverAnchor, setProfilePopoverAnchor] = useState<DOMRect | null>(null);
@@ -485,8 +667,17 @@ function App() {
   const [chatSettingsLength, setChatSettingsLength] = useState(2);
   const [chatSettingsLockMode, setChatSettingsLockMode] = useState<api.ChatLockMode>("on_leave");
   const [chatSettingsTimeout, setChatSettingsTimeout] = useState("");
+  const [chatSettingsReadReceipts, setChatSettingsReadReceipts] = useState(true);
+  const [chatSettingsTypingIndicators, setChatSettingsTypingIndicators] = useState(true);
   const [chatSettingsError, setChatSettingsError] = useState<string | null>(null);
   const [chatSettingsSaving, setChatSettingsSaving] = useState(false);
+  const [chatRealtimePreferences, setChatRealtimePreferences] = useState<Record<string, ChatRealtimePreferences>>(() => loadChatPreferences());
+  const [typingByConversation, setTypingByConversation] = useState<Record<string, string[]>>({});
+  const [seenByMessageId, setSeenByMessageId] = useState<Record<string, string[]>>({});
+  const typingStopTimerRef = useRef<number | null>(null);
+  const typingSentConversationRef = useRef<string | null>(null);
+  const seenSentRef = useRef<Set<string>>(new Set());
+  const typingIndicatorTimeoutsRef = useRef<Record<string, number>>({});
 
   // Archive (client-side, persisted per-user via localStorage)
   const [archivedConvIds, setArchivedConvIds] = useState<Set<string>>(() => {
@@ -498,6 +689,19 @@ function App() {
   const persistArchived = useCallback((ids: Set<string>) => {
     setArchivedConvIds(ids);
     localStorage.setItem("orbit:archived", JSON.stringify([...ids]));
+  }, []);
+
+  const [pinnedConvIds, setPinnedConvIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("orbit:pinned-chats");
+      return raw ? new Set(JSON.parse(raw)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const persistPinned = useCallback((ids: Set<string>) => {
+    setPinnedConvIds(ids);
+    localStorage.setItem("orbit:pinned-chats", JSON.stringify([...ids]));
   }, []);
 
   // Context menu
@@ -563,9 +767,12 @@ function App() {
   const profileErrorById = useProfilesStore((state) => state.errorById);
   const fetchProfile = useProfilesStore((state) => state.fetchProfile);
   const fetchMeProfile = useProfilesStore((state) => state.fetchMe);
+  const mergeProfiles = useProfilesStore((state) => state.mergeProfiles);
+  const mergePresence = useProfilesStore((state) => state.mergePresence);
   const ensureConversationSecretKey = useE2EEStore((state) => state.ensureConversationSecretKey);
   const ensureDeviceKeypair = useE2EEStore((state) => state.ensureDeviceKeypair);
   const getConversationSecretKey = useE2EEStore((state) => state.getConversationSecretKey);
+  const getConversationSecretKeyForVersion = useE2EEStore((state) => state.getConversationSecretKeyForVersion);
   const getConversationKeyVersion = useE2EEStore((state) => state.getConversationKeyVersion);
   const setConversationSecretKeyVersion = useE2EEStore((state) => state.setConversationSecretKeyVersion);
   const loadingByConversationId = useE2EEStore((state) => state.loadingByConversationId);
@@ -593,10 +800,277 @@ function App() {
     return selectedConversation.members.find((m) => m.user.id !== user.id)?.user ?? null;
   }, [selectedConversation, user]);
 
+  const mentionCandidates = useMemo(() => {
+    if (!selectedConversation || !mentionAutocomplete) return [] as string[];
+    const usernames = Array.from(
+      new Set(
+        selectedConversation.members
+          .map((member) => member.user.username)
+          .filter(Boolean)
+      )
+    );
+    const query = mentionAutocomplete.query.toLowerCase();
+    return usernames
+      .filter((username) => username.toLowerCase().startsWith(query))
+      .slice(0, 8);
+  }, [mentionAutocomplete, selectedConversation]);
+
   const messages = useMemo(
     () => (selectedConvId ? byConversation[selectedConvId] ?? [] : []),
     [byConversation, selectedConvId]
   );
+
+  const [messageSearchIndex, setMessageSearchIndex] = useState<Record<string, string>>({});
+
+  const messageById = useMemo(() => {
+    const map = new Map<string, (typeof messages)[number]>();
+    for (const message of messages) {
+      map.set(message.id, message);
+    }
+    return map;
+  }, [messages]);
+
+  const threadRootMessage = useMemo(() => {
+    if (!threadRootMessageId) return null;
+    return messageById.get(threadRootMessageId) ?? null;
+  }, [messageById, threadRootMessageId]);
+
+  const threadMessages = useMemo(() => {
+    if (!threadRootMessageId) return [] as typeof messages;
+    return messages.filter((message) => message.id === threadRootMessageId || message.parentMessageId === threadRootMessageId);
+  }, [messages, threadRootMessageId]);
+
+  const pinnedMessageIdsForSelectedConversation = useMemo(() => {
+    if (!selectedConversation) return [] as string[];
+    return pinnedMessageIdsByConversation[selectedConversation.id] ?? [];
+  }, [pinnedMessageIdsByConversation, selectedConversation]);
+
+  const pinnedMessagesForSelectedConversation = useMemo(() => {
+    if (!pinnedMessageIdsForSelectedConversation.length) return [] as typeof messages;
+    const collected = pinnedMessageIdsForSelectedConversation
+      .map((messageId) => messageById.get(messageId) ?? null)
+      .filter((message): message is (typeof messages)[number] => Boolean(message));
+    return collected;
+  }, [messageById, pinnedMessageIdsForSelectedConversation]);
+
+  const reactionModalMessage = useMemo(() => {
+    if (!reactionModalMessageId) return null;
+    return messageById.get(reactionModalMessageId) ?? null;
+  }, [messageById, reactionModalMessageId]);
+
+  const getReactionUserLabel = useCallback((userId: string) => {
+    if (userId === user?.id) return "You";
+    const profile = profileById[userId];
+    if (profile?.displayName?.trim()) return profile.displayName.trim();
+    if (profile?.username) return profile.username;
+    const member = selectedConversation?.members.find((conversationMember) => conversationMember.userId === userId);
+    return member?.user.username ?? `User ${userId.slice(0, 6)}`;
+  }, [profileById, selectedConversation, user?.id]);
+
+  const activeMessageSearchQuery = messageSearch.trim().toLowerCase();
+  const isSearchPopupOpen = activeTimelinePopup === "search";
+  const isPinsPopupOpen = activeTimelinePopup === "pins";
+
+  const visibleMessages = useMemo(() => {
+    return messages;
+  }, [messages]);
+
+  const messageSearchResults = useMemo(() => {
+    if (!selectedConversation || !activeMessageSearchQuery) return [] as Array<{
+      id: string;
+      senderLabel: string;
+      preview: string;
+      createdAt: number;
+    }>;
+
+    const results: Array<{ id: string; senderLabel: string; preview: string; createdAt: number }> = [];
+    for (const message of messages) {
+      const senderProfile = profileById[message.senderId];
+      const senderText = [message.sender, senderProfile?.username, senderProfile?.displayName]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const bodyText = messageSearchIndex[message.id] ?? "";
+      const bodyTextLower = bodyText.toLowerCase();
+      if (!senderText.includes(activeMessageSearchQuery) && !bodyTextLower.includes(activeMessageSearchQuery)) {
+        continue;
+      }
+
+      const senderLabel = senderProfile?.displayName?.trim() || message.sender;
+      const preview = bodyText.trim() || "Encrypted message";
+      results.push({ id: message.id, senderLabel, preview, createdAt: message.createdAt });
+    }
+
+    return results;
+  }, [activeMessageSearchQuery, messageSearchIndex, messages, profileById, selectedConversation]);
+
+  const activeReplyParentMessageId = useMemo(() => {
+    if (threadRootMessageId) return threadRootMessageId;
+    return replyTargetMessageId;
+  }, [replyTargetMessageId, threadRootMessageId]);
+
+  const selectedConversationPreferences = useMemo(() => {
+    if (!selectedConversation) return DEFAULT_CHAT_PREFERENCES;
+    return chatRealtimePreferences[selectedConversation.id] ?? DEFAULT_CHAT_PREFERENCES;
+  }, [chatRealtimePreferences, selectedConversation]);
+
+  const setRealtimePreferencesForConversation = useCallback((conversationId: string, nextPref: ChatRealtimePreferences) => {
+    setChatRealtimePreferences((prev) => {
+      const next = { ...prev, [conversationId]: nextPref };
+      persistChatPreferences(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setMessageSearch("");
+    setFocusedSearchMessageId(null);
+    setMentionAutocomplete(null);
+    setMentionActiveIndex(0);
+    setActiveTimelinePopup(null);
+    if (searchFocusTimeoutRef.current !== null) {
+      window.clearTimeout(searchFocusTimeoutRef.current);
+      searchFocusTimeoutRef.current = null;
+    }
+  }, [selectedConvId]);
+
+  useEffect(() => {
+    if (activeTimelinePopup || showChatSettings) {
+      setHoveredMessageId(null);
+    }
+  }, [activeTimelinePopup, showChatSettings]);
+
+  useEffect(() => {
+    if (!isSearchPopupOpen) return;
+    requestAnimationFrame(() => {
+      messageSearchPopupInputRef.current?.focus();
+      messageSearchPopupInputRef.current?.select();
+    });
+  }, [isSearchPopupOpen]);
+
+  useEffect(() => {
+    if (!activeTimelinePopup) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveTimelinePopup(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTimelinePopup]);
+
+  useEffect(() => {
+    if (!selectedConversation) return;
+    const currentPinnedIds = pinnedMessageIdsByConversation[selectedConversation.id] ?? [];
+    if (!currentPinnedIds.length) return;
+    const existingIds = new Set(messages.map((message) => message.id));
+    const filtered = currentPinnedIds.filter((messageId) => existingIds.has(messageId));
+    if (filtered.length !== currentPinnedIds.length) {
+      setPinnedMessageIdsByConversation((prev) => {
+        const next = { ...prev, [selectedConversation.id]: filtered };
+        if (filtered.length === 0) {
+          delete next[selectedConversation.id];
+        }
+        return next;
+      });
+    }
+  }, [messages, pinnedMessageIdsByConversation, selectedConversation]);
+
+  useEffect(() => {
+    return () => {
+      if (searchFocusTimeoutRef.current !== null) {
+        window.clearTimeout(searchFocusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedConversation || !token || messages.length === 0) {
+      setMessageSearchIndex({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      const entries = await Promise.all(
+        messages.map(async (message) => {
+          const secretKey = getConversationSecretKeyForVersion(selectedConversation.id, message.keyVersion);
+          const searchableText = await extractMessageSearchableText({
+            secretKey,
+            cipherText: message.cipherText,
+            nonce: message.nonce,
+          });
+          return [message.id, searchableText] as const;
+        })
+      );
+
+      if (!cancelled) {
+        setMessageSearchIndex(Object.fromEntries(entries));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getConversationSecretKeyForVersion, messages, selectedConversation, token]);
+
+  const emitTypingStop = useCallback((conversationId?: string | null) => {
+    const activeConversationId = conversationId ?? typingSentConversationRef.current;
+    if (!activeConversationId || !socket) return;
+    socket.emit("typing_stop", { conversationId: activeConversationId });
+    if (typingStopTimerRef.current !== null) {
+      window.clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
+    if (typingSentConversationRef.current === activeConversationId) {
+      typingSentConversationRef.current = null;
+    }
+  }, [socket]);
+
+  const onMessageDraftChange = useCallback((value: string, caretPosition?: number) => {
+    setMessageDraft(value);
+
+    const cursor = typeof caretPosition === "number" ? caretPosition : value.length;
+    const beforeCursor = value.slice(0, cursor);
+    const mentionMatch = /(^|\s)@([a-zA-Z0-9_]*)$/.exec(beforeCursor);
+    if (mentionMatch) {
+      const mentionQuery = mentionMatch[2] ?? "";
+      setMentionAutocomplete({
+        start: cursor - mentionQuery.length - 1,
+        end: cursor,
+        query: mentionQuery,
+      });
+      setMentionActiveIndex(0);
+    } else {
+      setMentionAutocomplete(null);
+    }
+
+    if (!selectedConvId || !socket) return;
+
+    const pref = chatRealtimePreferences[selectedConvId] ?? DEFAULT_CHAT_PREFERENCES;
+    if (!pref.typingIndicators || !value.trim()) {
+      emitTypingStop(selectedConvId);
+      return;
+    }
+
+    if (typingSentConversationRef.current !== selectedConvId) {
+      if (typingSentConversationRef.current && typingSentConversationRef.current !== selectedConvId) {
+        emitTypingStop(typingSentConversationRef.current);
+      }
+      socket.emit("typing_start", { conversationId: selectedConvId });
+      typingSentConversationRef.current = selectedConvId;
+    }
+
+    if (typingStopTimerRef.current !== null) {
+      window.clearTimeout(typingStopTimerRef.current);
+    }
+    typingStopTimerRef.current = window.setTimeout(() => {
+      emitTypingStop(selectedConvId);
+    }, 1200);
+  }, [chatRealtimePreferences, emitTypingStop, selectedConvId, socket]);
 
   const myMinReadableKeyVersion = useMemo(() => {
     if (!selectedConversation || !user) return 1;
@@ -613,8 +1087,13 @@ function App() {
     return conversations
       .filter((c) => !archivedConvIds.has(c.id))
       .slice()
-      .sort((a, b) => getConversationLastActivity(b) - getConversationLastActivity(a));
-  }, [byConversation, conversations, archivedConvIds]);
+      .sort((a, b) => {
+        const aPinned = pinnedConvIds.has(a.id) ? 1 : 0;
+        const bPinned = pinnedConvIds.has(b.id) ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+        return getConversationLastActivity(b) - getConversationLastActivity(a);
+      });
+  }, [byConversation, conversations, archivedConvIds, pinnedConvIds]);
 
   const archivedConversations = useMemo(() => {
     return conversations.filter((c) => archivedConvIds.has(c.id));
@@ -750,6 +1229,19 @@ function App() {
     return `${partnerUsername}#${shortConversationId(selectedConversation.id)}`;
   }, [selectedConversation, user]);
 
+  const typingDisplayNames = useMemo(() => {
+    if (!selectedConversation || !user) return [] as string[];
+    const typingUserIds = (typingByConversation[selectedConversation.id] ?? []).filter((id) => id !== user.id);
+    return typingUserIds
+      .map((userId) => {
+        const profile = profileById[userId];
+        if (profile?.displayName?.trim()) return profile.displayName.trim();
+        if (profile?.username) return profile.username;
+        return selectedConversation.members.find((member) => member.userId === userId)?.user.username ?? null;
+      })
+      .filter((name): name is string => Boolean(name));
+  }, [profileById, selectedConversation, typingByConversation, user]);
+
   const friendStatusByUserId = useMemo(() => {
     const map = new Map<string, "friend" | "incoming" | "outgoing">();
     for (const friend of friends) map.set(friend.user.id, "friend");
@@ -778,9 +1270,35 @@ function App() {
       api.getFriends(token),
       api.getFriendRequests(token),
     ]);
+
+    const profileUpdates: Array<Partial<api.UserProfile> & { id: string }> = [];
+    for (const friend of friendList) {
+      profileUpdates.push({
+        id: friend.user.id,
+        username: friend.user.username,
+        displayName: friend.user.displayName ?? null,
+        avatarUrl: friend.user.avatarUrl ?? null,
+        presence: friend.user.presence ?? "offline",
+        statusText: friend.user.statusText ?? null,
+        statusEmoji: friend.user.statusEmoji ?? null,
+      });
+    }
+    for (const request of [...requests.incoming, ...requests.outgoing]) {
+      profileUpdates.push({
+        id: request.user.id,
+        username: request.user.username,
+        displayName: request.user.displayName ?? null,
+        avatarUrl: request.user.avatarUrl ?? null,
+        presence: request.user.presence ?? "offline",
+        statusText: request.user.statusText ?? null,
+        statusEmoji: request.user.statusEmoji ?? null,
+      });
+    }
+
+    mergeProfiles(profileUpdates);
     setFriends(friendList);
     setFriendRequests(requests);
-  }, [token]);
+  }, [token, mergeProfiles]);
 
   const sendFriendRequest = useCallback(async (targetUserId: string) => {
     if (!token) return;
@@ -853,6 +1371,14 @@ function App() {
   /* ───── Electron version ───── */
   useEffect(() => {
     window.electronAPI?.getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
+    window.electronAPI?.getPlatform().then((platform) => setIsMacPlatform(platform === "darwin")).catch(() => setIsMacPlatform(false));
+  }, []);
+
+  useEffect(() => {
+    const unsub = window.electronAPI?.onUpdaterStatus((payload) => setUpdateStatus(payload));
+    return () => {
+      unsub?.();
+    };
   }, []);
 
   /* ───── Connect socket when token changes ───── */
@@ -879,6 +1405,51 @@ function App() {
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  /* ───── Auto-load all messages on app start to recover from storage loss ───── */
+  useEffect(() => {
+    if (!token || !conversations.length) return;
+
+    const autoLoadMessages = async () => {
+      for (const conversation of conversations) {
+        // Skip if messages already exist in store for this conversation
+        if (byConversation[conversation.id]?.length > 0) continue;
+
+        try {
+          const msgs = await api.getMessages(conversation.id, token);
+          for (const m of msgs) {
+            upsertMessage(conversation.id, {
+              id: m.id,
+              senderId: m.sender.id,
+              sender: m.sender.username,
+              parentMessageId: m.parentMessageId,
+              cipherText: m.ciphertext,
+              keyVersion: m.keyVersion,
+              nonce: m.nonce,
+              mediaIds: m.mediaIds ?? [],
+              reactions: m.reactions ?? [],
+              isPinned: m.isPinned ?? false,
+              createdAt: new Date(m.createdAt).getTime(),
+            }, { currentUserId: user?.id });
+          }
+          const pinnedIds = msgs.filter((message) => message.isPinned).map((message) => message.id);
+          setPinnedMessageIdsByConversation((prev) => {
+            const next = { ...prev };
+            if (pinnedIds.length === 0) {
+              delete next[conversation.id];
+            } else {
+              next[conversation.id] = pinnedIds;
+            }
+            return next;
+          });
+        } catch {
+          // Silently fail per conversation — one failure shouldn't block others
+        }
+      }
+    };
+
+    autoLoadMessages();
+  }, [conversations, token, upsertMessage, user?.id]);
 
   useEffect(() => {
     if (!token) {
@@ -921,6 +1492,130 @@ function App() {
       socket?.off("friendships_updated", onFriendshipsUpdated);
     };
   }, [loadFriendsData, socket, token]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const onPresenceUpdated = (data: { userId: string; presence: api.Presence; lastActiveAt: string | null }) => {
+      mergePresence(data.userId, data.presence, data.lastActiveAt);
+
+      setFriends((prev) =>
+        prev.map((friend) =>
+          friend.user.id === data.userId
+            ? { ...friend, user: { ...friend.user, presence: data.presence } }
+            : friend,
+        ),
+      );
+
+      setFriendRequests((prev) => ({
+        incoming: prev.incoming.map((request) =>
+          request.user.id === data.userId
+            ? { ...request, user: { ...request.user, presence: data.presence } }
+            : request,
+        ),
+        outgoing: prev.outgoing.map((request) =>
+          request.user.id === data.userId
+            ? { ...request, user: { ...request.user, presence: data.presence } }
+            : request,
+        ),
+      }));
+    };
+
+    socket.on("presence_updated", onPresenceUpdated);
+    return () => {
+      socket.off("presence_updated", onPresenceUpdated);
+    };
+  }, [mergePresence, socket]);
+
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const removeTypingUser = (conversationId: string, userId: string) => {
+      const timerKey = `${conversationId}:${userId}`;
+      const existingTimer = typingIndicatorTimeoutsRef.current[timerKey];
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+        delete typingIndicatorTimeoutsRef.current[timerKey];
+      }
+
+      setTypingByConversation((prev) => {
+        const current = prev[conversationId] ?? [];
+        if (!current.includes(userId)) return prev;
+        const nextUsers = current.filter((id) => id !== userId);
+        if (!nextUsers.length) {
+          const { [conversationId]: _removed, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, [conversationId]: nextUsers };
+      });
+    };
+
+    const onTypingStart = (data: { userId: string; conversationId: string }) => {
+      if (data.userId === user.id) return;
+
+      const pref = chatRealtimePreferences[data.conversationId] ?? DEFAULT_CHAT_PREFERENCES;
+      if (!pref.typingIndicators) return;
+
+      setTypingByConversation((prev) => {
+        const current = prev[data.conversationId] ?? [];
+        if (current.includes(data.userId)) return prev;
+        return { ...prev, [data.conversationId]: [...current, data.userId] };
+      });
+
+      const timerKey = `${data.conversationId}:${data.userId}`;
+      const existingTimer = typingIndicatorTimeoutsRef.current[timerKey];
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+      }
+      typingIndicatorTimeoutsRef.current[timerKey] = window.setTimeout(() => {
+        removeTypingUser(data.conversationId, data.userId);
+      }, 5000);
+    };
+
+    const onTypingStop = (data: { userId: string; conversationId: string }) => {
+      if (data.userId === user.id) return;
+      removeTypingUser(data.conversationId, data.userId);
+    };
+
+    const onMessageSeen = (data: { messageId: string; userId: string }) => {
+      setSeenByMessageId((prev) => {
+        const current = prev[data.messageId] ?? [];
+        if (current.includes(data.userId)) return prev;
+        return { ...prev, [data.messageId]: [...current, data.userId] };
+      });
+    };
+
+    socket.on("typing_start", onTypingStart);
+    socket.on("typing_stop", onTypingStop);
+    socket.on("message_seen", onMessageSeen);
+
+    return () => {
+      socket.off("typing_start", onTypingStart);
+      socket.off("typing_stop", onTypingStop);
+      socket.off("message_seen", onMessageSeen);
+
+      for (const timeoutId of Object.values(typingIndicatorTimeoutsRef.current)) {
+        window.clearTimeout(timeoutId);
+      }
+      typingIndicatorTimeoutsRef.current = {};
+    };
+  }, [chatRealtimePreferences, socket, user]);
+
+  useEffect(() => {
+    if (!socket || !selectedConvId || !user) return;
+    if (selectedConversation?.passcodeEnabled && !chatLock.isUnlocked(selectedConvId)) return;
+    const pref = chatRealtimePreferences[selectedConvId] ?? DEFAULT_CHAT_PREFERENCES;
+    if (!pref.readReceipts) return;
+
+    const conversationMessages = byConversation[selectedConvId] ?? [];
+    for (const message of conversationMessages) {
+      if (message.senderId === user.id) continue;
+      const dedupeKey = `${selectedConvId}:${message.id}`;
+      if (seenSentRef.current.has(dedupeKey)) continue;
+      socket.emit("message_seen", { messageId: message.id, conversationId: selectedConvId });
+      seenSentRef.current.add(dedupeKey);
+    }
+  }, [byConversation, chatLock, chatRealtimePreferences, selectedConvId, selectedConversation, socket, user]);
 
   useEffect(() => {
     if (!token) return;
@@ -981,6 +1676,9 @@ function App() {
     setGifActiveIndex(0);
     setEmojiActiveIndex(0);
     setMessageSendError(null);
+    setReplyTargetMessageId(null);
+    setThreadRootMessageId(null);
+    setHoveredMessageId(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [selectedConvId]);
 
@@ -1107,6 +1805,18 @@ function App() {
   }, [selectedConvId]);
 
   useEffect(() => {
+    if (!typingSentConversationRef.current) return;
+    if (selectedConvId === typingSentConversationRef.current) return;
+    emitTypingStop(typingSentConversationRef.current);
+  }, [emitTypingStop, selectedConvId]);
+
+  useEffect(() => {
+    return () => {
+      emitTypingStop(typingSentConversationRef.current);
+    };
+  }, [emitTypingStop]);
+
+  useEffect(() => {
     if (!selectedConvId || !token) return;
     // Only load messages if the conversation is unlocked or doesn't need a passcode
     const conv = conversations.find((c) => c.id === selectedConvId);
@@ -1118,18 +1828,31 @@ function App() {
           id: m.id,
           senderId: m.sender.id,
           sender: m.sender.username,
+          parentMessageId: m.parentMessageId,
           cipherText: m.ciphertext,
           keyVersion: m.keyVersion,
           nonce: m.nonce,
           mediaIds: m.mediaIds ?? [],
+          reactions: m.reactions ?? [],
+          isPinned: m.isPinned ?? false,
           createdAt: new Date(m.createdAt).getTime(),
         }, { currentUserId: user?.id, markAsRead: true });
       }
+      const pinnedIds = msgs.filter((message) => message.isPinned).map((message) => message.id);
+      setPinnedMessageIdsByConversation((prev) => {
+        const next = { ...prev };
+        if (pinnedIds.length === 0) {
+          delete next[selectedConvId];
+        } else {
+          next[selectedConvId] = pinnedIds;
+        }
+        return next;
+      });
     }).catch(() => {});
 
     // Join the room via socket
     socket?.emit("join_conversation", { conversationId: selectedConvId });
-  }, [selectedConvId, token, socket, upsertMessage, user?.id]);
+  }, [selectedConvId, socket, token, upsertMessage, user?.id]);
 
   /* ───── Refresh conversations on first inbound message ───── */
   useEffect(() => {
@@ -1160,6 +1883,38 @@ function App() {
       socket.off("new_message", handleNewMessage);
     };
   }, [socket, token, loadConversations, ensureConversationSecretKey, getConversationKeyVersion, user]);
+
+  /* ───── Handle pinned message sync across users ───── */
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleMessagePinUpdated = (data: { conversationId: string; messageId: string; isPinned: boolean }) => {
+      setPinnedMessageIdsByConversation((prev) => {
+        const current = prev[data.conversationId] ?? [];
+        const nextIds = data.isPinned
+          ? current.includes(data.messageId)
+            ? current
+            : [data.messageId, ...current]
+          : current.filter((id) => id !== data.messageId);
+
+        if (nextIds.length === 0) {
+          const next = { ...prev };
+          delete next[data.conversationId];
+          return next;
+        }
+
+        return {
+          ...prev,
+          [data.conversationId]: nextIds,
+        };
+      });
+    };
+
+    socket.on("message_pin_updated", handleMessagePinUpdated);
+    return () => {
+      socket.off("message_pin_updated", handleMessagePinUpdated);
+    };
+  }, [socket]);
 
   /* ───── Handle conversation_created: show passcode to recipient ───── */
   useEffect(() => {
@@ -1635,6 +2390,7 @@ function App() {
   const buildConvContextMenuItems = (conv: Conversation): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
     const isArchived = archivedConvIds.has(conv.id);
+    const isPinned = pinnedConvIds.has(conv.id);
     const isLocked = conv.passcodeEnabled && !chatLock.isUnlocked(conv.id);
 
     // Re-lock
@@ -1648,6 +2404,22 @@ function App() {
         onClick: () => chatLock.lock(conv.id),
       });
     }
+
+    items.push({
+      type: "item",
+      label: isPinned ? "Unpin chat" : "Pin chat",
+      icon: (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 3l7 7-4 1-2 7-4-4-7 2 2-7-4-4 7-2 1-4z" />
+        </svg>
+      ),
+      onClick: () => {
+        const next = new Set(pinnedConvIds);
+        if (isPinned) next.delete(conv.id);
+        else next.add(conv.id);
+        persistPinned(next);
+      },
+    });
 
     // Archive / Unarchive
     items.push({
@@ -1679,6 +2451,7 @@ function App() {
     <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
       {conversationList.map((conv) => {
         const isSelected = conv.id === selectedConvId;
+        const isPinned = pinnedConvIds.has(conv.id);
         const otherMember = conv.members.find((m) => m.user.id !== user?.id);
         const otherUserId = otherMember?.user.id ?? "";
         const otherUsername = otherMember?.user.username ?? "dm";
@@ -1744,6 +2517,11 @@ function App() {
                   </svg>
                 )}
                 <p className="truncate text-sm font-semibold">@{displayName}</p>
+                {isPinned && (
+                  <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                    Pinned
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {unreadCount > 0 && (
@@ -1772,6 +2550,32 @@ function App() {
     setMainView("chat");
     setNavTab("dm");
 
+    const existingDm = conversations.find(
+      (conversation) =>
+        conversation.type === "dm" &&
+        conversation.members.some((member) => member.user.id === targetUser.id),
+    );
+
+    if (existingDm) {
+      if (archivedConvIds.has(existingDm.id)) {
+        const next = new Set(archivedConvIds);
+        next.delete(existingDm.id);
+        persistArchived(next);
+      }
+
+      setSelectedConvId(existingDm.id);
+      setMainView("chat");
+      setSearch("");
+      setSearchResults([]);
+
+      if (!existingDm.passcodeEnabled) {
+        chatLock.unlock(existingDm.id, existingDm.lockMode, existingDm.lockTimeoutSeconds);
+      }
+
+      await ensureConversationSecretKey({ conversation: existingDm, token, myUserId: user.id });
+      return;
+    }
+
     try {
       const { publicKey: myPublicKey } = await ensureDeviceKeypair(user.id, token);
       const otherKeys = await api.getUserKeys(targetUser.id, token);
@@ -1792,33 +2596,31 @@ function App() {
       const mergedConversations = [conv, ...conversations.filter((existingConv) => existingConv.id !== conv.id)];
       setConversations(mergedConversations);
 
-      // Keep exactly one active DM thread per user: unarchive the selected DM, archive older duplicates.
-      const dmThreadsWithTarget = mergedConversations.filter(
-        (c) => c.type === "dm" && c.members.some((m) => m.user.id === targetUser.id)
-      );
-      const nextArchived = new Set(archivedConvIds);
-      nextArchived.delete(conv.id);
-      for (const thread of dmThreadsWithTarget) {
-        if (thread.id !== conv.id) {
-          nextArchived.add(thread.id);
-        }
+      // Ensure the selected DM remains visible.
+      if (archivedConvIds.has(conv.id)) {
+        const next = new Set(archivedConvIds);
+        next.delete(conv.id);
+        persistArchived(next);
       }
-      persistArchived(nextArchived);
 
       setSelectedConvId(conv.id);
       setMainView("chat");
       setSearch("");
       setSearchResults([]);
 
-      // Existing DM returned — just navigate, no passcode
+      // Existing DM returned. Respect lock state for passcode-protected chats.
       if (conv.created === false) {
-        chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+        if (!conv.passcodeEnabled) {
+          chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+        }
         await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
         return;
       }
 
-      // Newly created DM — no passcode for DMs, just auto-unlock
-      chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      // Newly created DM: auto-unlock only if passcode is not enabled.
+      if (!conv.passcodeEnabled) {
+        chatLock.unlock(conv.id, conv.lockMode, conv.lockTimeoutSeconds);
+      }
 
       await ensureConversationSecretKey({ conversation: conv, token, myUserId: user.id });
     } catch {
@@ -2006,6 +2808,200 @@ function App() {
     setPendingFiles((prev) => [...prev, ...accepted]);
   };
 
+  const handleToggleReaction = (messageId: string, reactionInput: string) => {
+    if (!socket || !selectedConvId) return;
+    const emoji = resolveReactionInput(reactionInput);
+    if (!emoji) return;
+    socket.emit("toggle_reaction", { messageId, emoji, conversationId: selectedConvId });
+  };
+
+  const handleQuickReply = (messageId: string) => {
+    setReplyTargetMessageId(messageId);
+    messageInputRef.current?.focus();
+  };
+
+  const applyMentionCandidate = useCallback((username: string) => {
+    if (!mentionAutocomplete) return;
+    const mentionText = `@${username} `;
+    const nextDraft =
+      `${messageDraft.slice(0, mentionAutocomplete.start)}${mentionText}${messageDraft.slice(mentionAutocomplete.end)}`;
+    const nextCursor = mentionAutocomplete.start + mentionText.length;
+    onMessageDraftChange(nextDraft, nextCursor);
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }, [mentionAutocomplete, messageDraft, onMessageDraftChange]);
+
+  useEffect(() => {
+    if (!mentionCandidates.length) {
+      if (mentionAutocomplete) setMentionActiveIndex(0);
+      return;
+    }
+    if (mentionActiveIndex >= mentionCandidates.length) {
+      setMentionActiveIndex(mentionCandidates.length - 1);
+    }
+  }, [mentionActiveIndex, mentionAutocomplete, mentionCandidates.length]);
+
+  const jumpToMessage = useCallback((messageId: string) => {
+    const element = messageElementRefs.current[messageId];
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (typeof element.animate === "function") {
+      element.animate(
+        [
+          { transform: "translateY(0)", offset: 0 },
+          { transform: "translateY(-2px)", offset: 0.45 },
+          { transform: "translateY(0)", offset: 1 },
+        ],
+        { duration: 380, easing: "ease-out" }
+      );
+    }
+    setFocusedSearchMessageId(messageId);
+    if (searchFocusTimeoutRef.current !== null) {
+      window.clearTimeout(searchFocusTimeoutRef.current);
+    }
+    searchFocusTimeoutRef.current = window.setTimeout(() => {
+      setFocusedSearchMessageId((prev) => (prev === messageId ? null : prev));
+      searchFocusTimeoutRef.current = null;
+    }, 3200);
+  }, []);
+
+  const scrollMainTimelineToBottom = useCallback((behavior: ScrollBehavior = "smooth", extraOffset = 36) => {
+    const list = messageListRef.current;
+    if (!list) return;
+    list.scrollTo({ top: list.scrollHeight + extraOffset, behavior });
+  }, []);
+
+  useEffect(() => {
+    if (!pendingSendScrollRef.current) return;
+    pendingSendScrollRef.current = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollMainTimelineToBottom("smooth", 56);
+      });
+    });
+  }, [messages.length, scrollMainTimelineToBottom]);
+
+  const updatePinnedMessageIds = useCallback((conversationId: string, nextIds: string[]) => {
+    setPinnedMessageIdsByConversation((prev) => {
+      const next = { ...prev };
+      if (nextIds.length === 0) {
+        delete next[conversationId];
+      } else {
+        next[conversationId] = nextIds;
+      }
+      return next;
+    });
+  }, []);
+
+  const togglePinnedMessage = useCallback((conversationId: string, messageId: string) => {
+    const current = pinnedMessageIdsByConversation[conversationId] ?? [];
+    const alreadyPinned = current.includes(messageId);
+    const next = alreadyPinned
+      ? current.filter((id) => id !== messageId)
+      : [messageId, ...current];
+    updatePinnedMessageIds(conversationId, next);
+    socket?.emit("toggle_message_pin", { conversationId, messageId });
+  }, [pinnedMessageIdsByConversation, socket, updatePinnedMessageIds]);
+
+  const handlePingMessageAuthor = (username: string) => {
+    const mention = `@${username} `;
+    setMessageDraft((prev) => {
+      if (prev.startsWith(mention)) return prev;
+      return `${mention}${prev}`;
+    });
+    messageInputRef.current?.focus();
+  };
+
+  const openThreadView = (messageId: string) => {
+    const message = messageById.get(messageId);
+    const rootId = message?.parentMessageId ?? messageId;
+    setThreadRootMessageId(rootId);
+    setReplyTargetMessageId(rootId);
+    messageInputRef.current?.focus();
+  };
+
+  const buildMessageContextMenuItems = (message: (typeof messages)[number], senderLabel: string): ContextMenuItem[] => {
+    const isPinnedMessage = selectedConversation
+      ? (pinnedMessageIdsByConversation[selectedConversation.id] ?? []).includes(message.id)
+      : false;
+
+    const items: ContextMenuItem[] = [
+      {
+        type: "item",
+        label: `Reply to ${senderLabel}`,
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 17l-5-5 5-5" />
+            <path d="M5 12h9a4 4 0 0 1 4 4v3" />
+          </svg>
+        ),
+        onClick: () => handleQuickReply(message.id),
+      },
+      {
+        type: "item",
+        label: `Open thread`,
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 6h14" />
+            <path d="M5 12h10" />
+            <path d="M5 18h6" />
+          </svg>
+        ),
+        onClick: () => openThreadView(message.id),
+      },
+      {
+        type: "item",
+        label: isPinnedMessage ? "Unpin message" : "Pin message",
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 3l7 7-4 1-2 7-4-4-7 2 2-7-4-4 7-2 1-4z" />
+          </svg>
+        ),
+        disabled: !selectedConversation,
+        onClick: () => {
+          if (!selectedConversation) return;
+          togglePinnedMessage(selectedConversation.id, message.id);
+        },
+      },
+    ];
+
+    if (message.senderId !== user?.id) {
+      items.splice(1, 0, {
+        type: "item",
+        label: `Ping @${message.sender}`,
+        icon: (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M16 4v5a2 2 0 0 0 2 2h3" />
+            <path d="M5 20h14" />
+            <path d="M7 20V8a4 4 0 0 1 4-4h5" />
+          </svg>
+        ),
+        onClick: () => handlePingMessageAuthor(message.sender),
+      });
+    }
+
+    items.push({ type: "separator" });
+    for (const emoji of QUICK_REACTION_EMOJIS) {
+      items.push({
+        type: "item",
+        label: `React ${emoji}`,
+        icon: <span className="text-sm leading-none">{emoji}</span>,
+        onClick: () => handleToggleReaction(message.id, emoji),
+      });
+    }
+
+    items.push({
+      type: "item",
+      label: "View all reactions",
+      disabled: (message.reactions?.length ?? 0) === 0,
+      onClick: () => setReactionModalMessageId(message.id),
+    });
+
+    return items;
+  };
+
   /* ───── Send message over socket ───── */
   const handleSendMessage = async () => {
     const draft = messageDraft.trim();
@@ -2102,15 +3098,24 @@ function App() {
         conversationId: selectedConvId,
         ciphertext: cipherText,
         nonce,
+        parentMessageId: activeReplyParentMessageId ?? undefined,
         keyVersion: getConversationKeyVersion(selectedConvId) ?? 1,
         mediaIds,
         type: attachments.length ? "media" : "text",
       });
+      pendingSendScrollRef.current = true;
+
+      emitTypingStop(selectedConvId);
 
       setMessageDraft("");
+      setMentionAutocomplete(null);
+      setMentionActiveIndex(0);
       setPendingFiles([]);
       setPendingGifs([]);
       setMessageSendError(null);
+      if (!threadRootMessageId) {
+        setReplyTargetMessageId(null);
+      }
       for (const key of usedCacheKeys) {
         delete uploadedAttachmentCacheRef.current[key];
       }
@@ -2127,6 +3132,17 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
+        <UpdateBanner
+          updateStatus={updateStatus}
+          installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+          onInstall={() => {
+            if (isMacPlatform) {
+              void window.electronAPI?.openReleasesPage();
+              return;
+            }
+            void window.electronAPI?.quitAndInstallUpdate();
+          }}
+        />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-md rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
@@ -2178,6 +3194,17 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
+        <UpdateBanner
+          updateStatus={updateStatus}
+          installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+          onInstall={() => {
+            if (isMacPlatform) {
+              void window.electronAPI?.openReleasesPage();
+              return;
+            }
+            void window.electronAPI?.quitAndInstallUpdate();
+          }}
+        />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-lg rounded-3xl p-8">
           <div className="mb-2 flex items-center gap-2">
@@ -2229,6 +3256,17 @@ function App() {
     return (
       <div className="relative flex min-h-screen flex-col overflow-y-auto bg-gradient-to-br from-orbit-bg via-orbit-panelAlt to-orbit-panel text-orbit-text">
         <TitleBar />
+        <UpdateBanner
+          updateStatus={updateStatus}
+          installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+          onInstall={() => {
+            if (isMacPlatform) {
+              void window.electronAPI?.openReleasesPage();
+              return;
+            }
+            void window.electronAPI?.quitAndInstallUpdate();
+          }}
+        />
         <div className="flex flex-1 items-start justify-center p-6 sm:items-center">
         <section className="orbit-card relative z-10 w-full max-w-5xl rounded-3xl p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr]">
@@ -2398,6 +3436,17 @@ function App() {
   return (
     <div className="orbit-shell">
       <TitleBar />
+      <UpdateBanner
+        updateStatus={updateStatus}
+        installLabel={isMacPlatform ? "Download Update" : "Restart & Install"}
+        onInstall={() => {
+          if (isMacPlatform) {
+            void window.electronAPI?.openReleasesPage();
+            return;
+          }
+          void window.electronAPI?.quitAndInstallUpdate();
+        }}
+      />
       <div className="grid h-full grid-cols-[68px_300px_1fr]">
         {/* ───── Left icon rail ───── */}
         <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#141822] p-2">
@@ -2845,7 +3894,7 @@ function App() {
                 <span className="text-xs text-orbit-muted">{archivedConversations.length}</span>
               </div>
 
-              <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
+              <div className="mt-2 space-y-2">
                 {archivedConversations.map((conv) => {
                   const otherMember = conv.members.find((m) => m.user.id !== user.id);
                   const otherUserId = otherMember?.user.id ?? "";
@@ -2855,6 +3904,7 @@ function App() {
                     conv.type === "dm"
                       ? (conv.name?.trim() ? conv.name.trim() : `${otherUsername}#${shortConversationId(conv.id)}`)
                       : conv.name ?? "Group";
+
                   return (
                     <div key={conv.id} className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#202533] p-3">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text">
@@ -3145,9 +4195,35 @@ function App() {
                 >
                   @{dmPartnerName}
                 </button>
-                <p className="text-xs text-orbit-muted">Direct encrypted chat</p>
+                <p className={`text-xs ${typingDisplayNames.length ? "text-orbit-accent" : "text-orbit-muted"}`}>
+                  {typingDisplayNames.length
+                    ? `${typingDisplayNames.length === 1 ? typingDisplayNames[0] : `${typingDisplayNames.length} people`} typing...`
+                    : "Direct encrypted chat"}
+                </p>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  className={`orbit-btn h-9 px-2.5 text-xs ${isSearchPopupOpen ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                  onClick={() => {
+                    setHoveredMessageId(null);
+                    setActiveTimelinePopup((prev) => (prev === "search" ? null : "search"));
+                  }}
+                  aria-label="Search messages"
+                  title="Search messages"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="M20 20l-3.5-3.5" />
+                    </svg>
+                    Search
+                    {activeMessageSearchQuery && (
+                      <span className="rounded-full border border-orbit-accent/45 bg-orbit-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                        {Math.min(messageSearchResults.length, 99)}
+                      </span>
+                    )}
+                  </span>
+                </button>
                 {getConversationSecretKey(selectedConversation.id) ? (
                   <span className="rounded-full border border-orbit-accent/40 px-3 py-1 text-xs text-orbit-accent">E2E Encrypted</span>
                 ) : loadingByConversationId[selectedConversation.id] ? (
@@ -3155,15 +4231,142 @@ function App() {
                 ) : (
                   <span className="rounded-full border border-orbit-danger/40 px-3 py-1 text-xs text-orbit-danger">Encryption unavailable</span>
                 )}
+                <div className="relative">
+                  <button
+                    className={`orbit-btn h-9 px-2.5 text-xs ${isPinsPopupOpen ? "border-orbit-accent/50 text-orbit-accent" : ""}`}
+                    onClick={() => {
+                      setHoveredMessageId(null);
+                      setActiveTimelinePopup((prev) => (prev === "pins" ? null : "pins"));
+                    }}
+                    aria-label="Pinned messages"
+                    title="Pinned messages"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M14 3l7 7-4 1-2 7-4-4-7 2 2-7-4-4 7-2 1-4z" />
+                      </svg>
+                      {pinnedMessagesForSelectedConversation.length}
+                    </span>
+                  </button>
+                </div>
+                {activeTimelinePopup && (
+                  <>
+                    <button
+                      className="fixed inset-0 z-20 cursor-default bg-transparent"
+                      onClick={() => setActiveTimelinePopup(null)}
+                      aria-label="Close popup"
+                    />
+                    <div
+                      className="absolute right-[7.5rem] top-[calc(100%+8px)] z-30 max-h-[min(70vh,30rem)] w-[min(34rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-[#1c2030]/95 shadow-xl shadow-black/50 backdrop-blur"
+                      onMouseEnter={() => setHoveredMessageId(null)}
+                    >
+                      {isSearchPopupOpen ? (
+                        <div className="flex max-h-[min(70vh,30rem)] flex-col">
+                          <div className="border-b border-white/10 p-3">
+                            <div className="mb-2 flex items-center justify-between">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">Search Messages</p>
+                              {activeMessageSearchQuery && (
+                                <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                                  {messageSearchResults.length} result{messageSearchResults.length === 1 ? "" : "s"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="relative">
+                              <input
+                                ref={messageSearchPopupInputRef}
+                                className="orbit-input h-10 pr-8 text-sm"
+                                value={messageSearch}
+                                onChange={(event) => setMessageSearch(event.target.value)}
+                                placeholder="Type to search this chat"
+                              />
+                              {messageSearch && (
+                                <button
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-orbit-muted hover:text-orbit-text"
+                                  onClick={() => setMessageSearch("")}
+                                  aria-label="Clear chat search"
+                                  title="Clear chat search"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="max-h-[24rem] overflow-y-auto p-2">
+                            {!activeMessageSearchQuery ? (
+                              <p className="px-3 py-2 text-xs text-orbit-muted">Type a keyword, username, or phrase to find a message.</p>
+                            ) : messageSearchResults.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-orbit-muted">No messages match.</p>
+                            ) : (
+                              messageSearchResults.slice(0, 16).map((result) => (
+                                <button
+                                  key={`search-result:${result.id}`}
+                                  className="group mb-1.5 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2.5 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
+                                  onClick={() => {
+                                    jumpToMessage(result.id);
+                                    setActiveTimelinePopup(null);
+                                  }}
+                                >
+                                  <div className="mb-1 flex items-center justify-between gap-2">
+                                    <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
+                                      {result.senderLabel} • {formatMessageTimestamp(result.createdAt)}
+                                    </p>
+                                    <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold text-slate-200">Jump</span>
+                                  </div>
+                                  <p className="line-clamp-2 text-xs text-slate-300">{result.preview}</p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="max-h-[min(70vh,30rem)] overflow-y-auto p-2">
+                          <div className="mb-2 flex items-center justify-between border-b border-white/10 px-2 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">Pinned Messages</p>
+                            <span className="rounded-full border border-orbit-accent/30 bg-orbit-accent/10 px-2 py-0.5 text-[10px] font-semibold text-orbit-accent">
+                              {pinnedMessagesForSelectedConversation.length}
+                            </span>
+                          </div>
+                          {pinnedMessagesForSelectedConversation.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-orbit-muted">No pinned messages in this chat.</p>
+                          ) : (
+                            pinnedMessagesForSelectedConversation.map((pinnedMessage) => (
+                              <button
+                                key={`pinned-message:${pinnedMessage.id}`}
+                                className="group mb-1.5 block w-full rounded-xl border border-transparent bg-white/[0.03] px-3 py-2.5 text-left transition hover:border-orbit-accent/40 hover:bg-orbit-accent/10"
+                                onClick={() => {
+                                  jumpToMessage(pinnedMessage.id);
+                                  setActiveTimelinePopup(null);
+                                }}
+                              >
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <p className="truncate text-[11px] font-semibold text-orbit-accent group-hover:text-[#5ff6df]">
+                                    {pinnedMessage.sender} • {formatMessageTimestamp(pinnedMessage.createdAt)}
+                                  </p>
+                                  <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold text-slate-200">Jump</span>
+                                </div>
+                                <p className="line-clamp-2 text-xs text-slate-300">{(messageSearchIndex[pinnedMessage.id] ?? "Encrypted message").trim() || "Encrypted message"}</p>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
                 <button
                   className="orbit-btn h-9 w-9 p-0"
                   onClick={() => {
+                    setHoveredMessageId(null);
+                    setActiveTimelinePopup(null);
                     setShowChatSettings(!showChatSettings);
                     if (!showChatSettings) {
+                      const realtimePref = chatRealtimePreferences[selectedConversation.id] ?? DEFAULT_CHAT_PREFERENCES;
                       setChatSettingsName(selectedConversation.name ?? "");
                       setChatSettingsLength(selectedConversation.passcodeLength);
                       setChatSettingsLockMode(selectedConversation.lockMode);
                       setChatSettingsTimeout(selectedConversation.lockTimeoutSeconds?.toString() ?? "");
+                      setChatSettingsReadReceipts(realtimePref.readReceipts);
+                      setChatSettingsTypingIndicators(realtimePref.typingIndicators);
                       setChatSettingsPasscode("");
                       setChatSettingsError(null);
                     }
@@ -3179,72 +4382,259 @@ function App() {
               </div>
             </header>
 
-            <section className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
-              {messages.length === 0 && (
-                <p className="text-sm text-orbit-muted">No messages yet. Send your first encrypted payload.</p>
-              )}
-              {messages.map((msg) => {
-                const mine = msg.sender === user.username;
-                const senderProfile = profileById[msg.senderId] ?? null;
-                const senderLabel = senderProfile?.displayName?.trim() || msg.sender;
-                const senderAvatar = senderProfile?.avatarUrl ?? null;
-                const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
-                return (
-                  <article
-                    key={msg.id}
-                    className={`flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
-                  >
-                    <button
-                      className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text"
-                      onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
-                      aria-label={`Open profile for ${senderLabel}`}
-                      title={senderLabel}
-                    >
-                      {senderAvatar ? (
-                        <img src={senderAvatar} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <span className="flex h-full w-full items-center justify-center">{senderInitial}</span>
-                      )}
-                    </button>
+            <div className="flex min-h-0 flex-1">
+              <section
+                ref={messageListRef}
+                className={`space-y-2 overflow-y-auto px-3 py-2 ${threadRootMessage ? "w-[65%] border-r border-white/10" : "w-full"}`}
+              >
+                {visibleMessages.length === 0 && (
+                  <p className="text-sm text-orbit-muted">
+                    No messages yet. Send your first encrypted payload.
+                  </p>
+                )}
+                {visibleMessages.map((msg) => {
+                  const mine = msg.sender === user.username;
+                  const senderProfile = profileById[msg.senderId] ?? null;
+                  const senderLabel = senderProfile?.displayName?.trim() || msg.sender;
+                  const senderAvatar = senderProfile?.avatarUrl ?? null;
+                  const senderInitial = senderLabel.trim()?.[0]?.toUpperCase() ?? msg.sender[0]?.toUpperCase() ?? "?";
+                  const parentMessage = msg.parentMessageId ? messageById.get(msg.parentMessageId) ?? null : null;
+                  const threadReplyCount = messages.filter((candidate) => candidate.parentMessageId === msg.id).length;
+                  const menusOpen = Boolean(activeTimelinePopup) || showChatSettings;
+                  const quickActionsVisible = hoveredMessageId === msg.id && !menusOpen;
+                  const isPingedMessage = !mine && hasHandleMention(messageSearchIndex[msg.id] ?? "", user?.username);
+                  const isPinnedMessage = pinnedMessageIdsForSelectedConversation.includes(msg.id);
+                  const seenByOthers = (seenByMessageId[msg.id] ?? []).filter((seenUserId) => seenUserId !== user.id);
 
-                    <div
-                      className={`min-w-0 rounded-xl border px-3 py-2 text-[13px] leading-snug shadow-sm ${
-                        mine
-                          ? "border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
-                          : "border-white/10 bg-[#202533]"
-                      }`}
+                  return (
+                    <article
+                      ref={(node) => {
+                        messageElementRefs.current[msg.id] = node;
+                      }}
+                      key={msg.id}
+                      className={`group relative flex max-w-[82%] items-end gap-2 ${mine ? "ml-auto flex-row-reverse" : ""}`}
+                      onContextMenu={(e) => ctxMenu.show(e, buildMessageContextMenuItems(msg, senderLabel))}
                     >
-                      <div className="flex items-center gap-2">
-                        <button
-                          className="max-w-[180px] truncate text-[11px] font-semibold text-orbit-accent hover:underline"
-                          onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
-                        >
-                          {mine ? "You" : senderLabel}
-                        </button>
-                        <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
-                      </div>
-                      <div className="mt-1">
-                        {typeof msg.keyVersion === "number" && msg.keyVersion < myMinReadableKeyVersion ? (
-                          <p className="break-words text-orbit-muted">
-                            Encrypted message unavailable (sent before you joined this key version).
-                          </p>
+                      <button
+                        className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt text-[11px] font-semibold text-orbit-text"
+                        onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                        aria-label={`Open profile for ${senderLabel}`}
+                        title={senderLabel}
+                      >
+                        {senderAvatar ? (
+                          <img src={senderAvatar} alt="" className="h-full w-full object-cover" />
                         ) : (
+                          <span className="flex h-full w-full items-center justify-center">{senderInitial}</span>
+                        )}
+                      </button>
+
+                      <div
+                        className={`min-w-0 rounded-xl border px-3 py-2 text-[13px] leading-snug shadow-sm ${
+                          mine
+                            ? "border-orbit-accent/20 bg-orbit-accent/15 shadow-[0_8px_20px_rgba(18,201,180,0.12)]"
+                            : isPingedMessage
+                              ? "border-amber-300/45 bg-amber-300/10"
+                              : "border-white/10 bg-[#202533]"
+                        } ${focusedSearchMessageId === msg.id ? "ring-2 ring-orbit-accent/60" : ""}`}
+                        onMouseEnter={() => setHoveredMessageId(msg.id)}
+                        onMouseLeave={() => setHoveredMessageId((prev) => (prev === msg.id ? null : prev))}
+                      >
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="max-w-[180px] truncate text-[11px] font-semibold text-orbit-accent hover:underline"
+                            onClick={(e) => openProfilePopover(msg.senderId, e.currentTarget)}
+                          >
+                            {mine ? "You" : senderLabel}
+                          </button>
+                          <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(msg.createdAt)}</span>
+                          {isPingedMessage && (
+                            <span className="rounded-full border border-amber-300/60 bg-amber-300/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200">
+                              Ping
+                            </span>
+                          )}
+                          {isPinnedMessage && (
+                            <span className="rounded-full border border-orbit-accent/40 bg-orbit-accent/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-orbit-accent">
+                              Pinned
+                            </span>
+                          )}
+                        </div>
+
+                        {parentMessage && (
+                          <button
+                            className="mt-1 flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-left text-[11px] text-orbit-muted hover:border-white/20"
+                            onClick={() => openThreadView(parentMessage.id)}
+                          >
+                            <span className="font-semibold text-orbit-accent">Replying to {parentMessage.sender}</span>
+                            <span className="truncate">in thread</span>
+                          </button>
+                        )}
+
+                        <div className="mt-1">
+                          {typeof msg.keyVersion === "number" && msg.keyVersion < myMinReadableKeyVersion ? (
+                            <p className="break-words text-orbit-muted">
+                              Encrypted message unavailable (sent before you joined this key version).
+                            </p>
+                          ) : (
+                            <DecryptedMessageBody
+                              conversationId={selectedConversation.id}
+                              token={token}
+                              cipherText={msg.cipherText}
+                              nonce={msg.nonce}
+                              keyVersion={msg.keyVersion}
+                              currentUsername={user.username}
+                            />
+                          )}
+                        </div>
+
+                        {(msg.reactions ?? []).length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {(msg.reactions ?? []).map((reaction) => {
+                              const active = reaction.userIds.includes(user.id);
+                              return (
+                                <button
+                                  key={`${msg.id}:${reaction.emoji}`}
+                                  onClick={() => handleToggleReaction(msg.id, reaction.emoji)}
+                                >
+                                  {reaction.emoji} {reaction.count}
+                                </button>
+                              );
+                            })}
+                            <button
+                              className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[11px] text-orbit-muted hover:border-white/20 hover:text-orbit-text"
+                              onClick={() => setReactionModalMessageId(msg.id)}
+                              aria-label="Message options"
+                              title="Message options"
+                            >
+                              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+                                <circle cx="5" cy="12" r="1.8" />
+                                <circle cx="12" cy="12" r="1.8" />
+                                <circle cx="19" cy="12" r="1.8" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+
+                        {threadReplyCount > 0 && (
+                          <button
+                            className="mt-2 text-[11px] text-orbit-muted hover:text-orbit-accent"
+                            onClick={() => openThreadView(msg.id)}
+                          >
+                            {threadReplyCount} {threadReplyCount === 1 ? "reply" : "replies"} in thread
+                          </button>
+                        )}
+
+                        {mine && seenByOthers.length > 0 && (
+                          <div className="mt-1 flex justify-end">
+                            <p className="inline-flex items-center gap-1 rounded-full border border-emerald-300/35 bg-emerald-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
+                              <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M20 6L9 17l-5-5" />
+                              </svg>
+                              Seen by {seenByOthers.length}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {quickActionsVisible && (
+                        <div className={`absolute -top-3 flex items-center gap-1 rounded-full border border-white/10 bg-orbit-panelAlt px-1.5 py-1 shadow-lg ${mine ? "right-10" : "left-10"}`}>
+                          {QUICK_REACTION_EMOJIS.map((emoji) => (
+                            <button
+                              key={`${msg.id}:quick:${emoji}`}
+                              className="rounded-full px-1.5 py-0.5 text-sm hover:bg-white/10"
+                              onClick={() => handleToggleReaction(msg.id, emoji)}
+                              title={`React ${emoji}`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                          <button
+                            className="rounded-full px-2 py-0.5 text-[11px] text-orbit-muted hover:bg-white/10 hover:text-orbit-text"
+                            onClick={() => handleQuickReply(msg.id)}
+                            title="Quick reply"
+                          >
+                            Reply
+                          </button>
+                          <button
+                            className="rounded-full px-2 py-0.5 text-[11px] text-orbit-muted hover:bg-white/10 hover:text-orbit-text"
+                            onClick={() => openThreadView(msg.id)}
+                            title="Open thread"
+                          >
+                            Thread
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </section>
+
+              {threadRootMessage && (
+                <aside className="flex w-[35%] min-w-[280px] flex-col bg-[#171b27]/80">
+                  <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Thread</p>
+                      <p className="text-xs text-orbit-muted">{threadMessages.length - 1} replies</p>
+                    </div>
+                    <button
+                      className="orbit-btn px-2 py-1 text-xs"
+                      onClick={() => {
+                        setThreadRootMessageId(null);
+                        setReplyTargetMessageId(null);
+                      }}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
+                    {threadMessages.map((threadMessage) => (
+                      <div key={`thread:${threadMessage.id}`} className="rounded-lg border border-white/10 bg-orbit-panelAlt px-2.5 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-orbit-accent">{threadMessage.sender}</span>
+                          <span className="text-[10px] uppercase tracking-wide text-orbit-muted">{formatMessageTimestamp(threadMessage.createdAt)}</span>
+                        </div>
+                        <div className="mt-1 text-xs">
                           <DecryptedMessageBody
                             conversationId={selectedConversation.id}
                             token={token}
-                            cipherText={msg.cipherText}
-                            nonce={msg.nonce}
-                            keyVersion={msg.keyVersion}
+                            cipherText={threadMessage.cipherText}
+                            nonce={threadMessage.nonce}
+                            keyVersion={threadMessage.keyVersion}
+                            currentUsername={user.username}
                           />
-                        )}
+                        </div>
                       </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </section>
+                    ))}
+                  </div>
+                </aside>
+              )}
+            </div>
 
             <footer className="border-t border-white/10 bg-[#1b2030]/90 px-3 py-2 backdrop-blur">
+              {(activeReplyParentMessageId || threadRootMessage) && (
+                <div className="mb-2 flex items-center justify-between rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-orbit-accent">
+                      {threadRootMessage ? "Replying in thread" : "Quick reply"}
+                    </p>
+                    <p className="truncate text-[11px] text-orbit-muted">
+                      {activeReplyParentMessageId ? `Linked to message ${activeReplyParentMessageId.slice(0, 8)}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    className="orbit-btn px-2 py-1 text-xs"
+                    onClick={() => {
+                      if (threadRootMessage) {
+                        setThreadRootMessageId(null);
+                      }
+                      setReplyTargetMessageId(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
               {(pendingFiles.length > 0 || pendingGifs.length > 0) && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, idx) => (
@@ -3514,13 +4904,56 @@ function App() {
                 <p className="mb-2 text-xs text-rose-300">{messageSendError}</p>
               )}
 
+              {mentionAutocomplete && mentionCandidates.length > 0 && (
+                <div className="mb-2 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-orbit-panelAlt p-1.5">
+                  {mentionCandidates.map((username, idx) => {
+                    const active = idx === mentionActiveIndex;
+                    return (
+                      <button
+                        key={`mention:${username}`}
+                        className={`block w-full rounded-md px-2 py-1.5 text-left text-xs transition ${active ? "bg-orbit-accent/20 text-orbit-accent" : "text-slate-200 hover:bg-white/10"}`}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          applyMentionCandidate(username);
+                        }}
+                      >
+                        @{username}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="flex gap-1.5">
                 <input
                   ref={messageInputRef}
                   className="orbit-input h-9 flex-1 px-3 text-sm"
                   value={messageDraft}
-                  onChange={(event) => setMessageDraft(event.target.value)}
+                  onChange={(event) => onMessageDraftChange(event.target.value, event.target.selectionStart ?? undefined)}
                   onKeyDown={(event) => {
+                    if (mentionAutocomplete && mentionCandidates.length > 0) {
+                      if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        setMentionActiveIndex((prev) => (prev + 1) % mentionCandidates.length);
+                        return;
+                      }
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setMentionActiveIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+                        return;
+                      }
+                      if (event.key === "Enter" || event.key === "Tab") {
+                        event.preventDefault();
+                        const selected = mentionCandidates[mentionActiveIndex] ?? mentionCandidates[0];
+                        if (selected) applyMentionCandidate(selected);
+                        return;
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setMentionAutocomplete(null);
+                        return;
+                      }
+                    }
                     if (event.key === "Enter") {
                       event.preventDefault();
                       void handleSendMessage();
@@ -3542,13 +4975,10 @@ function App() {
 
           {showChatSettings && selectedConversation && (
             <div
-              className="orbit-modal-overlay"
-              onClick={() => {
-                if (!chatSettingsSaving) setShowChatSettings(false);
-              }}
+              className="orbit-modal-overlay pointer-events-none"
             >
               <div
-                className="orbit-modal"
+                className="orbit-modal pointer-events-auto"
                 onClick={(event) => event.stopPropagation()}
                 role="dialog"
                 aria-modal="true"
@@ -3630,6 +5060,37 @@ function App() {
                         <option value="after_inactivity">After Inactivity</option>
                       </select>
                     </label>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-orbit-panelAlt/70 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Realtime</p>
+                    <div className="space-y-2">
+                      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-orbit-panel px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={chatSettingsReadReceipts}
+                          onChange={(e) => setChatSettingsReadReceipts(e.target.checked)}
+                          className="h-4 w-4 accent-orbit-accent"
+                        />
+                        <div>
+                          <p className="text-sm text-slate-200">Send read receipts</p>
+                          <p className="text-[11px] text-orbit-muted">When enabled, your client sends "seen" updates for this chat.</p>
+                        </div>
+                      </label>
+
+                      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-orbit-panel px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={chatSettingsTypingIndicators}
+                          onChange={(e) => setChatSettingsTypingIndicators(e.target.checked)}
+                          className="h-4 w-4 accent-orbit-accent"
+                        />
+                        <div>
+                          <p className="text-sm text-slate-200">Show typing indicators</p>
+                          <p className="text-[11px] text-orbit-muted">When disabled, you won’t send or display typing activity for this chat.</p>
+                        </div>
+                      </label>
+                    </div>
                   </div>
 
                   {(chatSettingsLockMode === "after_time" || chatSettingsLockMode === "after_inactivity") && (
@@ -3919,6 +5380,17 @@ function App() {
                           }
                           const updated = await api.updateChatSettings(selectedConversation.id, data, token);
                           setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                          setRealtimePreferencesForConversation(selectedConversation.id, {
+                            readReceipts: chatSettingsReadReceipts,
+                            typingIndicators: chatSettingsTypingIndicators,
+                          });
+                          if (!chatSettingsTypingIndicators) {
+                            emitTypingStop(selectedConversation.id);
+                            setTypingByConversation((prev) => {
+                              const { [selectedConversation.id]: _removed, ...rest } = prev;
+                              return rest;
+                            });
+                          }
                           chatLock.unlock(updated.id, updated.lockMode, updated.lockTimeoutSeconds);
                           setShowChatSettings(false);
                         } catch (err: any) {
@@ -4202,6 +5674,94 @@ function App() {
             setSelectedConvId(null);
           }}
         />
+
+        {reactionModalMessageId && (
+          <div className="orbit-modal-overlay" onClick={() => setReactionModalMessageId(null)}>
+            <div
+              className="orbit-modal max-w-lg"
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Message reactions"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-bold text-orbit-text">Reactions</h3>
+                  <p className="mt-1 text-xs text-orbit-muted">See who reacted to this message and add more reactions.</p>
+                </div>
+                <button className="orbit-btn px-2 py-1 text-xs" onClick={() => setReactionModalMessageId(null)}>Close</button>
+              </div>
+
+              {reactionModalMessage ? (
+                <>
+                  <div className="mt-3 rounded-lg border border-white/10 bg-orbit-panelAlt px-3 py-2">
+                    <p className="text-xs text-orbit-muted">Add reaction</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {REACTION_EMOJI_CATALOG.map((reaction) => (
+                        <button
+                          key={`modal:add:${reaction.name}`}
+                          className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-sm hover:border-orbit-accent/40"
+                          title={`:${reaction.name}:`}
+                          onClick={() => handleToggleReaction(reactionModalMessage.id, reaction.emoji)}
+                        >
+                          {reaction.emoji}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        className="orbit-input h-9 flex-1 text-xs"
+                        value={reactionShortcodeInput}
+                        onChange={(event) => setReactionShortcodeInput(event.target.value)}
+                        placeholder=":thumbsup:"
+                      />
+                      <button
+                        className="orbit-btn-primary px-3 py-2 text-xs"
+                        onClick={() => handleToggleReaction(reactionModalMessage.id, reactionShortcodeInput)}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {(reactionModalMessage.reactions ?? []).length === 0 ? (
+                      <p className="text-xs text-orbit-muted">No reactions yet.</p>
+                    ) : (
+                      (reactionModalMessage.reactions ?? [])
+                        .slice()
+                        .sort((a, b) => b.count - a.count)
+                        .map((reaction) => (
+                          <div key={`modal:reaction:${reactionModalMessage.id}:${reaction.emoji}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-orbit-text">
+                                {reaction.emoji} <span className="text-orbit-muted">{reaction.count}</span>
+                              </p>
+                              <button
+                                className="orbit-btn px-2 py-1 text-[11px]"
+                                onClick={() => handleToggleReaction(reactionModalMessage.id, reaction.emoji)}
+                              >
+                                Toggle mine
+                              </button>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {reaction.userIds.map((reactUserId) => (
+                                <span key={`modal:user:${reaction.emoji}:${reactUserId}`} className="rounded-full border border-white/10 bg-orbit-panelAlt px-2 py-0.5 text-[11px] text-slate-200">
+                                  {getReactionUserLabel(reactUserId)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="mt-3 text-xs text-orbit-muted">Message not found.</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Context menu */}
         <ContextMenuPortal menu={ctxMenu.menu} onClose={ctxMenu.hide} />
