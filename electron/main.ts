@@ -5,6 +5,9 @@ import { autoUpdater } from "electron-updater";
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const appIcon = path.join(app.getAppPath(), "logo.png");
 const RELEASES_URL = "https://github.com/orbit-chat/orbit-chat/releases/latest";
+// Re-check for updates while the app stays open, so users are prompted
+// when a new GitHub release ships without needing to restart the app.
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 type UpdaterStatus =
   | "idle"
@@ -164,7 +167,13 @@ function setupAutoUpdater(mainWindow: BrowserWindow) {
     sendStatus({ status: "error", message: error?.message ?? "Auto-update failed." });
   });
 
-  void autoUpdater.checkForUpdates();
+  if (!isDev) {
+    autoUpdater.checkForUpdates().catch(() => {});
+    const recheck = setInterval(() => {
+      autoUpdater.checkForUpdates().catch(() => {});
+    }, UPDATE_CHECK_INTERVAL_MS);
+    mainWindow.on("closed", () => clearInterval(recheck));
+  }
 }
 
 // Helps notifications + taskbar grouping on Windows.

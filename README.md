@@ -2,7 +2,7 @@
 
 Orbit Chat is a desktop messaging app focused on private communication.
 
-Current desktop package version: `0.9.0`.
+Current desktop package version: `0.9.3`.
 
 This app is designed so message text in direct and group chats is end-to-end encrypted. The backend delivers and stores encrypted payloads, but does not hold the private keys needed to read message content.
 
@@ -43,6 +43,8 @@ Orbit Chat combines:
 - avatar rendering across DM and friends surfaces with initials fallback
 - frameless desktop shell with custom title bar window controls
 - local pinned chat ordering and local pinned-message persistence
+- in-app auto-update banner with download progress and restart-to-install prompt (GitHub Releases, checked at launch and hourly)
+- single-instance app lock with focus-existing-window behavior
 
 The desktop app talks to a separate backend service for identity, routing, persistence, and presence.
 
@@ -395,6 +397,7 @@ Server is not trusted for:
 - Pinned chats and pinned messages are currently local-only (localStorage) and are not synced across devices.
 - Very large desktop installers are currently distributed as direct release artifacts, which may require LFS/CDN strategy over time.
 - In-app desktop auto-update depends on signed GitHub Release assets and matching `latest.yml` / `latest-mac.yml` metadata from the release workflow.
+- The app checks for updates at launch and re-checks hourly while running; Windows downloads in the background and prompts "Restart to install", macOS prompts with a manual download link until signed/notarized in-place updates are enabled.
 - Current build config forces `libsodium-wrappers` to its CommonJS entry due to an upstream ESM packaging issue.
 
 ## CI/CD And Production Trust
