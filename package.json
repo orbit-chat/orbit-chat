@@ -36,7 +36,7 @@
     "electron": "^42.7.0",
     "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
-    "libsodium-wrappers": "^0.7.15",
+    "libsodium-wrappers": "^0.8.4",
     "postcss": "^8.5.19",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
