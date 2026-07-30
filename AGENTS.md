@@ -20,7 +20,19 @@ Use TypeScript and React function components. Keep two-space indentation, double
 
 ## Testing Guidelines
 
-There is no dedicated test runner configured yet. For now, every change should pass `npm run check`. For security-sensitive work, manually exercise signup/login, socket reconnect, message send/receive, E2EE decrypt, attachments, passcode locks, and updater UI where relevant. If tests are added later, place them beside the module or under a clear `tests` directory and document the new command here.
+Tests run on Vitest and are required by CI — a failing suite blocks the build.
+
+- `npm test`: run the suite once.
+- `npm run test:watch`: watch mode while developing.
+- `npm run check`: typecheck, then tests, then build. Every change should pass this.
+
+Place specs beside the code under test in a `__tests__` directory (see `src/lib/__tests__/crypto.test.ts`). Import `describe`/`it`/`expect` explicitly from `vitest` rather than relying on globals, so files typecheck under `tsconfig.app.json` with no extra configuration.
+
+`src/lib/__tests__/crypto.test.ts` is the highest-value file in the repo: it pins ciphertext integrity, key-version isolation, sealed-box targeting, and the chunked-attachment parser's handling of malformed input. Its negative cases matter more than its round-trips — a round-trip failure is obvious in the app, whereas silently accepting a tampered ciphertext is not. Any change to `src/lib/crypto.ts` needs coverage here.
+
+Tests default to the `node` environment; store tests that need `localStorage` or DOM APIs opt in with a `// @vitest-environment jsdom` pragma at the top of the file.
+
+For security-sensitive work, still manually exercise signup/login, socket reconnect, message send/receive, E2EE decrypt, attachments, passcode locks, and updater UI where relevant.
 
 ## Commit & Pull Request Guidelines
 
