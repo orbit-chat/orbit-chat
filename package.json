@@ -27,7 +27,7 @@
     "@hookform/resolvers": "^3.10.0",
     "@tanstack/react-query": "^5.67.3",
     "@types/libsodium-wrappers": "^0.7.14",
-    "@types/node": "^22.12.0",
+    "@types/node": "^26.1.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
