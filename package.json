@@ -42,7 +42,7 @@
     "react-dom": "^19.2.7",
     "react-hook-form": "^7.54.2",
     "socket.io-client": "^4.8.1",
-    "tailwindcss": "^3.4.17",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.7.3",
     "vite": "^8.1.5",
     "vite-plugin-electron": "^1.1.0",
