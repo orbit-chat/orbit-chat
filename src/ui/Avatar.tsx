@@ -31,7 +31,9 @@ export function Avatar({ name, src, size = "md", presence, className }: AvatarPr
   const initial = name.trim()[0]?.toUpperCase() ?? "?";
   return (
     <span className={cn("relative inline-flex shrink-0", className)}>
+      {/* Decorative: the name is always shown or labelled next to it, so the initial isn't read twice. */}
       <AvatarPrimitive.Root
+        aria-hidden="true"
         className={cn(
           "inline-flex items-center justify-center overflow-hidden rounded-full border border-white/10 bg-orbit-panelAlt font-semibold text-orbit-text",
           sizes[size]

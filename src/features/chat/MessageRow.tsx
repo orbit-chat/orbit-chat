@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Avatar, Tooltip, cn } from "../../ui";
+import { Avatar, Button, Tooltip, cn } from "../../ui";
 import { PinIcon, ReplyIcon } from "../../ui/icons";
 import type { ChatMessage } from "../../stores/messagesStore";
 import { useMessagesStore } from "../../stores/messagesStore";
@@ -8,7 +8,8 @@ import { searchableText } from "./envelope";
 import { MessageBody } from "./MessageBody";
 import { mentionsUser } from "./MessageText";
 import { messageTime, messageTimestampFull } from "./timeline";
-import { useDecryptedMessage } from "./useDecryptedMessage";
+import { useDecryptedMessage, type DecryptState } from "./useDecryptedMessage";
+import { useOutboxStore, type OutboxEntry } from "../composer/outboxStore";
 
 type MessageRowProps = {
   conversationId: string;
@@ -18,6 +19,8 @@ type MessageRowProps = {
   minReadableKeyVersion: number;
   highlighted: boolean;
   onJumpTo: (messageId: string) => void;
+  /** Set for a message still in the outbox (not yet confirmed by the server). */
+  pending?: OutboxEntry;
 };
 
 /**
@@ -31,12 +34,14 @@ export const MessageRow = memo(function MessageRow({
   me,
   minReadableKeyVersion,
   highlighted,
-  onJumpTo
+  onJumpTo,
+  pending
 }: MessageRowProps) {
   const mine = message.senderId === me.id;
   const profile = useProfilesStore((s) => s.byId[message.senderId]);
   const name = profile?.displayName?.trim() || message.sender;
-  const decrypted = useDecryptedMessage(conversationId, message);
+  const fetched = useDecryptedMessage(conversationId, message, !pending);
+  const decrypted: DecryptState = pending ? { status: "ok", envelope: pending.envelope } : fetched;
   const unreadableVersion = typeof message.keyVersion === "number" && message.keyVersion < minReadableKeyVersion;
   const pingsMe = !mine && decrypted.status === "ok" && mentionsUser(decrypted.envelope.text, me.username);
   const reactions = message.reactions ?? [];
@@ -70,7 +75,9 @@ export const MessageRow = memo(function MessageRow({
               "relative min-w-0 rounded-2xl border px-3 py-2 text-[13.5px] leading-relaxed text-orbit-text transition-shadow duration-300",
               mine ? "border-orbit-accent/20 bg-orbit-accent/15" : pingsMe ? "border-orbit-warning/40 bg-orbit-warning/10" : "border-white/[0.06] bg-orbit-bubble",
               mine ? (startsGroup ? "rounded-tr-md" : "rounded-r-md") : startsGroup ? "rounded-tl-md" : "rounded-l-md",
-              highlighted && "ring-2 ring-orbit-accent/70"
+              highlighted && "ring-2 ring-orbit-accent/70",
+              pending && pending.status !== "failed" && "opacity-70",
+              pending?.status === "failed" && "border-orbit-danger/50"
             )}
           >
             <MessageBody
@@ -84,6 +91,8 @@ export const MessageRow = memo(function MessageRow({
               <PinIcon className="absolute -right-1.5 -top-1.5 h-3.5 w-3.5 rounded-full bg-orbit-raised p-0.5 text-orbit-accent" aria-label="Pinned" />
             )}
           </div>
+
+          {pending && <PendingStatus entry={pending} />}
 
           {reactions.length > 0 && (
             <ul className={cn("mt-1 flex flex-wrap gap-1", mine && "justify-end")} aria-label="Reactions">
@@ -120,6 +129,30 @@ export const MessageRow = memo(function MessageRow({
     </div>
   );
 });
+
+/** Under a message that hasn't been confirmed: what's happening, or why it failed. */
+function PendingStatus({ entry }: { entry: OutboxEntry }) {
+  if (entry.status === "failed") {
+    return (
+      <div className="mt-1 flex flex-wrap items-center justify-end gap-2 text-[11px]" role="alert">
+        <span className="text-rose-300">{entry.error ?? "Not sent."}</span>
+        <Button size="sm" variant="ghost" className="h-6 px-2 text-orbit-accent" onClick={() => void useOutboxStore.getState().retry(entry.localId)}>
+          Retry
+        </Button>
+        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => useOutboxStore.getState().discard(entry.localId)}>
+          Discard
+        </Button>
+      </div>
+    );
+  }
+  const uploading = entry.files.length === 1 ? entry.files[0]!.name : `${entry.files.length} files`;
+  const label = entry.status === "sending" ? "Sending…" : entry.files.length ? `Encrypting and uploading ${uploading}…` : "Encrypting…";
+  return (
+    <p className="mt-1 text-[11px] text-orbit-muted" role="status">
+      {label}
+    </p>
+  );
+}
 
 /** "Replying to …" above a reply; jumps to the original when clicked. */
 function ReplyQuote({ conversationId, parentId, onJumpTo, mine }: { conversationId: string; parentId: string; onJumpTo: (id: string) => void; mine: boolean }) {

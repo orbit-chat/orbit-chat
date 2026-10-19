@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, cn } from "../../ui";
 import { useMessagesStore, type ChatMessage } from "../../stores/messagesStore";
+import { useOutboxStore, type OutboxEntry } from "../composer/outboxStore";
 import { useHistory, useHistoryStore } from "./historyStore";
 import { MessageRow } from "./MessageRow";
 import { buildTimeline, type TimelineItem } from "./timeline";
@@ -28,8 +29,25 @@ type MessageListProps = {
  * as you scroll up without the view jumping.
  */
 export function MessageList({ conversationId, me, minReadableKeyVersion, unreadAtOpen }: MessageListProps) {
-  const messages = useMessagesStore((s) => s.byConversation[conversationId] ?? EMPTY);
+  const stored = useMessagesStore((s) => s.byConversation[conversationId] ?? EMPTY);
+  const outbox = useOutboxStore((s) => s.entries);
   const history = useHistory(conversationId);
+
+  // Messages you sent that the server hasn't echoed yet go after everything else.
+  const { messages, pendingById } = useMemo(() => {
+    const pending = outbox.filter((e) => e.conversationId === conversationId);
+    if (!pending.length) return { messages: stored, pendingById: new Map<string, OutboxEntry>() };
+    const asMessages: ChatMessage[] = pending.map((e) => ({
+      id: e.localId,
+      senderId: me.id,
+      sender: me.username,
+      parentMessageId: e.parentMessageId,
+      cipherText: "",
+      createdAt: Math.max(e.createdAt, stored.at(-1)?.createdAt ?? 0)
+    }));
+    return { messages: [...stored, ...asMessages], pendingById: new Map(pending.map((e) => [e.localId, e])) };
+  }, [stored, outbox, conversationId, me.id, me.username]);
+
   const items = useMemo(() => buildTimeline(messages, { unreadCount: unreadAtOpen, myUserId: me.id }), [messages, unreadAtOpen, me.id]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -181,6 +199,7 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
                     minReadableKeyVersion={minReadableKeyVersion}
                     highlighted={highlightedId === item.message.id}
                     onJumpTo={jumpTo}
+                    pending={pendingById.get(item.message.id)}
                   />
                 )}
               </div>

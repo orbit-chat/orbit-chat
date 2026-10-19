@@ -290,8 +290,44 @@ lands with the passcode flows in Phase 6 (the data is already captured).
   scrolled up, "1 new message" pill. Smooth-scroll animations couldn't be watched there
   (the hidden pane produces no animation frames).
 
+### Phase 4: done (2026-10-19)
+
+- `features/composer/outboxStore`: **sending states the old client never had.** The server
+  has no send acknowledgement (it just echoes `new_message`), so a sent message shows at once
+  as "Encrypting…/Uploading…/Sending…", is confirmed when the echo carries the same
+  ciphertext (its plaintext is handed to the decrypted cache, so there's no flash), and
+  becomes "failed" after 20s, on a server `error` event, offline, without a key, or when the
+  session/conversation is gone. Retry re-sends the identical ciphertext (or redoes uploads
+  that failed); Discard drops it.
+- `encryptAttachment`: per-file random key, chunked encryption, integrity hash, upload of
+  ciphertext only, file key wrapped with the conversation key. **Change vs old UI:** any
+  non-video file up to 50 MB can be attached (the server already allowed it; the old client
+  only allowed images).
+- `draftsStore`: per-conversation drafts (text, reply target, files with image previews,
+  GIF) kept in memory, so switching chats keeps what you were writing; previews are
+  revoked when removed or sent.
+- `Composer`: auto-growing textarea (Enter sends, Shift+Enter new line, IME-safe), @mention
+  combobox (keyboard: arrows, Enter, Tab; matches username and display-name words), reply bar
+  (Esc cancels), attachment tray, paste and drag-and-drop of files, GIF picker (Giphy, labelled
+  as not end-to-end encrypted) and emoji picker (search, arrow keys, recents) as portalled
+  popovers, shortcuts Ctrl/Cmd + I / G / E / "/".
+- `useTypingSignals`: one `typing_start`, `typing_stop` after 3s idle, on send, on clearing
+  the box, or on leaving; honours the per-chat typing-indicator preference. (Showing other
+  people's typing comes in Phase 5.)
+- `ErrorBoundary` around the app screens: a render error now shows a recovery screen
+  (Try again / Reload) instead of a blank window. Avatars are now `aria-hidden` (names are
+  always shown or labelled next to them).
+- Tests: mention parsing and ranking, file rejection, outbox (encryption, echo confirmation,
+  timeout, retry with identical ciphertext, error attribution, offline/no-key/signed-out),
+  attachment encryption round trip, composer interactions, typing signals, error boundary.
+- Checked by hand in the browser with network calls stubbed in the page and a fake socket:
+  mention completion, typing start/stop, send → "Sending…" → confirmed by echo, server
+  error → Retry re-sends the same ciphertext. Real uploads and Giphy weren't exercised.
+
 Notes for later phases:
 - The friends sidebar is still a placeholder (Phase 7).
+- Reply is wired in the draft store; the "Reply" action on a message arrives with the
+  message actions in Phase 5.
 - Testing tip: in `dev:new:web`, Vite can load a store as `…store.ts?t=…` after a hot
   reload, so a console `import("/src/stores/…")` may get a second copy. Import the exact
   URL from `performance.getEntriesByType("resource")`.

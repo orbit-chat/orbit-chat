@@ -4,6 +4,7 @@ import { useAuthStore } from "../stores/authStore";
 import { AuthScreen } from "../features/auth/AuthScreen";
 import { RecoveryCodesScreen } from "../features/auth/RecoveryCodesScreen";
 import { AppShell } from "./AppShell";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { TitleBar } from "./TitleBar";
 import { UpdateBanner } from "./UpdateBanner";
 import { useAppInfo, useUpdaterStatus } from "./useDesktop";
@@ -21,7 +22,10 @@ export default function NewApp() {
       <div className="flex h-screen flex-col overflow-hidden bg-orbit-base text-orbit-text">
         <TitleBar />
         <UpdateBanner status={updateStatus} isMac={appInfo.isMac} />
-        <Screen appInfo={appInfo} updateStatus={updateStatus} />
+        {/* Inside the window chrome, so a crash still leaves the title bar's window controls. */}
+        <ErrorBoundary>
+          <Screen appInfo={appInfo} updateStatus={updateStatus} />
+        </ErrorBoundary>
       </div>
     </TooltipProvider>
   );

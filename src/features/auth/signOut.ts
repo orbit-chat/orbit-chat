@@ -6,6 +6,8 @@ import { usePrefsStore } from "../../stores/prefsStore";
 import { useConversationsStore } from "../conversations/conversationsStore";
 import { useDecryptedStore } from "../chat/decryptedStore";
 import { useHistoryStore } from "../chat/historyStore";
+import { useDraftsStore } from "../composer/draftsStore";
+import { useOutboxStore } from "../composer/outboxStore";
 
 /**
  * Ends the session and resets every piece of per-session UI state in one place,
@@ -21,5 +23,7 @@ export function signOut(queryClient?: QueryClient) {
   // Drop decrypted plaintext from memory as soon as the session ends.
   useDecryptedStore.getState().reset();
   useHistoryStore.getState().reset();
+  useDraftsStore.getState().reset();
+  useOutboxStore.getState().reset();
   queryClient?.clear();
 }

@@ -6,6 +6,7 @@ import { useMessagesStore } from "../../stores/messagesStore";
 import { useProfilesStore } from "../../stores/profilesStore";
 import { useConversationsStore } from "../conversations/conversationsStore";
 import { conversationTitle } from "../conversations/selectors";
+import { Composer } from "../composer/Composer";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
 import { useOpenConversation } from "./useOpenConversation";
@@ -42,11 +43,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
       ) : (
         <LockedPanel title={title} />
       )}
-      <footer className="shrink-0 border-t border-white/10 bg-orbit-raised px-4 py-3">
-        <div className="flex h-10 items-center rounded-xl border border-white/10 bg-orbit-panelAlt px-3 text-sm text-orbit-muted">
-          {unlocked ? "The composer arrives in Phase 4." : "Unlock this chat to send messages."}
-        </div>
-      </footer>
+      {unlocked && <Composer conversation={conversation} me={user} title={title} />}
     </div>
   );
 }

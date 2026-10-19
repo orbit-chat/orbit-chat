@@ -9,6 +9,7 @@ import { ConversationSidebar } from "../features/conversations/ConversationSideb
 import { useConversationsStore } from "../features/conversations/conversationsStore";
 import { totalUnread } from "../features/conversations/selectors";
 import { ChatView } from "../features/chat/ChatView";
+import { useOutboxSync } from "../features/composer/useOutboxSync";
 import { useConversationSync } from "../features/conversations/useConversationSync";
 import { ConnectionBanner } from "./ConnectionBanner";
 import type { AppInfo } from "./useDesktop";
@@ -23,6 +24,7 @@ type ContentRoute = Exclude<Route, { page: "settings" }>;
 export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateStatus: UpdaterStatusPayload | null }) {
   useNavigationShortcuts();
   useConversationSync();
+  useOutboxSync();
   const route = useNavigationStore((s) => s.route);
   const badges = useRailBadges();
 

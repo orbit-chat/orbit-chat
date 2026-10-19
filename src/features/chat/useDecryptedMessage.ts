@@ -9,14 +9,14 @@ export type DecryptState = DecryptedEntry | { status: "pending" } | { status: "n
  * Decrypted content of a message, decrypting it once if needed. Re-runs when the
  * conversation key for the message's version becomes available.
  */
-export function useDecryptedMessage(conversationId: string, message: ChatMessage): DecryptState {
+export function useDecryptedMessage(conversationId: string, message: ChatMessage, enabled = true): DecryptState {
   const secretKey = useE2EEStore((s) => s.getConversationSecretKeyForVersion(conversationId, message.keyVersion));
   const entry = useDecryptedStore((s) => s.byMessageId[message.id]);
 
   useEffect(() => {
-    if (!secretKey || entry?.status === "ok") return;
+    if (!enabled || !secretKey || entry?.status === "ok") return;
     void useDecryptedStore.getState().ensure(message, secretKey);
-  }, [secretKey, entry?.status, message]);
+  }, [enabled, secretKey, entry?.status, message]);
 
   if (entry?.status === "ok") return entry;
   if (!secretKey) return { status: "nokey" };
