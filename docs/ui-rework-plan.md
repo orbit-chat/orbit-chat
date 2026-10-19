@@ -219,6 +219,46 @@ connection, and the Electron window (Electron couldn't download its binary in th
 Session persistence is unchanged from the old app: tokens live in memory, so restarting the
 app signs you out.
 
+### Phase 2: done (2026-10-18)
+
+- `features/conversations/conversationsStore`: the conversation list, load status and
+  pending one-time passcodes. **Deviation from rule 5:** conversations live in Zustand, not
+  react-query, because socket handlers and non-React code (sign-out, DM creation) mutate
+  them directly. Friends do use react-query (`features/friends/friendsQueries`).
+- `selectors.ts` (pure, tested): titles (custom name → DM partner's display name → group
+  members "Ada, Grace +2"; the old `username#1a2b` suffix is gone), pinned-then-recent
+  ordering, filter matching, compact list times, previews that name the sender without
+  decrypting (DMs just say "Sent a message").
+- `useConversationSync` (mounted in `AppShell`): initial load, reload after reconnect,
+  history backfill (3 at a time), profile loading for avatars, and the socket events
+  `conversation_created`, `chat_settings_updated`, `passcode_reenabled`,
+  `conversation_deleted`, `member_removed`, `member_left`, `member_added`,
+  `presence_updated`, `new_message`. A removed conversation is dropped from the list, the
+  route/history and prefs together. Route effects: opening a chat marks it read, leaving it
+  calls chat-lock `onLeave`, and its key is fetched.
+- **Fix vs old UI:** backfilled history was counted as unread after storage loss; it's now
+  marked read.
+- `startDirectMessage`: moved out of `App`, throws readable errors (the old one swallowed
+  them, e.g. when the other user has no device keys), and unarchives the DM it opens.
+- Sidebar UI: `ConversationSidebar` (header with New message, filter box with Escape to clear,
+  Pinned/Recent sections, loading skeleton, error with retry, empty states, arrow/Home/End
+  keys), `ConversationItem` (memoised; subscribes only to its own messages, so a new message
+  re-renders one row), `ConversationAvatar` (presence for DMs, stacked members for groups),
+  right-click menu plus a matching hover "…" menu (Mark as read, Lock chat, Pin/Unpin,
+  Archive/Unarchive), and `NewMessageDialog` (friends list, debounced user search,
+  Message / Add friend / Accept / Cancel request).
+- Rail unread dots on DMs and Groups. `messagesStore.markRead` added.
+- Tests: selectors, store (including a stale load after sign-out), DM creation (checks
+  both sealed keys open to the same secret), sidebar interactions, sync events.
+- Checked by hand in the browser with injected sample data (no token, no server):
+  ordering, unread, badges, opening a chat, pin via right-click, New message dialog.
+
+Moved to Phase 6: Delete chat / Leave group in the conversation menu (they need the
+confirm dialog and group rekeying). Showing a pending passcode when a chat is opened also
+lands with the passcode flows in Phase 6 (the data is already captured).
+
 Notes for later phases:
-- Chat lock `onLeave` should hook into navigation changes when conversations land (Phase 2/6).
-- The unread-DM dot on the rail (`NavRail` `badges` prop) gets wired in Phase 2.
+- The friends sidebar is still a placeholder (Phase 7).
+- Testing tip: in `dev:new:web`, Vite can load a store as `…store.ts?t=…` after a hot
+  reload, so a console `import("/src/stores/…")` may get a second copy. Import the exact
+  URL from `performance.getEntriesByType("resource")`.

@@ -1,11 +1,20 @@
 import type { ReactNode } from "react";
 import { ArchiveIcon, ChatIcon, HomeIcon, UserPlusIcon, UsersIcon } from "../ui/icons";
+import { useAuthStore } from "../stores/authStore";
+import { useMessagesStore } from "../stores/messagesStore";
 import { useNavigationStore, type Route } from "../stores/navigationStore";
+import { useProfilesStore } from "../stores/profilesStore";
 import { NavRail } from "../features/navigation/NavRail";
 import { useNavigationShortcuts } from "../features/navigation/useNavigationShortcuts";
 import { SettingsPage } from "../features/settings/SettingsPage";
+import { ConversationSidebar } from "../features/conversations/ConversationSidebar";
+import { useConversationsStore } from "../features/conversations/conversationsStore";
+import { conversationTitle, totalUnread } from "../features/conversations/selectors";
+import { useConversationSync } from "../features/conversations/useConversationSync";
 import { ConnectionBanner } from "./ConnectionBanner";
 import type { AppInfo } from "./useDesktop";
+
+type ContentRoute = Exclude<Route, { page: "settings" }>;
 
 /**
  * Signed-in layout: rail | sidebar | main. The route decides both the sidebar and
@@ -14,18 +23,24 @@ import type { AppInfo } from "./useDesktop";
  */
 export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateStatus: UpdaterStatusPayload | null }) {
   useNavigationShortcuts();
+  useConversationSync();
   const route = useNavigationStore((s) => s.route);
+  const badges = useRailBadges();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ConnectionBanner />
       <div className="flex min-h-0 flex-1">
-        <NavRail version={appInfo.version} />
+        <NavRail version={appInfo.version} badges={badges} />
         {route.page === "settings" ? (
           <SettingsPage section={route.section} appInfo={appInfo} updateStatus={updateStatus} />
         ) : (
           <>
-            <Sidebar route={route} />
+            {route.page === "friends" ? (
+              <FriendsSidebarPlaceholder />
+            ) : (
+              <ConversationSidebar page={route.page} selectedId={"conversationId" in route ? route.conversationId : null} />
+            )}
             <main className="flex min-w-0 flex-1 flex-col bg-orbit-canvas">
               <MainPane route={route} />
             </main>
@@ -36,42 +51,57 @@ export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateSt
   );
 }
 
-const pageMeta: Record<Exclude<Route["page"], "settings">, { title: string; icon: ReactNode; empty: string; hint: string }> = {
-  home: { title: "Home", icon: <HomeIcon />, empty: "Your recent chats will show here.", hint: "Pick a chat from the list to start messaging." },
-  dm: { title: "Direct messages", icon: <ChatIcon />, empty: "Your direct messages will show here.", hint: "Pick a conversation, or start one from Friends." },
-  groups: { title: "Groups", icon: <UsersIcon />, empty: "Your group chats will show here.", hint: "Pick a group, or create a new one." },
-  friends: { title: "Friends", icon: <UserPlusIcon />, empty: "Friend requests and your friends list will show here.", hint: "Add friends by username and accept requests here." },
-  archive: { title: "Archive", icon: <ArchiveIcon />, empty: "Chats you archive will show here.", hint: "Archived chats stay here until you unarchive them." }
+/** Unread dots on the DM and Groups rail buttons. */
+function useRailBadges() {
+  const conversations = useConversationsStore((s) => s.conversations);
+  const unread = useMessagesStore((s) => s.unreadCountByConversation);
+  return {
+    dm: totalUnread(conversations, unread, "dm") > 0,
+    groups: totalUnread(conversations, unread, "group") > 0
+  };
+}
+
+const pageMeta: Record<ContentRoute["page"], { title: string; icon: ReactNode; hint: string }> = {
+  home: { title: "Home", icon: <HomeIcon />, hint: "Pick a chat from the list to start messaging." },
+  dm: { title: "Direct messages", icon: <ChatIcon />, hint: "Pick a conversation, or start a new one." },
+  groups: { title: "Groups", icon: <UsersIcon />, hint: "Pick a group to open it." },
+  friends: { title: "Friends", icon: <UserPlusIcon />, hint: "Add friends by username and accept requests here." },
+  archive: { title: "Archive", icon: <ArchiveIcon />, hint: "Archived chats stay here until you unarchive them." }
 };
 
-/** Phase 1 placeholder; conversation lists land in Phase 2, friends in Phase 7. */
-function Sidebar({ route }: { route: Exclude<Route, { page: "settings" }> }) {
-  const meta = pageMeta[route.page];
+/** Phase 7 replaces this with the friends list and requests. */
+function FriendsSidebarPlaceholder() {
   return (
-    <aside aria-label={meta.title} className="flex w-[300px] shrink-0 flex-col border-r border-white/10 bg-orbit-sidebar">
+    <aside aria-label="Friends" className="flex w-[300px] shrink-0 flex-col border-r border-white/10 bg-orbit-sidebar">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-4">
-        <span className="text-orbit-muted">{meta.icon}</span>
-        <h2 className="text-sm font-bold">{meta.title}</h2>
+        <span className="text-orbit-muted">
+          <UserPlusIcon />
+        </span>
+        <h2 className="text-sm font-bold">Friends</h2>
       </header>
-      <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-orbit-muted">{meta.empty}</div>
+      <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-orbit-muted">
+        Friend requests and your friends list will show here.
+      </div>
     </aside>
   );
 }
 
-/** Phase 1 placeholder for the main pane. */
-function MainPane({ route }: { route: Exclude<Route, { page: "settings" }> }) {
+/** Empty state, or (until Phase 3) a stand-in for the open conversation. */
+function MainPane({ route }: { route: ContentRoute }) {
   const conversationId = "conversationId" in route ? route.conversationId : null;
+  const conversation = useConversationsStore((s) => (conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined));
+  const myUserId = useAuthStore((s) => s.user?.id ?? "");
+  const profiles = useProfilesStore((s) => s.byId);
   const meta = pageMeta[route.page];
+
   return (
     <div className="flex flex-1 items-center justify-center p-8">
       <div className="max-w-sm text-center">
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orbit-accent/10 text-orbit-accent [&_svg]:h-6 [&_svg]:w-6">
           {meta.icon}
         </span>
-        <h1 className="mt-4 text-lg font-bold">{conversationId ? "Conversation" : meta.title}</h1>
-        <p className="mt-1 text-sm text-orbit-muted">
-          {conversationId ? `Conversation ${conversationId} opens here in Phase 3.` : meta.hint}
-        </p>
+        <h1 className="mt-4 text-lg font-bold">{conversation ? conversationTitle(conversation, myUserId, profiles) : meta.title}</h1>
+        <p className="mt-1 text-sm text-orbit-muted">{conversation ? "The message view arrives in Phase 3." : meta.hint}</p>
       </div>
     </div>
   );

@@ -32,6 +32,8 @@ type MessagesState = {
     patch: Partial<ChatMessage>
   ) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
+  /** Clear the unread count without opening the conversation. */
+  markRead: (conversationId: string) => void;
 };
 
 export const useMessagesStore = create<
@@ -95,6 +97,9 @@ export const useMessagesStore = create<
             [conversationId]: current.filter((m) => m.id !== messageId)
           }
         });
+      },
+      markRead: (conversationId) => {
+        set({ unreadCountByConversation: { ...get().unreadCountByConversation, [conversationId]: 0 } });
       }
     }),
     {

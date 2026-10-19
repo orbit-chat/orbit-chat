@@ -3,6 +3,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useChatLockStore } from "../../stores/chatLockStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { usePrefsStore } from "../../stores/prefsStore";
+import { useConversationsStore } from "../conversations/conversationsStore";
 
 /**
  * Ends the session and resets every piece of per-session UI state in one place,
@@ -14,5 +15,6 @@ export function signOut(queryClient?: QueryClient) {
   useAuthStore.getState().clearSession();
   usePrefsStore.getState().deactivate();
   useNavigationStore.getState().reset();
+  useConversationsStore.getState().reset();
   queryClient?.clear();
 }
