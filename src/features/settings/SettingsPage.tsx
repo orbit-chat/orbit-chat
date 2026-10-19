@@ -4,6 +4,7 @@ import { CloseIcon } from "../../ui/icons";
 import { API_BASE } from "../../lib/api";
 import { useNavigationStore, type SettingsSection } from "../../stores/navigationStore";
 import { installUpdateAction, type AppInfo } from "../../app/useDesktop";
+import { switchInterface } from "../../lib/uiPreference";
 import { PrivacySection } from "./PrivacySection";
 import { NotificationsSection } from "./NotificationsSection";
 import { ProfileSection } from "./ProfileSection";
@@ -226,6 +227,15 @@ function AboutSection({ appInfo }: { appInfo: AppInfo }) {
       <p className="mt-4 text-xs text-orbit-muted">
         Messages and attachments are encrypted on this device before they're sent. The server stores and relays ciphertext only.
       </p>
+      <Card className="mt-6 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold">Classic interface</p>
+          <p className="mt-0.5 text-[11px] text-orbit-muted">Something not working in the new design? Switch back to the previous one. You can return from its title bar.</p>
+        </div>
+        <Button size="sm" onClick={() => switchInterface("classic")}>
+          Use the classic interface
+        </Button>
+      </Card>
     </>
   );
 }

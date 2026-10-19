@@ -21,6 +21,7 @@ import { ProfileSettings } from "./components/ProfileSettings";
 import { useContextMenu, ContextMenuPortal, type ContextMenuItem } from "./components/ContextMenu";
 import DevOverlay from "./components/DevOverlay";
 import { devLog } from "./lib/devLogger";
+import { switchInterface } from "./lib/uiPreference";
 
 /* ─── Custom frameless title bar ─── */
 function TitleBar() {
@@ -37,6 +38,13 @@ function TitleBar() {
       <div className="orbit-titlebar-drag">
         <span className="orbit-titlebar-label">Orbit Chat</span>
       </div>
+      {/* The classic UI is now the fallback; this returns to the rebuilt one. */}
+      <button
+        onClick={() => switchInterface("new")}
+        className="mr-2 rounded-md border border-orbit-accent/40 px-2 py-0.5 text-[11px] font-semibold text-orbit-accent hover:bg-orbit-accent/10 [-webkit-app-region:no-drag]"
+      >
+        Back to the new interface
+      </button>
       <div className="orbit-titlebar-controls">
         <button onClick={() => window.electronAPI?.minimize()} className="orbit-titlebar-btn" aria-label="Minimize">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect y="5" width="12" height="1.5" rx=".75" fill="currentColor"/></svg>

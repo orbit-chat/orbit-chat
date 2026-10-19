@@ -158,7 +158,7 @@ Dev: dev overlay + logger.
 | `npm run dev:new` | New UI in Electron (`.env.newui` sets `VITE_NEW_UI=1`) |
 | `npm run dev:new:web` | New UI in a browser at `localhost:5173`, no Electron (`*-web` modes skip the Electron plugin; `window.electronAPI` is undefined) |
 
-Production builds never include `src/app` unless `VITE_NEW_UI=1` is set at build time.
+**Since 0.10.0 the new UI is the default in every build.** The classic UI is a fallback: Settings → About → "Use the classic interface" (stored as `orbit:ui=classic`), and its title bar has "Back to the new interface". `VITE_UI=classic` forces it at build time.
 
 ## Progress
 
@@ -461,16 +461,22 @@ The old UI stays the default until the new one has been tested against a real se
   and closes with Escape; only the newest message is tabbable; skip link present;
   notifications settings show defaults and the blocked-permission notice.
 
-### Remaining: Phase 8b (cutover), after real-server testing
+### Released as 0.10.0 (2026-10-19)
+
+At the user's request the new UI shipped as the default in 0.10.0 (Windows only; built
+unsigned on this machine), ahead of real-server testing, with the classic UI kept as an
+in-app fallback.
+
+### Remaining: Phase 8b (remove the classic UI), after real-server testing
 
 1. Test every flow against a real server, in the Electron window: sign-up/sign-in/recovery,
    DMs and groups, sends/receives across two accounts, uploads and downloads, Giphy, reactions,
    pins, threads, receipts and typing, passcode lock/bypass/reveal/disable-agreement, group
    add/remove/leave key rotation, friends, profile edits and uploads, notifications.
 2. Fix what that turns up.
-3. Make the new UI the default (`main.tsx`), then delete `App.tsx`, `ProfileSettings.tsx`,
+3. Delete `App.tsx`, `ProfileSettings.tsx`,
    `UserProfilePopover.tsx`, `ContextMenu.tsx` and the `orbit-*` component classes in
-   `styles.css` the old UI used; drop the flag and `.env.newui*`.
+   `styles.css` the old UI used; drop the classic switch, `uiPreference.ts` and `.env.newui*`.
 4. Consider Tailwind v4 and the group-leave key rotation follow-up.
 
 Notes for later phases:
