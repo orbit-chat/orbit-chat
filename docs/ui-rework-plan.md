@@ -324,10 +324,48 @@ lands with the passcode flows in Phase 6 (the data is already captured).
   mention completion, typing start/stop, send → "Sending…" → confirmed by echo, server
   error → Retry re-sends the same ciphertext. Real uploads and Giphy weren't exercised.
 
+### Phase 5: done (2026-10-19)
+
+- **Bug 2 is fixed and pinned by tests.** The hover toolbar is CSS only (`group-hover` /
+  `focus-within`, kept visible while its own menu is open via `has-[[data-state=open]]`);
+  no React hover state remains. The pinned and search popovers are portalled. Checked in a
+  real browser: with the mouse over the pinned popover, 260/260 sample points over message
+  rows hit the popover, no row is `:hover`, no toolbar shows; hovering a row directly shows
+  only that row's toolbar.
+- `socketActions`: every interaction emit goes through one helper that records the last
+  emit. The server reports all failures on one `error` event, so the outbox now only blames
+  a pending send when a send was the last emit (a reaction or pin error no longer fails your
+  message).
+- Message actions (`messageActions.tsx`), shared by the hover toolbar's "…" menu and the
+  right-click menu: Reply, Open thread, Mention, Pin/Unpin, Copy text. Quick reactions in the
+  toolbar and context menu, a full reaction picker (only the 15 emoji the server accepts),
+  reaction chips you can click to toggle with a tooltip of who reacted.
+- `PinnedPopover` (pins among loaded messages, jump, unpin; the server has no list-pins
+  endpoint) and `SearchPopover` (Ctrl/Cmd+F; decrypts loaded messages once and searches them
+  locally with highlighted excerpts; "load older to search further"). Both jump via
+  `chatUiStore.jumpTo`.
+- `ThreadPanel`: root + replies beside the timeline with its own composer and draft
+  (`conversationId#rootId`); sends default to the thread root. "N replies" links on roots.
+  The composer gained `threadRootId` (only the main composer owns the global shortcuts).
+- `presenceStore` + `useRealtimeSync`: typing (with 6s expiry, cleared when that person's
+  message arrives, honouring the per-chat preference) and live read receipts.
+  `TypingIndicator` is a fixed-height line, so it never shifts the layout. "Seen by …" under
+  your latest message.
+- **Fix vs old UI:** read receipts. The old client emitted `message_seen` for every message
+  in the chat on each open; now one receipt goes out for the newest message from someone
+  else, only while the window is visible, once per message, and not at all if receipts are
+  off for the chat.
+- Fixed while testing: the "Mention" action used a stale snapshot of the draft and could
+  overwrite text typed since the menu was built.
+- Tests: socket actions and error attribution, presence store, search and excerpts, message
+  actions, and rendered interactions (CSS-only toolbar, portalled pins popover with jump,
+  reactions, context menu, threads with their own draft, search jump, typing/seen display,
+  single read receipt, receipts off).
+
 Notes for later phases:
 - The friends sidebar is still a placeholder (Phase 7).
-- Reply is wired in the draft store; the "Reply" action on a message arrives with the
-  message actions in Phase 5.
+- Testing tip: the browser pane can report a 0×0 viewport when collapsed; set a size with
+  the pane's viewport emulation before measuring layout.
 - Testing tip: in `dev:new:web`, Vite can load a store as `…store.ts?t=…` after a hot
   reload, so a console `import("/src/stores/…")` may get a second copy. Import the exact
   URL from `performance.getEntriesByType("resource")`.

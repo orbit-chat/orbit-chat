@@ -189,3 +189,25 @@ export const GifIcon = (p: IconProps) => (
     <path d="M18 10h-3v4M15 12h2" />
   </Icon>
 );
+
+export const ThreadIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.8-.9L3 20l1.1-4.2A8.4 8.4 0 1 1 21 11.5Z" />
+    <path d="M8 10h8M8 14h5" />
+  </Icon>
+);
+
+export const AtIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
+  </Icon>
+);
+
+export const SmilePlusIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M22 11v1a10 10 0 1 1-9-10" />
+    <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+    <path d="M9 9h.01M15 9h.01M16 5h6M19 2v6" />
+  </Icon>
+);

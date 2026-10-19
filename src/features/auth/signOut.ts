@@ -8,6 +8,8 @@ import { useDecryptedStore } from "../chat/decryptedStore";
 import { useHistoryStore } from "../chat/historyStore";
 import { useDraftsStore } from "../composer/draftsStore";
 import { useOutboxStore } from "../composer/outboxStore";
+import { useChatUiStore } from "../chat/chatUiStore";
+import { usePresenceStore } from "../chat/presenceStore";
 
 /**
  * Ends the session and resets every piece of per-session UI state in one place,
@@ -25,5 +27,7 @@ export function signOut(queryClient?: QueryClient) {
   useHistoryStore.getState().reset();
   useDraftsStore.getState().reset();
   useOutboxStore.getState().reset();
+  usePresenceStore.getState().reset();
+  useChatUiStore.getState().reset();
   queryClient?.clear();
 }

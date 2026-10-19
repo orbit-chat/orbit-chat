@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useSocketStore } from "../../stores/socketStore";
 import { useHistoryStore } from "./historyStore";
+import { joinConversation } from "./socketActions";
 
 /**
  * While a conversation is open (and unlocked): fetch its newest messages and join its
@@ -18,6 +19,6 @@ export function useOpenConversation(conversationId: string, unlocked: boolean) {
 
   useEffect(() => {
     if (!unlocked || !socket || !connected) return;
-    socket.emit("join_conversation", { conversationId });
+    joinConversation(conversationId);
   }, [conversationId, unlocked, socket, connected]);
 }

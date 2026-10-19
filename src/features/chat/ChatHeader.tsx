@@ -5,6 +5,7 @@ import { useProfilesStore } from "../../stores/profilesStore";
 import type { Conversation } from "../conversations/conversationsStore";
 import { ConversationAvatar } from "../conversations/ConversationAvatar";
 import { dmPartner } from "../conversations/selectors";
+import { PinnedPopover, SearchPopover } from "./HeaderPopovers";
 
 const presenceLabel: Record<string, string> = {
   online: "Online",
@@ -44,6 +45,10 @@ export function ChatHeader({ conversation, title, myUserId }: { conversation: Co
           {partnerProfile?.statusEmoji && <span className="mr-1">{partnerProfile.statusEmoji}</span>}
           {subtitle}
         </p>
+      </div>
+      <div className="flex items-center gap-0.5">
+        <SearchPopover conversationId={conversation.id} />
+        <PinnedPopover conversationId={conversation.id} />
       </div>
       {hasKey ? (
         <Tooltip content="Messages are encrypted on your device before they're sent.">

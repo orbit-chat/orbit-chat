@@ -20,6 +20,8 @@ type ComposerProps = {
   conversation: Conversation;
   me: { id: string; username: string };
   title: string;
+  /** Set inside the thread panel: its own draft, and messages reply to the thread root by default. */
+  threadRootId?: string;
 };
 
 /**
@@ -27,9 +29,10 @@ type ComposerProps = {
  * switching chats keeps it. Enter sends, Shift+Enter adds a line, @ suggests members,
  * images can be pasted or dropped, and Ctrl/Cmd + I / G / E / "/" work while it's on screen.
  */
-export function Composer({ conversation, me, title }: ComposerProps) {
+export function Composer({ conversation, me, title, threadRootId }: ComposerProps) {
   const conversationId = conversation.id;
-  const draft = useDraft(conversationId);
+  const draftKey = threadRootId ? `${conversationId}#${threadRootId}` : conversationId;
+  const draft = useDraft(draftKey);
   const drafts = useDraftsStore.getState;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,24 +66,24 @@ export function Composer({ conversation, me, title }: ComposerProps) {
   // Opening a chat (or starting a reply) puts the caret in the box.
   useEffect(() => {
     textareaRef.current?.focus();
-  }, [conversationId, draft.replyToId]);
+  }, [draftKey, draft.replyToId]);
 
   const setText = useCallback(
     (text: string, caret?: number) => {
-      drafts().setText(conversationId, text);
+      drafts().setText(draftKey, text);
       typing.onTextChange(text);
       const at = caret ?? text.length;
       setMention(mentionAtCaret(text, at));
       setMentionIndex(0);
     },
-    [conversationId, drafts, typing]
+    [draftKey, drafts, typing]
   );
 
   /** Insert at the caret (or replace the selection) and keep focus in the box. */
   const insertAtCaret = useCallback(
     (insert: string) => {
       const el = textareaRef.current;
-      const text = drafts().byConversation[conversationId]?.text ?? "";
+      const text = drafts().byConversation[draftKey]?.text ?? "";
       const start = el?.selectionStart ?? text.length;
       const end = el?.selectionEnd ?? text.length;
       const next = replaceRange(text, start, end, insert);
@@ -90,7 +93,7 @@ export function Composer({ conversation, me, title }: ComposerProps) {
         el?.setSelectionRange(next.caret, next.caret);
       });
     },
-    [conversationId, drafts, setText]
+    [draftKey, drafts, setText]
   );
 
   const applyMention = (candidate: MentionCandidate) => {
@@ -107,24 +110,24 @@ export function Composer({ conversation, me, title }: ComposerProps) {
       const errors = files.map(rejectReason).filter((e): e is string => Boolean(e));
       const accepted = files.filter((f) => !rejectReason(f));
       setFileErrors(errors);
-      if (accepted.length) drafts().addFiles(conversationId, accepted);
+      if (accepted.length) drafts().addFiles(draftKey, accepted);
     },
-    [conversationId, drafts]
+    [draftKey, drafts]
   );
 
   const canSend = Boolean(draft.text.trim() || draft.files.length || draft.gif);
 
   const send = () => {
-    const current = drafts().byConversation[conversationId];
+    const current = drafts().byConversation[draftKey];
     if (!current || !(current.text.trim() || current.files.length || current.gif)) return;
     void useOutboxStore.getState().send({
       conversationId,
       text: current.text.trim(),
       files: current.files.map((f) => f.file),
       gif: current.gif,
-      parentMessageId: current.replyToId
+      parentMessageId: current.replyToId ?? threadRootId ?? null
     });
-    drafts().clear(conversationId);
+    drafts().clear(draftKey);
     typing.stop();
     setMention(null);
     setFileErrors([]);
@@ -151,7 +154,7 @@ export function Composer({ conversation, me, title }: ComposerProps) {
     }
     if (event.key === "Escape" && !mentionOpen && draft.replyToId) {
       event.preventDefault();
-      drafts().setReplyTo(conversationId, null);
+      drafts().setReplyTo(draftKey, null);
     }
   };
 
@@ -162,8 +165,9 @@ export function Composer({ conversation, me, title }: ComposerProps) {
     addFiles(files);
   };
 
-  // App-wide shortcuts while this composer is on screen.
+  // App-wide shortcuts while this composer is on screen (the main one only).
   useEffect(() => {
+    if (threadRootId) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
       const key = event.key.toLowerCase();
@@ -183,7 +187,7 @@ export function Composer({ conversation, me, title }: ComposerProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [threadRootId]);
 
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
@@ -222,8 +226,8 @@ export function Composer({ conversation, me, title }: ComposerProps) {
               dragging && "border-dashed border-orbit-accent bg-orbit-accent/5"
             )}
           >
-            {draft.replyToId && <ReplyBar conversationId={conversationId} messageId={draft.replyToId} myUserId={me.id} />}
-            <AttachmentTray conversationId={conversationId} />
+            {draft.replyToId && <ReplyBar conversationId={conversationId} draftKey={draftKey} messageId={draft.replyToId} myUserId={me.id} />}
+            <AttachmentTray draftKey={draftKey} />
 
             <div className="flex items-end gap-1 p-1.5">
               <Tooltip content="Attach files (Ctrl+I)">
@@ -250,8 +254,8 @@ export function Composer({ conversation, me, title }: ComposerProps) {
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
                 onSelect={(event) => setMention(mentionAtCaret(event.currentTarget.value, event.currentTarget.selectionStart))}
-                placeholder={dragging ? "Drop to attach" : `Message ${title}`}
-                aria-label={`Message ${title}`}
+                placeholder={dragging ? "Drop to attach" : threadRootId ? "Reply in thread" : `Message ${title}`}
+                aria-label={threadRootId ? "Reply in thread" : `Message ${title}`}
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded={mentionOpen}
@@ -271,7 +275,7 @@ export function Composer({ conversation, me, title }: ComposerProps) {
                 <PopoverContent side="top" align="end" className="p-0">
                   <GifPicker
                     onPick={(gif) => {
-                      drafts().setGif(conversationId, gif);
+                      drafts().setGif(draftKey, gif);
                       setPicker(null);
                       textareaRef.current?.focus();
                     }}
@@ -336,15 +340,25 @@ export function Composer({ conversation, me, title }: ComposerProps) {
   );
 }
 
-function ReplyBar({ conversationId, messageId, myUserId }: { conversationId: string; messageId: string; myUserId: string }) {
+function ReplyBar({ conversationId, draftKey, messageId, myUserId }: { conversationId: string; draftKey: string; messageId: string; myUserId: string }) {
   const message = useMessagesStore((s) => s.byConversation[conversationId]?.find((m) => m.id === messageId));
   const profile = useProfilesStore((s) => (message ? s.byId[message.senderId] : undefined));
   if (!message) return null;
   const name = message.senderId === myUserId ? "yourself" : profile?.displayName?.trim() || message.sender;
-  return <ReplyBarLoaded conversationId={conversationId} message={message} name={name} />;
+  return <ReplyBarLoaded conversationId={conversationId} draftKey={draftKey} message={message} name={name} />;
 }
 
-function ReplyBarLoaded({ conversationId, message, name }: { conversationId: string; message: Parameters<typeof useDecryptedMessage>[1]; name: string }) {
+function ReplyBarLoaded({
+  conversationId,
+  draftKey,
+  message,
+  name
+}: {
+  conversationId: string;
+  draftKey: string;
+  message: Parameters<typeof useDecryptedMessage>[1];
+  name: string;
+}) {
   const decrypted = useDecryptedMessage(conversationId, message);
   const snippet = decrypted.status === "ok" ? searchableText(decrypted.envelope) || "Attachment" : "Encrypted message";
   return (
@@ -355,7 +369,7 @@ function ReplyBarLoaded({ conversationId, message, name }: { conversationId: str
       </span>
       <span className="min-w-0 flex-1 truncate text-orbit-muted">{snippet}</span>
       <Tooltip content="Cancel reply (Esc)">
-        <IconButton label="Cancel reply" size="sm" onClick={() => useDraftsStore.getState().setReplyTo(conversationId, null)}>
+        <IconButton label="Cancel reply" size="sm" onClick={() => useDraftsStore.getState().setReplyTo(draftKey, null)}>
           <CloseIcon className="h-3.5 w-3.5" />
         </IconButton>
       </Tooltip>
@@ -363,8 +377,8 @@ function ReplyBarLoaded({ conversationId, message, name }: { conversationId: str
   );
 }
 
-function AttachmentTray({ conversationId }: { conversationId: string }) {
-  const { files, gif } = useDraft(conversationId);
+function AttachmentTray({ draftKey }: { draftKey: string }) {
+  const { files, gif } = useDraft(draftKey);
   if (!files.length && !gif) return null;
   return (
     <ul className="flex flex-wrap gap-2 border-b border-white/[0.06] p-2" aria-label="Attachments">
@@ -378,13 +392,13 @@ function AttachmentTray({ conversationId }: { conversationId: string }) {
             </span>
           )}
           <span className="min-w-0 truncate text-[11px]">{pending.file.name}</span>
-          <RemoveButton label={`Remove ${pending.file.name}`} onClick={() => useDraftsStore.getState().removeFile(conversationId, pending.id)} />
+          <RemoveButton label={`Remove ${pending.file.name}`} onClick={() => useDraftsStore.getState().removeFile(draftKey, pending.id)} />
         </li>
       ))}
       {gif && (
         <li className="relative h-16 overflow-hidden rounded-xl border border-white/10">
           <img src={gif.previewUrl || gif.url} alt={gif.title || "GIF"} className="h-16 w-auto object-cover" />
-          <RemoveButton label="Remove GIF" onClick={() => useDraftsStore.getState().setGif(conversationId, null)} />
+          <RemoveButton label="Remove GIF" onClick={() => useDraftsStore.getState().setGif(draftKey, null)} />
         </li>
       )}
     </ul>

@@ -10,6 +10,7 @@ import { useConversationsStore } from "../features/conversations/conversationsSt
 import { totalUnread } from "../features/conversations/selectors";
 import { ChatView } from "../features/chat/ChatView";
 import { useOutboxSync } from "../features/composer/useOutboxSync";
+import { useRealtimeSync } from "../features/chat/useRealtimeSync";
 import { useConversationSync } from "../features/conversations/useConversationSync";
 import { ConnectionBanner } from "./ConnectionBanner";
 import type { AppInfo } from "./useDesktop";
@@ -25,6 +26,7 @@ export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateSt
   useNavigationShortcuts();
   useConversationSync();
   useOutboxSync();
+  useRealtimeSync();
   const route = useNavigationStore((s) => s.route);
   const badges = useRailBadges();
 

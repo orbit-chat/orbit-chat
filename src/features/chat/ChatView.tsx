@@ -9,7 +9,11 @@ import { conversationTitle } from "../conversations/selectors";
 import { Composer } from "../composer/Composer";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
+import { useChatUiStore } from "./chatUiStore";
+import { ThreadPanel } from "./ThreadPanel";
+import { TypingIndicator } from "./TypingIndicator";
 import { useOpenConversation } from "./useOpenConversation";
+import { useSeenReceipts } from "./useRealtimeSync";
 
 /**
  * The open conversation. Mounted with `key={conversationId}`, so switching chats starts
@@ -22,7 +26,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const unlocked = useChatLockStore((s) => Boolean(conversation && (!conversation.passcodeEnabled || s.unlocked[conversation.id])));
   // Read before the sync hook marks the chat read, so the "New messages" marker knows where to go.
   const [unreadAtOpen] = useState(() => useMessagesStore.getState().unreadCountByConversation[conversationId] ?? 0);
+  const threadRootId = useChatUiStore((s) => s.threadRootByConversation[conversationId] ?? null);
   useOpenConversation(conversationId, unlocked);
+  useSeenReceipts(conversationId, unlocked);
 
   if (!conversation || !user) {
     return (
@@ -39,11 +45,17 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <ChatHeader conversation={conversation} title={title} myUserId={user.id} />
       {unlocked ? (
-        <MessageList conversationId={conversationId} me={user} minReadableKeyVersion={minReadableKeyVersion} unreadAtOpen={unreadAtOpen} />
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <MessageList conversationId={conversationId} me={user} minReadableKeyVersion={minReadableKeyVersion} unreadAtOpen={unreadAtOpen} />
+            <TypingIndicator conversationId={conversationId} />
+            <Composer conversation={conversation} me={user} title={title} />
+          </div>
+          {threadRootId && <ThreadPanel conversation={conversation} rootId={threadRootId} me={user} minReadableKeyVersion={minReadableKeyVersion} />}
+        </div>
       ) : (
         <LockedPanel title={title} />
       )}
-      {unlocked && <Composer conversation={conversation} me={user} title={title} />}
     </div>
   );
 }

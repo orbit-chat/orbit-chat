@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { encryptMessage } from "../../lib/crypto";
 import { useAuthStore } from "../../stores/authStore";
 import { useE2EEStore } from "../../stores/e2eeStore";
-import { useSocketStore } from "../../stores/socketStore";
+import { emitAction } from "../chat/socketActions";
 import { useConversationsStore } from "../conversations/conversationsStore";
 import { useDecryptedStore } from "../chat/decryptedStore";
 import type { GifLinkAttachment, MessageAttachment, MessageEnvelope } from "../chat/envelope";
@@ -74,13 +74,11 @@ export const useOutboxStore = create<OutboxState>((set, get) => {
   };
 
   const emit = (entry: OutboxEntry, payload: WirePayload) => {
-    const socket = useSocketStore.getState().socket;
-    if (!socket) {
+    // socket.io buffers this while reconnecting; the timeout catches it if it never lands.
+    if (!emitAction("send_message", payload)) {
       fail(entry.localId, "You're offline. Retry when the connection is back.");
       return;
     }
-    // socket.io buffers this while reconnecting; the timeout catches it if it never lands.
-    socket.emit("send_message", payload);
     patch(entry.localId, { status: "sending", error: null, payload });
     clearTimer(entry.localId);
     timers.set(

@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, cn } from "../../ui";
 import { useMessagesStore, type ChatMessage } from "../../stores/messagesStore";
 import { useOutboxStore, type OutboxEntry } from "../composer/outboxStore";
+import { useChatUiStore } from "./chatUiStore";
 import { useHistory, useHistoryStore } from "./historyStore";
 import { MessageRow } from "./MessageRow";
 import { buildTimeline, type TimelineItem } from "./timeline";
@@ -149,6 +150,23 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
     return () => window.clearTimeout(timer);
   }, [highlightedId]);
 
+  // Jumps asked for from elsewhere (search results, pinned messages, the thread panel).
+  const jumpRequest = useChatUiStore((s) => (s.jumpRequest?.conversationId === conversationId ? s.jumpRequest : null));
+  useEffect(() => {
+    if (jumpRequest) jumpTo(jumpRequest.messageId);
+    // Only a new request should jump, not a re-render with the same one.
+  }, [jumpRequest?.seq]);
+
+  const replyCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of stored) if (m.parentMessageId) counts.set(m.parentMessageId, (counts.get(m.parentMessageId) ?? 0) + 1);
+    return counts;
+  }, [stored]);
+  const myLatestId = useMemo(() => {
+    for (let i = stored.length - 1; i >= 0; i--) if (stored[i]!.senderId === me.id) return stored[i]!.id;
+    return null;
+  }, [stored, me.id]);
+
   const showEmpty = items.length === 0 && !history.loadingLatest;
 
   return (
@@ -200,6 +218,8 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
                     highlighted={highlightedId === item.message.id}
                     onJumpTo={jumpTo}
                     pending={pendingById.get(item.message.id)}
+                    replyCount={replyCounts.get(item.message.id)}
+                    showSeen={item.message.id === myLatestId}
                   />
                 )}
               </div>
