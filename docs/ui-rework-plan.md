@@ -257,6 +257,39 @@ Moved to Phase 6: Delete chat / Leave group in the conversation menu (they need 
 confirm dialog and group rekeying). Showing a pending passcode when a chat is opened also
 lands with the passcode flows in Phase 6 (the data is already captured).
 
+### Phase 3: done (2026-10-19)
+
+- `features/chat/envelope.ts`: envelope types moved out of `App`, a stricter parser
+  (malformed attachments from another client are dropped, not trusted), `searchableText`,
+  `safeHttpsUrl`.
+- `decryptedStore`: **one decryption per message**, shared by every view (the old UI
+  decrypted each body in its component and again for search). Plaintext is memory-only,
+  never persisted, and is wiped on sign-out; a failed decrypt is retried when a new key arrives.
+- `historyStore`: newest page on open, plus **older history when you scroll up** using the
+  server's cursor (the old client only ever showed the latest 50 plus whatever was cached).
+- `useOpenConversation`: fetches on open, joins the socket room, rejoins and refetches after a
+  reconnect.
+- `timeline.ts` (pure): day separators (Today / Yesterday / weekday / date), sender grouping
+  within 5 minutes, and the "New messages" marker placed from the unread count captured
+  when the chat opened.
+- UI: `ChatView` (keyed by conversation, so switching chats starts clean), `ChatHeader`
+  (no backdrop-blur; encryption state with an explanation), `MessageList` (react-virtual with
+  measured rows: opens at the unread marker or bottom, follows new messages only when you're
+  at the bottom or sent them, "Jump to latest" / "N new messages" pill otherwise, keeps your
+  place when older pages load, jump-to-message with highlight), `MessageRow` (memoised,
+  grouped bubbles, reply quote that jumps to the original, read-only reactions, pinned marker,
+  mention highlight, unreadable-key-version notice), `MessageText` (https links only, @mentions,
+  line breaks kept), encrypted image/file attachments with integrity check, GIF links.
+- Locked chats show a locked panel and fetch nothing (the unlock form comes in Phase 6). The
+  composer is a placeholder until Phase 4.
+- Tests: envelope parsing and crypto round trip, text tokenizing, timeline, decrypted cache
+  (dedupe, retry, reset), history paging, and the rendered chat view (decryption, links,
+  markers, mention highlight, reply jump, undecryptable and no-key states, locked chat).
+- Checked by hand in the browser with 300 real encrypted messages (no server): 18 of 300
+  rows mounted, opens at the bottom, scroll position kept when a message arrives while
+  scrolled up, "1 new message" pill. Smooth-scroll animations couldn't be watched there
+  (the hidden pane produces no animation frames).
+
 Notes for later phases:
 - The friends sidebar is still a placeholder (Phase 7).
 - Testing tip: in `dev:new:web`, Vite can load a store as `…store.ts?t=…` after a hot

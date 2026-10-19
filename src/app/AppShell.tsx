@@ -1,15 +1,14 @@
 import type { ReactNode } from "react";
 import { ArchiveIcon, ChatIcon, HomeIcon, UserPlusIcon, UsersIcon } from "../ui/icons";
-import { useAuthStore } from "../stores/authStore";
 import { useMessagesStore } from "../stores/messagesStore";
 import { useNavigationStore, type Route } from "../stores/navigationStore";
-import { useProfilesStore } from "../stores/profilesStore";
 import { NavRail } from "../features/navigation/NavRail";
 import { useNavigationShortcuts } from "../features/navigation/useNavigationShortcuts";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { ConversationSidebar } from "../features/conversations/ConversationSidebar";
 import { useConversationsStore } from "../features/conversations/conversationsStore";
-import { conversationTitle, totalUnread } from "../features/conversations/selectors";
+import { totalUnread } from "../features/conversations/selectors";
+import { ChatView } from "../features/chat/ChatView";
 import { useConversationSync } from "../features/conversations/useConversationSync";
 import { ConnectionBanner } from "./ConnectionBanner";
 import type { AppInfo } from "./useDesktop";
@@ -86,22 +85,20 @@ function FriendsSidebarPlaceholder() {
   );
 }
 
-/** Empty state, or (until Phase 3) a stand-in for the open conversation. */
+/** The open conversation, or the page's empty state. */
 function MainPane({ route }: { route: ContentRoute }) {
   const conversationId = "conversationId" in route ? route.conversationId : null;
-  const conversation = useConversationsStore((s) => (conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined));
-  const myUserId = useAuthStore((s) => s.user?.id ?? "");
-  const profiles = useProfilesStore((s) => s.byId);
-  const meta = pageMeta[route.page];
+  if (conversationId) return <ChatView key={conversationId} conversationId={conversationId} />;
 
+  const meta = pageMeta[route.page];
   return (
     <div className="flex flex-1 items-center justify-center p-8">
       <div className="max-w-sm text-center">
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orbit-accent/10 text-orbit-accent [&_svg]:h-6 [&_svg]:w-6">
           {meta.icon}
         </span>
-        <h1 className="mt-4 text-lg font-bold">{conversation ? conversationTitle(conversation, myUserId, profiles) : meta.title}</h1>
-        <p className="mt-1 text-sm text-orbit-muted">{conversation ? "The message view arrives in Phase 3." : meta.hint}</p>
+        <h1 className="mt-4 text-lg font-bold">{meta.title}</h1>
+        <p className="mt-1 text-sm text-orbit-muted">{meta.hint}</p>
       </div>
     </div>
   );
