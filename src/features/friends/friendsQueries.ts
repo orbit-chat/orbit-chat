@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "../../lib/api";
 import { useAuthStore } from "../../stores/authStore";
 import { useSocketStore } from "../../stores/socketStore";
+import { useConversationsStore } from "../conversations/conversationsStore";
 
 export const friendsKey = ["friends"] as const;
 
@@ -29,9 +30,22 @@ export function useFriends() {
   useEffect(() => {
     if (!socket) return;
     const invalidate = () => void queryClient.invalidateQueries({ queryKey: friendsKey });
+    // Keep presence dots live without refetching the whole list.
+    const onPresence = (data: { userId: string; presence: api.Presence }) => {
+      queryClient.setQueryData<FriendsData>(friendsKey, (current) => {
+        if (!current) return current;
+        const patch = (item: api.FriendListItem) => (item.user.id === data.userId ? { ...item, user: { ...item.user, presence: data.presence } } : item);
+        return {
+          friends: current.friends.map(patch),
+          requests: { incoming: current.requests.incoming.map(patch), outgoing: current.requests.outgoing.map(patch) }
+        };
+      });
+    };
     socket.on("friendships_updated", invalidate);
+    socket.on("presence_updated", onPresence);
     return () => {
       socket.off("friendships_updated", invalidate);
+      socket.off("presence_updated", onPresence);
     };
   }, [socket, queryClient]);
 
@@ -81,6 +95,11 @@ export function useFriendAction() {
           return api.removeFriend(action.userId, token);
       }
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: friendsKey })
+    onSettled: (_data, _error, action) => {
+      void queryClient.invalidateQueries({ queryKey: friendsKey });
+      // Unfriending can delete the DM (depending on privacy settings); refresh the chat list.
+      const token = useAuthStore.getState().token;
+      if (action.kind === "remove" && token) void useConversationsStore.getState().load(token);
+    }
   });
 }

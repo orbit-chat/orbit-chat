@@ -398,8 +398,42 @@ the person who left knows the key for future messages. Fixing it needs a remaini
 to rotate the key after `member_left` (the server's `storeConversationKey` could carry the
 new version).
 
+### Phase 7: done (2026-10-19)
+
+- `FriendsPage` (takes over sidebar + main, like settings): friends grouped Online/Offline
+  with presence and status, filter, "Add friend" (username search with the right action per
+  person) and "Requests" (accept/decline incoming, cancel sent). It opens on Requests when
+  any are waiting. Selecting a friend shows their full profile with Message and a confirmed
+  "Remove friend" whose text reflects your delete-on-unfriend setting. The rail's Friends
+  button gets a dot for incoming requests (the old UI put the unread-DM dot there).
+- Friends data updates presence live from `presence_updated`; removing a friend reloads the
+  chat list (the server may delete the DM).
+- `ProfileCard` + `UserPopover`: banner, avatar with presence, name, pronouns, status, roles,
+  bio, local time from their time zone, joined date, https-only links, and the right action
+  (Message / Add friend / Accept / Requested / Edit profile). Message avatars and names open it.
+- Settings → Profile: react-hook-form + zod with the server's limits (character counters),
+  presence as described choices ("Invisible" for offline), time zone with suggestions and
+  "Use mine", up to 5 https links, avatar/banner uploads (immediate, image only, 8 MB), and a
+  live preview card. Settings → Privacy & security: delete-on-unfriend switch (saves
+  immediately) and recovery codes (status, get new codes using current ones and show the new
+  set once, or turn them off permanently behind a warning).
+- **Fix:** Escape inside a settings form field no longer closes settings and loses your edits.
+- Tests: profile schema and mapping, time zones, code parsing, friends page (sections,
+  requests, search actions, profile, confirmed removal), profile save/preview/validation,
+  Escape behaviour, privacy switch, recovery code refresh and disable.
+- Checked by hand in the browser with fixture responses for the friends/profile endpoints:
+  requests view by default, presence grouping, the friend profile card, the profile editor
+  with preview.
+
+### Remaining: Phase 8 (polish and cutover)
+
+Parity gaps to close or consciously drop before deleting the old UI: an image lightbox
+(images currently open via download link), notifications, the dev overlay, a full keyboard
+and screen-reader pass, motion polish, empty-state copy review, real-server testing of every
+flow (sign-in, uploads, Giphy, group key rotation, passcode flows), the Electron window, and
+the group-leave key rotation follow-up above.
+
 Notes for later phases:
-- The friends sidebar is still a placeholder (Phase 7).
 - Testing tip: the browser pane can report a 0×0 viewport when collapsed; set a size with
   the pane's viewport emulation before measuring layout.
 - Testing tip: in `dev:new:web`, Vite can load a store as `…store.ts?t=…` after a hot

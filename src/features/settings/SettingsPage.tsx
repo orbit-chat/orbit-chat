@@ -4,10 +4,12 @@ import { CloseIcon } from "../../ui/icons";
 import { API_BASE } from "../../lib/api";
 import { useNavigationStore, type SettingsSection } from "../../stores/navigationStore";
 import { installUpdateAction, type AppInfo } from "../../app/useDesktop";
+import { PrivacySection } from "./PrivacySection";
+import { ProfileSection } from "./ProfileSection";
 
 const sections: Array<{ id: SettingsSection; label: string }> = [
   { id: "profile", label: "Profile" },
-  { id: "privacy", label: "Privacy" },
+  { id: "privacy", label: "Privacy & security" },
   { id: "keybinds", label: "Keybinds" },
   { id: "updates", label: "Updates" },
   { id: "about", label: "About" }
@@ -32,7 +34,11 @@ export function SettingsPage({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // Radix marks Escape as handled when it closes a menu or dialog first.
-      if (event.key === "Escape" && !event.defaultPrevented) closeSettings();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // Escape in a form field shouldn't throw away what you're typing.
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
+      closeSettings();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -67,9 +73,9 @@ export function SettingsPage({
             </IconButton>
           </Tooltip>
         </div>
-        <div className="mx-auto max-w-2xl px-8 py-10">
-          {section === "profile" && <PlaceholderSection title="Profile" phase={7} />}
-          {section === "privacy" && <PlaceholderSection title="Privacy" phase={7} />}
+        <div className={cn("mx-auto px-8 py-10", section === "profile" ? "max-w-4xl" : "max-w-2xl")}>
+          {section === "profile" && <ProfileSection />}
+          {section === "privacy" && <PrivacySection />}
           {section === "keybinds" && <KeybindsSection />}
           {section === "updates" && <UpdatesSection appInfo={appInfo} status={updateStatus} />}
           {section === "about" && <AboutSection appInfo={appInfo} />}
@@ -92,16 +98,6 @@ function Card({ children, className }: { children: ReactNode; className?: string
   return <section className={cn("rounded-2xl border border-white/10 bg-orbit-panel/60 p-5", className)}>{children}</section>;
 }
 
-function PlaceholderSection({ title, phase }: { title: string; phase: number }) {
-  return (
-    <>
-      <SectionHeader title={title} />
-      <Card>
-        <p className="text-sm text-orbit-muted">This section is rebuilt in Phase {phase} of the UI rework.</p>
-      </Card>
-    </>
-  );
-}
 
 const keybinds: Array<{ action: string; keys: string[] }> = [
   { action: "Open settings", keys: ["Ctrl", ","] },

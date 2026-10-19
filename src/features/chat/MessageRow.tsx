@@ -5,6 +5,7 @@ import type { ChatMessage } from "../../stores/messagesStore";
 import { useMessagesStore } from "../../stores/messagesStore";
 import { useProfilesStore } from "../../stores/profilesStore";
 import { useOutboxStore, type OutboxEntry } from "../composer/outboxStore";
+import { UserPopover } from "../profile/UserPopover";
 import { useChatUiStore } from "./chatUiStore";
 import { searchableText } from "./envelope";
 import { buildMessageActions, react } from "./messageActions";
@@ -66,12 +67,26 @@ export const MessageRow = memo(function MessageRow({
 
   const row = (
     <div className={cn("relative flex items-end gap-2", mine && "flex-row-reverse")}>
-      <div className="w-9 shrink-0">{startsGroup && !mine && <Avatar name={name} src={profile?.avatarUrl} size="md" />}</div>
+      <div className="w-9 shrink-0">
+        {startsGroup && !mine && (
+          <UserPopover userId={message.senderId} username={message.sender}>
+            <button type="button" aria-label={`Profile of ${name}`} className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60">
+              <Avatar name={name} src={profile?.avatarUrl} size="md" />
+            </button>
+          </UserPopover>
+        )}
+      </div>
 
       <div className={cn("flex min-w-0 max-w-[min(75%,42rem)] flex-col", mine ? "items-end" : "items-start")}>
         {startsGroup && (
           <div className={cn("mb-1 flex items-baseline gap-2 px-1", mine && "flex-row-reverse")}>
-            {!mine && <span className="truncate text-xs font-semibold text-orbit-accent">{name}</span>}
+            {!mine && (
+              <UserPopover userId={message.senderId} username={message.sender}>
+                <button type="button" className="truncate text-xs font-semibold text-orbit-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60">
+                  {name}
+                </button>
+              </UserPopover>
+            )}
             <Tooltip content={messageTimestampFull(message.createdAt)}>
               <time dateTime={new Date(message.createdAt).toISOString()} className="text-[10px] text-orbit-muted">
                 {messageTime(message.createdAt)}
