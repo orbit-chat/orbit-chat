@@ -28,7 +28,9 @@ function dropConversation(conversationId: string) {
  */
 async function backfillMessages(conversations: Conversation[], token: string, userId: string) {
   const { byConversation, upsertMessage } = useMessagesStore.getState();
-  const queue = conversations.filter((c) => !byConversation[c.id]?.length);
+  const { unlocked } = useChatLockStore.getState();
+  // Locked chats load nothing until their passcode is entered.
+  const queue = conversations.filter((c) => !byConversation[c.id]?.length && (!c.passcodeEnabled || unlocked[c.id]));
   const worker = async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {
       try {

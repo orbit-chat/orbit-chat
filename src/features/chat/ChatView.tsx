@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { LockIcon } from "../../ui/icons";
 import { useAuthStore } from "../../stores/authStore";
 import { useChatLockStore } from "../../stores/chatLockStore";
 import { useMessagesStore } from "../../stores/messagesStore";
@@ -7,6 +6,8 @@ import { useProfilesStore } from "../../stores/profilesStore";
 import { useConversationsStore } from "../conversations/conversationsStore";
 import { conversationTitle } from "../conversations/selectors";
 import { Composer } from "../composer/Composer";
+import { PasscodeLockScreen } from "../chat-settings/PasscodeLockScreen";
+import { useChatLockEffects } from "../chat-settings/useChatLockEffects";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
 import { useChatUiStore } from "./chatUiStore";
@@ -29,6 +30,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const threadRootId = useChatUiStore((s) => s.threadRootByConversation[conversationId] ?? null);
   useOpenConversation(conversationId, unlocked);
   useSeenReceipts(conversationId, unlocked);
+  useChatLockEffects(conversation, unlocked);
 
   if (!conversation || !user) {
     return (
@@ -54,23 +56,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           {threadRootId && <ThreadPanel conversation={conversation} rootId={threadRootId} me={user} minReadableKeyVersion={minReadableKeyVersion} />}
         </div>
       ) : (
-        <LockedPanel title={title} />
+        <PasscodeLockScreen conversation={conversation} title={title} />
       )}
-    </div>
-  );
-}
-
-/** Phase 6 adds the passcode form and recovery-code bypass here. */
-function LockedPanel({ title }: { title: string }) {
-  return (
-    <div className="flex flex-1 items-center justify-center p-8">
-      <div className="max-w-xs text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/[0.06] text-orbit-muted">
-          <LockIcon className="h-6 w-6" />
-        </span>
-        <h2 className="mt-4 text-base font-bold">{title} is locked</h2>
-        <p className="mt-1 text-sm text-orbit-muted">Enter the chat passcode to read it. The unlock form arrives in Phase 6.</p>
-      </div>
     </div>
   );
 }

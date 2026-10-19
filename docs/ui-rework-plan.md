@@ -362,6 +362,42 @@ lands with the passcode flows in Phase 6 (the data is already captured).
   reactions, context menu, threads with their own draft, search jump, typing/seen display,
   single read receipt, receipts off).
 
+### Phase 6: done (2026-10-19)
+
+- `features/groups/groupKeys.ts` (tested with real crypto): create group, add members, remove
+  member, leave group, delete DM. Every membership change seals a fresh key to each member's
+  newest device key and adopts the next key version locally; a member without a device key
+  is named in the error instead of failing obscurely.
+- **New:** the group owner can remove members (the server allowed it; the old UI had a TODO).
+- `PasscodeLockScreen`: numeric passcode entry, recovery-code bypass with a warning that it
+  turns the passcode off, then reloads the chat. `PasscodeRevealDialog`: the one-time
+  passcode (new passcode group, re-enabled protection, or a chat someone else secured, shown
+  the first time you open it); only "I've saved it" closes it, with copy.
+- `ChatSettingsDialog`: name; lock mode as described choices; timeout presets with
+  validation; passcode digits and new passcode (validated against the length, and a length
+  change requires a new passcode); passcode protection flow (ask to turn off / cancel /
+  agree / turn back on, acting immediately); per-device read-receipt and typing switches;
+  members with owner badge and confirm-to-remove; archive and delete/leave.
+- `DeleteOrLeaveDialog` (DM delete also unfriends; group leave with "delete my messages"),
+  `CreateGroupDialog` and `AddMembersDialog` with a shared `FriendPicker`.
+- `DialogHost` + `dialogStore`: one place renders app dialogs; the header gear, the
+  conversation menus ("Chat settings…", "Delete chat…"/"Leave group…") and the Groups
+  page's "New group" button just open them.
+- `useChatLockEffects`: hands pending passcodes to the reveal dialog when a chat opens, and
+  keeps the after-inactivity timer alive while you use the app (throttled).
+- **Fix:** history backfill no longer fetches messages for locked passcode chats.
+- Tests: group key operations, lock-setting validation, lock screen, bypass, reveal dialog,
+  settings save and validation, device switches, passcode protection, owner-only removal,
+  leave with wipe choice, DM delete refreshing friends, create group.
+- Checked by hand in the browser (stubbed network): locked chat shows the lock screen; the
+  settings dialog opens with the current lock mode and timeout selected and focus inside.
+
+**Security follow-up (not changed, protocol-level):** leaving a group keeps the old
+protocol where the *leaver* generates and seals the new key for the remaining members, so
+the person who left knows the key for future messages. Fixing it needs a remaining member
+to rotate the key after `member_left` (the server's `storeConversationKey` could carry the
+new version).
+
 Notes for later phases:
 - The friends sidebar is still a placeholder (Phase 7).
 - Testing tip: the browser pane can report a 0×0 viewport when collapsed; set a size with

@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
-import { ArchiveIcon, CheckIcon, InboxIcon, LockIcon, PinIcon } from "../../ui/icons";
+import { ArchiveIcon, CheckIcon, InboxIcon, LockIcon, PinIcon, SettingsIcon, TrashIcon } from "../../ui/icons";
 import { useChatLockStore } from "../../stores/chatLockStore";
 import { useMessagesStore } from "../../stores/messagesStore";
 import { routeConversationId, useNavigationStore } from "../../stores/navigationStore";
 import { usePrefsStore, useUserPrefs } from "../../stores/prefsStore";
 import type { Conversation } from "./conversationsStore";
+import { useDialogStore } from "../chat-settings/dialogStore";
 
 export type ConversationAction = {
   id: string;
@@ -65,6 +66,22 @@ export function useConversationActions(conversation: Conversation): Conversation
       if (archived) nav.openConversation(conversation);
       else nav.openConversation(conversation, { archived: true });
     }
+  });
+
+  actions.push({
+    id: "settings",
+    label: "Chat settings…",
+    icon: <SettingsIcon />,
+    separatorBefore: true,
+    onSelect: () => useDialogStore.getState().open({ kind: "chatSettings", conversationId: conversation.id })
+  });
+
+  actions.push({
+    id: "delete",
+    label: conversation.type === "dm" ? "Delete chat…" : "Leave group…",
+    icon: <TrashIcon />,
+    danger: true,
+    onSelect: () => useDialogStore.getState().open({ kind: "deleteOrLeave", conversationId: conversation.id })
   });
 
   return actions;

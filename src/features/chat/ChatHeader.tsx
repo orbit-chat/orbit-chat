@@ -1,11 +1,12 @@
-import { Badge, Tooltip } from "../../ui";
-import { LockIcon } from "../../ui/icons";
+import { Badge, IconButton, Tooltip } from "../../ui";
+import { LockIcon, SettingsIcon } from "../../ui/icons";
 import { useE2EEStore } from "../../stores/e2eeStore";
 import { useProfilesStore } from "../../stores/profilesStore";
 import type { Conversation } from "../conversations/conversationsStore";
 import { ConversationAvatar } from "../conversations/ConversationAvatar";
 import { dmPartner } from "../conversations/selectors";
 import { PinnedPopover, SearchPopover } from "./HeaderPopovers";
+import { useDialogStore } from "../chat-settings/dialogStore";
 
 const presenceLabel: Record<string, string> = {
   online: "Online",
@@ -49,6 +50,11 @@ export function ChatHeader({ conversation, title, myUserId }: { conversation: Co
       <div className="flex items-center gap-0.5">
         <SearchPopover conversationId={conversation.id} />
         <PinnedPopover conversationId={conversation.id} />
+        <Tooltip content="Chat settings">
+          <IconButton label="Chat settings" size="sm" onClick={() => useDialogStore.getState().open({ kind: "chatSettings", conversationId: conversation.id })}>
+            <SettingsIcon />
+          </IconButton>
+        </Tooltip>
       </div>
       {hasKey ? (
         <Tooltip content="Messages are encrypted on your device before they're sent.">

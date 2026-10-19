@@ -11,6 +11,7 @@ import { totalUnread } from "../features/conversations/selectors";
 import { ChatView } from "../features/chat/ChatView";
 import { useOutboxSync } from "../features/composer/useOutboxSync";
 import { useRealtimeSync } from "../features/chat/useRealtimeSync";
+import { DialogHost } from "../features/chat-settings/DialogHost";
 import { useConversationSync } from "../features/conversations/useConversationSync";
 import { ConnectionBanner } from "./ConnectionBanner";
 import type { AppInfo } from "./useDesktop";
@@ -33,6 +34,7 @@ export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateSt
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ConnectionBanner />
+      <DialogHost />
       <div className="flex min-h-0 flex-1">
         <NavRail version={appInfo.version} badges={badges} />
         {route.page === "settings" ? (

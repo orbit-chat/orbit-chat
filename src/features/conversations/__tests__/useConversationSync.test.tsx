@@ -76,6 +76,13 @@ describe("useConversationSync", () => {
     expect(useMessagesStore.getState().unreadCountByConversation.a ?? 0).toBe(0);
   });
 
+  it("doesn't backfill locked passcode chats", async () => {
+    getConversations.mockResolvedValue([dm("a", "ada"), dm("locked", "bob", { passcodeEnabled: true })]);
+    await mount();
+    await waitFor(() => expect(getMessages).toHaveBeenCalledWith("a", "t"));
+    expect(getMessages).not.toHaveBeenCalledWith("locked", "t");
+  });
+
   it("applies created, updated and member events", async () => {
     await mount();
     socket.fire("conversation_created", { conversation: dm("n", "nina"), passcode: "4321" });

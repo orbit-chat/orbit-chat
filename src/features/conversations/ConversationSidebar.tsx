@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Alert, Button, IconButton, Input, Tooltip } from "../../ui";
-import { ArchiveIcon, ChatIcon, ComposeIcon, HomeIcon, SearchIcon, UsersIcon } from "../../ui/icons";
+import { ArchiveIcon, ChatIcon, ComposeIcon, HomeIcon, SearchIcon, UserPlusIcon, UsersIcon } from "../../ui/icons";
 import { useAuthStore } from "../../stores/authStore";
 import { useMessagesStore } from "../../stores/messagesStore";
 import { useNavigationStore } from "../../stores/navigationStore";
@@ -9,6 +9,7 @@ import { useUserPrefs } from "../../stores/prefsStore";
 import { ConversationItem } from "./ConversationItem";
 import { useConversationsStore, type Conversation } from "./conversationsStore";
 import { NewMessageDialog } from "./NewMessageDialog";
+import { useDialogStore } from "../chat-settings/dialogStore";
 import { buildConversationLists, conversationTitle, matchesFilter } from "./selectors";
 
 export type ConversationPage = "home" | "dm" | "groups" | "archive";
@@ -63,6 +64,13 @@ export function ConversationSidebar({ page, selectedId }: { page: ConversationPa
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 pl-4 pr-2">
         <span className="text-orbit-muted">{info.icon}</span>
         <h2 className="flex-1 truncate text-sm font-bold">{info.title}</h2>
+        {page === "groups" && (
+          <Tooltip content="New group">
+            <IconButton label="New group" size="sm" onClick={() => useDialogStore.getState().open({ kind: "createGroup" })}>
+              <UserPlusIcon />
+            </IconButton>
+          </Tooltip>
+        )}
         {canCompose && (
           <Tooltip content="New message">
             <IconButton label="New message" size="sm" onClick={() => setComposing(true)}>
