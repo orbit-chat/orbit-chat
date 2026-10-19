@@ -1,0 +1,12 @@
+/* Loaded only by the rebuilt UI (imported from NewApp), so the old UI keeps its current font. */
+@import "@fontsource-variable/sora";
+
+:root {
+  font-family: "Sora Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+/* The old styles fade #root in with a transform. A transformed ancestor becomes the
+   containing block for position: fixed, so skip it here to keep overlays viewport-anchored. */
+#root {
+  animation: none;
+}

@@ -11,7 +11,8 @@ declare global {
   };
 
   interface Window {
-    electronAPI: {
+    /** Exposed by electron/preload.ts. Undefined when the renderer runs in a plain browser (dev:new:web). */
+    electronAPI?: {
       getVersion: () => Promise<string>;
       getPlatform: () => Promise<string>;
       checkForUpdates: () => Promise<{ ok: boolean; reason?: string }>;

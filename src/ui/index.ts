@@ -18,3 +18,5 @@ export {
 export { Tooltip, TooltipProvider } from "./Tooltip";
 export { Avatar, type Presence } from "./Avatar";
 export { Badge, CountBadge, Kbd } from "./Badge";
+export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
+export { Alert } from "./Alert";

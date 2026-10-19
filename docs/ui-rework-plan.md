@@ -184,7 +184,41 @@ Production builds never include `src/app` unless `VITE_NEW_UI=1` is set at build
   hits the popover (no toolbar underneath); hovering a message shows only that toolbar;
   Settings → Friends replaces the settings page.
 
+### Phase 1: done (2026-10-18)
+
+- `app/NewApp` gate: auth screen → one-time recovery codes → `AppShell`. The dev gallery moved
+  to `#gallery` (dev builds only).
+- `features/auth`: `AuthScreen` (Sign in / Create account / Recovery tabs, react-hook-form +
+  zod, live password checklist, show/hide + Caps Lock warning, username kept across tabs),
+  `RecoveryCodesScreen` (copy, save as .txt, must confirm before continuing), `signOut()` which
+  resets auth, chat locks, prefs, navigation and the query cache in one place.
+- `app/AppShell`: rail | sidebar | main, all driven by the route; settings takes over both
+  columns. `NavRail` with tooltips, active marker and an `AccountMenu` (avatar with presence,
+  edit profile, settings, sign out, version).
+- `features/settings/SettingsPage`: routed sections. Keybinds, Updates (manual check,
+  install/download) and About (version, platform, server) are real; Profile and Privacy wait
+  for Phase 7. Escape or the close button returns to the previous page; Escape that closes a
+  menu first doesn't also close settings.
+- Navigation shortcuts: `Alt+←/→`, mouse back/forward buttons, `Ctrl/Cmd+,`.
+- `UpdateBanner` (dismissible, per-platform install action) and `ConnectionBanner`, which
+  replaces the always-on "Realtime connected" badge and only appears after 2.5s of being
+  offline, with a Retry button.
+- `useSessionLifecycle`: socket follows the token, prefs activate per user, own profile loads.
+- Sora is now bundled (`@fontsource-variable/sora`) and loaded only by the new UI.
+- Small shared changes: `authStore.clearError()`, `api.API_BASE` exported,
+  `window.electronAPI` typed as optional (it's undefined in a browser).
+- Tests: auth schemas (including parity with the old password regex), auth screen flows,
+  recovery-codes gate, shell navigation and settings regression, shortcuts, sign-out reset,
+  update banner.
+- Checked by hand in the browser (no server; a fake signed-in user was injected with no token):
+  validation, password checklist, tabs, rail → settings → friends, Escape behaviour, account
+  menu, sign out.
+
+Not verified yet: real sign-in/sign-up against a server, the socket banner against a live
+connection, and the Electron window (Electron couldn't download its binary in the sandbox).
+Session persistence is unchanged from the old app: tokens live in memory, so restarting the
+app signs you out.
+
 Notes for later phases:
-- The "Sora" font in `styles.css` is never loaded, so the app falls back to Segoe UI. Bundle
-  it (e.g. `@fontsource`) or drop it in Phase 1.
 - Chat lock `onLeave` should hook into navigation changes when conversations land (Phase 2/6).
+- The unread-DM dot on the rail (`NavRail` `badges` prop) gets wired in Phase 2.

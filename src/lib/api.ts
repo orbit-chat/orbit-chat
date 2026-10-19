@@ -4,7 +4,7 @@ function normalizeBaseUrl(rawUrl: string) {
   return fixedPort.replace(/\/$/, "");
 }
 
-const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_URL ?? "http://147.135.31.128:3000");
+export const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_URL ?? "http://147.135.31.128:3000");
 
 type RequestOptions = {
   method?: string;

@@ -1,18 +1,39 @@
+import "./app.css";
 import { TooltipProvider } from "../ui";
+import { useAuthStore } from "../stores/authStore";
+import { AuthScreen } from "../features/auth/AuthScreen";
+import { RecoveryCodesScreen } from "../features/auth/RecoveryCodesScreen";
+import { AppShell } from "./AppShell";
 import { TitleBar } from "./TitleBar";
+import { UpdateBanner } from "./UpdateBanner";
+import { useAppInfo, useUpdaterStatus } from "./useDesktop";
+import { useSessionLifecycle } from "./useSessionLifecycle";
 import { DevGallery } from "./dev/DevGallery";
 
-/**
- * Root of the rebuilt UI. Phase 0 only shows the primitives gallery; the auth gate
- * and real shell replace it in Phase 1 (see docs/ui-rework-plan.md).
- */
+/** Root of the rebuilt UI: window chrome, then sign-in, one-time recovery codes, or the app. */
 export default function NewApp() {
+  const appInfo = useAppInfo();
+  const updateStatus = useUpdaterStatus();
+  useSessionLifecycle();
+
   return (
     <TooltipProvider>
       <div className="flex h-screen flex-col overflow-hidden bg-orbit-base text-orbit-text">
-        <TitleBar title="Orbit Chat — new UI preview" />
-        <DevGallery />
+        <TitleBar />
+        <UpdateBanner status={updateStatus} isMac={appInfo.isMac} />
+        <Screen appInfo={appInfo} updateStatus={updateStatus} />
       </div>
     </TooltipProvider>
   );
+}
+
+function Screen({ appInfo, updateStatus }: Parameters<typeof AppShell>[0]) {
+  const user = useAuthStore((s) => s.user);
+  const recoveryCodes = useAuthStore((s) => s.pendingRecoveryCodes);
+
+  // Dev-only primitives gallery: open the app with #gallery.
+  if (import.meta.env.DEV && window.location.hash === "#gallery") return <DevGallery />;
+  if (!user) return <AuthScreen />;
+  if (recoveryCodes?.length) return <RecoveryCodesScreen codes={recoveryCodes} />;
+  return <AppShell appInfo={appInfo} updateStatus={updateStatus} />;
 }

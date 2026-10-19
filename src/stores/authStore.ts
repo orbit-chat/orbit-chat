@@ -16,6 +16,8 @@ type AuthState = {
   /** Recovery codes shown once after signup */
   pendingRecoveryCodes: string[] | null;
   clearPendingRecoveryCodes: () => void;
+  /** Dismiss the last auth error (e.g. when switching between login and signup). */
+  clearError: () => void;
   setSession: (token: string, user: User, refreshToken?: string) => void;
   clearSession: () => void;
   login: (username: string, password: string) => Promise<void>;
@@ -72,6 +74,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   pendingRecoveryCodes: null,
 
   clearPendingRecoveryCodes: () => set({ pendingRecoveryCodes: null }),
+
+  clearError: () => set({ error: null }),
 
   setSession: (token, user, refreshToken) => {
     set({ token, user, refreshToken: refreshToken ?? null, error: null });
