@@ -44,7 +44,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const minReadableKeyVersion = conversation.members.find((m) => m.userId === user.id)?.minReadableKeyVersion ?? 1;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 animate-orbit-fade-in flex-col">
       <ChatHeader conversation={conversation} title={title} myUserId={user.id} />
       {unlocked ? (
         <div className="flex min-h-0 flex-1">

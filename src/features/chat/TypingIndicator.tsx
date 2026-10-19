@@ -10,14 +10,14 @@ export function typingLabel(names: string[]) {
   return "Several people are typing";
 }
 
-/** Fixed-height line above the composer, so it appearing never shifts the layout. */
+/** Fixed-height line above the composer, so it appearing never shifts the layout. Not a live region: announcing every keystroke pause would be noise. */
 export function TypingIndicator({ conversationId }: { conversationId: string }) {
   const typing = usePresenceStore((s) => s.typingByConversation[conversationId] ?? NO_ONE);
   const profiles = useProfilesStore((s) => s.byId);
   const label = typingLabel(typing.map((id) => profiles[id]?.displayName?.trim() || profiles[id]?.username || "Someone"));
 
   return (
-    <div className="flex h-5 shrink-0 items-center gap-1.5 px-5 text-[11px] text-orbit-muted" aria-live="polite">
+    <div className="flex h-5 shrink-0 items-center gap-1.5 px-5 text-[11px] text-orbit-muted">
       {label && (
         <>
           <span className="flex gap-0.5" aria-hidden="true">

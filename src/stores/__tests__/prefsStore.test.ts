@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_CHAT_REALTIME, LEGACY_KEYS, PREFS_STORAGE_KEY, usePrefsStore } from "../prefsStore";
+import { DEFAULT_CHAT_REALTIME, DEFAULT_NOTIFICATIONS, LEGACY_KEYS, PREFS_STORAGE_KEY, usePrefsStore } from "../prefsStore";
 
 const prefs = () => usePrefsStore.getState();
 const active = () => prefs().byUser[prefs().userId!]!;
@@ -22,7 +22,9 @@ describe("prefsStore", () => {
       archivedConversationIds: ["a1"],
       pinnedConversationIds: ["p1"],
       chatRealtime: { c1: { readReceipts: false, typingIndicators: true } },
-      recentEmojis: ["🔥", "👍"]
+      recentEmojis: ["🔥", "👍"],
+      notifications: DEFAULT_NOTIFICATIONS,
+      mutedConversationIds: []
     });
 
     prefs().activate("bob");
@@ -81,6 +83,26 @@ describe("prefsStore", () => {
     prefs().setChatRealtime("c1", { readReceipts: false });
     prefs().forgetConversation("c1");
     expect(active()).toMatchObject({ pinnedConversationIds: [], archivedConversationIds: [], chatRealtime: {} });
+  });
+
+  it("fills new fields for prefs saved before notifications existed", async () => {
+    localStorage.setItem(
+      PREFS_STORAGE_KEY,
+      JSON.stringify({ version: 1, state: { byUser: { old: { archivedConversationIds: ["a"], pinnedConversationIds: [], chatRealtime: {}, recentEmojis: [] } }, legacyImported: true } })
+    );
+    await usePrefsStore.persist.rehydrate();
+    prefs().activate("old");
+    expect(active()).toMatchObject({ archivedConversationIds: ["a"], notifications: DEFAULT_NOTIFICATIONS, mutedConversationIds: [] });
+  });
+
+  it("toggles mute and notification settings, and forgets muted chats", () => {
+    prefs().activate("alice");
+    prefs().toggleMuted("c1");
+    prefs().setNotifications({ mode: "mentions" });
+    expect(active().mutedConversationIds).toEqual(["c1"]);
+    expect(active().notifications).toEqual({ ...DEFAULT_NOTIFICATIONS, mode: "mentions" });
+    prefs().forgetConversation("c1");
+    expect(active().mutedConversationIds).toEqual([]);
   });
 
   it("persists prefs but not the signed-in user", () => {

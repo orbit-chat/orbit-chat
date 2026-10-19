@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type SettingsSection = "profile" | "privacy" | "keybinds" | "updates" | "about";
+export type SettingsSection = "profile" | "privacy" | "notifications" | "keybinds" | "updates" | "about";
 
 /**
  * The one answer to "what is on screen". Every page — settings included — is a

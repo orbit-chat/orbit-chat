@@ -50,6 +50,7 @@ export function MessageToolbar({
         <button
           key={emoji}
           type="button"
+          tabIndex={-1}
           aria-label={`React ${emoji}`}
           onClick={() => react(conversationId, messageId, emoji)}
           className="flex h-7 w-7 items-center justify-center rounded-full text-[15px] transition-transform hover:scale-110 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60"
@@ -60,14 +61,14 @@ export function MessageToolbar({
       <ReactionPickerButton conversationId={conversationId} messageId={messageId} />
       {reply && (
         <Tooltip content="Reply">
-          <IconButton label="Reply" size="sm" className="rounded-full" onClick={reply.onSelect}>
+          <IconButton label="Reply" size="sm" tabIndex={-1} className="rounded-full" onClick={reply.onSelect}>
             <ReplyIcon className="h-3.5 w-3.5" />
           </IconButton>
         </Tooltip>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <IconButton label="More actions" size="sm" className="rounded-full">
+          <IconButton label="More actions" size="sm" tabIndex={-1} className="rounded-full">
             <MoreIcon className="h-3.5 w-3.5" />
           </IconButton>
         </DropdownMenuTrigger>
@@ -92,7 +93,7 @@ function ReactionPickerButton({ conversationId, messageId }: { conversationId: s
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip content="Add reaction">
         <PopoverTrigger asChild>
-          <IconButton label="Add reaction" size="sm" className="rounded-full">
+          <IconButton label="Add reaction" size="sm" tabIndex={-1} className="rounded-full">
             <SmilePlusIcon className="h-3.5 w-3.5" />
           </IconButton>
         </PopoverTrigger>

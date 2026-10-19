@@ -34,6 +34,11 @@ type MessageRowProps = {
   showSeen?: boolean;
   /** Rendered inside the thread panel: no thread link, replies go to the thread's draft. */
   inThread?: boolean;
+  /** In the tab order (the timeline uses a roving tabindex; arrows move between messages). */
+  focusable?: boolean;
+  onFocusRow?: (messageId: string) => void;
+  /** Just arrived: plays the entrance animation. */
+  fresh?: boolean;
 };
 
 /**
@@ -52,7 +57,10 @@ export const MessageRow = memo(function MessageRow({
   pending,
   replyCount = 0,
   showSeen = false,
-  inThread = false
+  inThread = false,
+  focusable,
+  onFocusRow,
+  fresh = false
 }: MessageRowProps) {
   const mine = message.senderId === me.id;
   const profile = useProfilesStore((s) => s.byId[message.senderId]);
@@ -148,7 +156,18 @@ export const MessageRow = memo(function MessageRow({
   );
 
   return (
-    <div data-message-id={message.id} className={cn("group/msg px-4", startsGroup ? "pt-3" : "pt-0.5")}>
+    <div
+      data-message-id={message.id}
+      role="article"
+      aria-roledescription="message"
+      tabIndex={focusable === undefined ? undefined : focusable ? 0 : -1}
+      onFocus={(event) => event.target === event.currentTarget && onFocusRow?.(message.id)}
+      className={cn(
+        "group/msg px-4 outline-none focus-visible:bg-white/[0.03] focus-visible:shadow-[inset_2px_0_0_rgb(var(--orbit-accent))]",
+        startsGroup ? "pt-3" : "pt-0.5",
+        fresh && "animate-orbit-rise"
+      )}
+    >
       {interactive ? (
         <ContextMenu>
           <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>

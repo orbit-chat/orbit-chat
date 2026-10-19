@@ -11,11 +11,24 @@ export const DEFAULT_CHAT_REALTIME: ChatRealtimePreferences = {
   typingIndicators: true
 };
 
+export type NotificationMode = "all" | "mentions" | "off";
+
+export type NotificationPrefs = {
+  mode: NotificationMode;
+  /** Show message text in the OS notification. Off by default: notification centres keep history. */
+  showPreview: boolean;
+  sound: boolean;
+};
+
+export const DEFAULT_NOTIFICATIONS: NotificationPrefs = { mode: "all", showPreview: false, sound: true };
+
 export type UserPrefs = {
   archivedConversationIds: string[];
   pinnedConversationIds: string[];
   chatRealtime: Record<string, ChatRealtimePreferences>;
   recentEmojis: string[];
+  notifications: NotificationPrefs;
+  mutedConversationIds: string[];
 };
 
 const RECENT_EMOJI_LIMIT = 16;
@@ -30,7 +43,14 @@ export const LEGACY_KEYS = {
 } as const;
 
 export function emptyPrefs(): UserPrefs {
-  return { archivedConversationIds: [], pinnedConversationIds: [], chatRealtime: {}, recentEmojis: [] };
+  return {
+    archivedConversationIds: [],
+    pinnedConversationIds: [],
+    chatRealtime: {},
+    recentEmojis: [],
+    notifications: { ...DEFAULT_NOTIFICATIONS },
+    mutedConversationIds: []
+  };
 }
 
 function readJson(key: string): unknown {
@@ -61,7 +81,20 @@ export function readLegacyPrefs(): UserPrefs {
     archivedConversationIds: stringArray(readJson(LEGACY_KEYS.archived)),
     pinnedConversationIds: stringArray(readJson(LEGACY_KEYS.pinned)),
     chatRealtime,
-    recentEmojis: stringArray(readJson(LEGACY_KEYS.recentEmojis)).slice(0, RECENT_EMOJI_LIMIT)
+    recentEmojis: stringArray(readJson(LEGACY_KEYS.recentEmojis)).slice(0, RECENT_EMOJI_LIMIT),
+    notifications: { ...DEFAULT_NOTIFICATIONS },
+    mutedConversationIds: []
+  };
+}
+
+/** Fills fields added after a user's prefs were first saved. */
+export function withDefaults(prefs: Partial<UserPrefs>): UserPrefs {
+  const empty = emptyPrefs();
+  return {
+    ...empty,
+    ...prefs,
+    notifications: { ...DEFAULT_NOTIFICATIONS, ...prefs.notifications },
+    mutedConversationIds: prefs.mutedConversationIds ?? []
   };
 }
 
@@ -82,6 +115,8 @@ type PrefsState = {
   togglePinned: (conversationId: string) => void;
   setChatRealtime: (conversationId: string, patch: Partial<ChatRealtimePreferences>) => void;
   pushRecentEmoji: (emoji: string) => void;
+  setNotifications: (patch: Partial<NotificationPrefs>) => void;
+  toggleMuted: (conversationId: string) => void;
   /** Remove a deleted/left conversation from every list. */
   forgetConversation: (conversationId: string) => void;
 };
@@ -103,8 +138,9 @@ export const usePrefsStore = create<PrefsState>()(
 
         activate: (userId) => {
           const state = get();
-          if (state.byUser[userId]) {
-            set({ userId });
+          const existing = state.byUser[userId];
+          if (existing) {
+            set({ userId, byUser: { ...state.byUser, [userId]: withDefaults(existing) } });
             return;
           }
           const prefs = state.legacyImported ? emptyPrefs() : readLegacyPrefs();
@@ -134,6 +170,11 @@ export const usePrefsStore = create<PrefsState>()(
             recentEmojis: [emoji, ...prefs.recentEmojis.filter((value) => value !== emoji)].slice(0, RECENT_EMOJI_LIMIT)
           })),
 
+        setNotifications: (patch) => update((prefs) => ({ ...prefs, notifications: { ...prefs.notifications, ...patch } })),
+
+        toggleMuted: (conversationId) =>
+          update((prefs) => ({ ...prefs, mutedConversationIds: toggle(prefs.mutedConversationIds, conversationId) })),
+
         forgetConversation: (conversationId) =>
           update((prefs) => {
             const { [conversationId]: _removed, ...chatRealtime } = prefs.chatRealtime;
@@ -141,6 +182,7 @@ export const usePrefsStore = create<PrefsState>()(
               ...prefs,
               archivedConversationIds: prefs.archivedConversationIds.filter((id) => id !== conversationId),
               pinnedConversationIds: prefs.pinnedConversationIds.filter((id) => id !== conversationId),
+              mutedConversationIds: prefs.mutedConversationIds.filter((id) => id !== conversationId),
               chatRealtime
             };
           })
@@ -148,8 +190,16 @@ export const usePrefsStore = create<PrefsState>()(
     },
     {
       name: PREFS_STORAGE_KEY,
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      // v1 → v2 added notification settings and muted chats.
+      migrate: (persisted, version) => {
+        const state = (persisted ?? {}) as { byUser?: Record<string, Partial<UserPrefs>>; legacyImported?: boolean };
+        if (version < 2) {
+          state.byUser = Object.fromEntries(Object.entries(state.byUser ?? {}).map(([id, prefs]) => [id, withDefaults(prefs)]));
+        }
+        return state as unknown as PrefsState;
+      },
       // The active user comes from the auth session, not from disk.
       partialize: ({ byUser, legacyImported }) => ({ byUser, legacyImported })
     }

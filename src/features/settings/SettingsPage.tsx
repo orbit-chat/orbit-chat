@@ -5,11 +5,13 @@ import { API_BASE } from "../../lib/api";
 import { useNavigationStore, type SettingsSection } from "../../stores/navigationStore";
 import { installUpdateAction, type AppInfo } from "../../app/useDesktop";
 import { PrivacySection } from "./PrivacySection";
+import { NotificationsSection } from "./NotificationsSection";
 import { ProfileSection } from "./ProfileSection";
 
 const sections: Array<{ id: SettingsSection; label: string }> = [
   { id: "profile", label: "Profile" },
   { id: "privacy", label: "Privacy & security" },
+  { id: "notifications", label: "Notifications" },
   { id: "keybinds", label: "Keybinds" },
   { id: "updates", label: "Updates" },
   { id: "about", label: "About" }
@@ -73,9 +75,10 @@ export function SettingsPage({
             </IconButton>
           </Tooltip>
         </div>
-        <div className={cn("mx-auto px-8 py-10", section === "profile" ? "max-w-4xl" : "max-w-2xl")}>
+        <div key={section} className={cn("mx-auto animate-orbit-fade-in px-8 py-10", section === "profile" ? "max-w-4xl" : "max-w-2xl")}>
           {section === "profile" && <ProfileSection />}
           {section === "privacy" && <PrivacySection />}
+          {section === "notifications" && <NotificationsSection />}
           {section === "keybinds" && <KeybindsSection />}
           {section === "updates" && <UpdatesSection appInfo={appInfo} status={updateStatus} />}
           {section === "about" && <AboutSection appInfo={appInfo} />}

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArchiveIcon, CheckIcon, InboxIcon, LockIcon, PinIcon, SettingsIcon, TrashIcon } from "../../ui/icons";
+import { ArchiveIcon, BellIcon, BellOffIcon, CheckIcon, InboxIcon, LockIcon, PinIcon, SettingsIcon, TrashIcon } from "../../ui/icons";
 import { useChatLockStore } from "../../stores/chatLockStore";
 import { useMessagesStore } from "../../stores/messagesStore";
 import { routeConversationId, useNavigationStore } from "../../stores/navigationStore";
@@ -46,6 +46,14 @@ export function useConversationActions(conversation: Conversation): Conversation
       onSelect: () => useChatLockStore.getState().lock(conversation.id)
     });
   }
+
+  const muted = prefs.mutedConversationIds.includes(conversation.id);
+  actions.push({
+    id: "mute",
+    label: muted ? "Unmute notifications" : "Mute notifications",
+    icon: muted ? <BellIcon /> : <BellOffIcon />,
+    onSelect: () => usePrefsStore.getState().toggleMuted(conversation.id)
+  });
 
   actions.push({
     id: "pin",

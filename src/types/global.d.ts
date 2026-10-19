@@ -21,6 +21,10 @@ declare global {
       minimize: () => void;
       maximize: () => void;
       close: () => void;
+      /** Restore and focus the window (added with the new UI; optional for older preload builds). */
+      focusWindow?: () => void;
+      /** Flash the taskbar entry if the window isn't focused. */
+      requestAttention?: () => void;
       isMaximized: () => Promise<boolean>;
       onMaximizedChanged: (cb: (maximized: boolean) => void) => () => void;
       onUpdaterStatus: (cb: (payload: UpdaterStatusPayload) => void) => () => void;

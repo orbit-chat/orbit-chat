@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, cn } from "../../ui";
 import { useMessagesStore, type ChatMessage } from "../../stores/messagesStore";
@@ -7,6 +7,8 @@ import { useChatUiStore } from "./chatUiStore";
 import { useHistory, useHistoryStore } from "./historyStore";
 import { MessageRow } from "./MessageRow";
 import { buildTimeline, type TimelineItem } from "./timeline";
+import { useProfilesStore } from "../../stores/profilesStore";
+import { preferredScrollBehavior } from "../../ui/motion";
 
 /** Within this distance of the bottom counts as "reading the latest". */
 const BOTTOM_THRESHOLD = 96;
@@ -59,6 +61,11 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
   const anchorRef = useRef<{ key: string; delta: number } | null>(null);
   const initialScrollDone = useRef(false);
   const lastMessageIdRef = useRef<string | null>(messages.at(-1)?.id ?? null);
+  /** The one message in the tab order (roving tabindex); defaults to the newest. */
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  /** Messages that arrived while the chat was open; they rise in once (history doesn't). */
+  const [freshIds, setFreshIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -95,8 +102,18 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
     lastMessageIdRef.current = last.id;
     // Older pages prepend; only a change of the newest message counts as "new".
     if (previousLast && messages.findIndex((m) => m.id === previousLast) === -1) return;
+    setFreshIds((current) => new Set(current).add(last.id));
+    window.setTimeout(() => setFreshIds((current) => {
+      const next = new Set(current);
+      next.delete(last.id);
+      return next;
+    }), 1000);
+    if (last.senderId !== me.id) {
+      const name = useProfilesStore.getState().byId[last.senderId]?.displayName?.trim() || last.sender;
+      setAnnouncement(`New message from ${name}`);
+    }
     if (atBottomRef.current || last.senderId === me.id) {
-      requestAnimationFrame(() => scrollToBottom("smooth"));
+      requestAnimationFrame(() => scrollToBottom(preferredScrollBehavior()));
     } else {
       setMissedWhileAway((n) => n + 1);
     }
@@ -138,7 +155,7 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
     (messageId: string) => {
       const index = items.findIndex((item) => item.kind === "message" && item.message.id === messageId);
       if (index < 0) return;
-      virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
+      virtualizer.scrollToIndex(index, { align: "center", behavior: preferredScrollBehavior() });
       setHighlightedId(messageId);
     },
     [items, virtualizer]
@@ -167,6 +184,34 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
     return null;
   }, [stored, me.id]);
 
+  const messageIndexes = useMemo(() => items.flatMap((item, i) => (item.kind === "message" ? [i] : [])), [items]);
+  const focusedId = activeId ?? (messageIndexes.length ? (items[messageIndexes.at(-1)!] as Extract<TimelineItem, { kind: "message" }>).message.id : null);
+
+  /** Up/Down/Home/End/PageUp/PageDown move between messages; Escape goes back to the composer. */
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-message-id]");
+    if (!row || row !== event.target) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      document.querySelector<HTMLTextAreaElement>("textarea[data-main-composer]")?.focus();
+      return;
+    }
+    const steps: Record<string, number> = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 };
+    const current = messageIndexes.findIndex((i) => (items[i] as Extract<TimelineItem, { kind: "message" }>).message.id === row.dataset.messageId);
+    let next: number;
+    if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = messageIndexes.length - 1;
+    else if (event.key in steps) next = Math.max(0, Math.min(messageIndexes.length - 1, current + steps[event.key]!));
+    else return;
+    event.preventDefault();
+    const itemIndex = messageIndexes[next]!;
+    const id = (items[itemIndex] as Extract<TimelineItem, { kind: "message" }>).message.id;
+    setActiveId(id);
+    virtualizer.scrollToIndex(itemIndex, { align: "auto" });
+    // The row may only mount after scrolling; focus it on the next frame.
+    requestAnimationFrame(() => scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`)?.focus());
+  };
+
   const showEmpty = items.length === 0 && !history.loadingLatest;
 
   return (
@@ -177,8 +222,8 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
         role="log"
         aria-label="Messages"
-        aria-live="polite"
-        aria-relevant="additions"
+        aria-live="off"
+        onKeyDown={onKeyDown}
       >
         {history.loadingOlder && <p className="py-3 text-center text-[11px] text-orbit-muted">Loading older messages…</p>}
         {!history.hasOlder && messages.length > 0 && (
@@ -218,6 +263,9 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
                     highlighted={highlightedId === item.message.id}
                     onJumpTo={jumpTo}
                     pending={pendingById.get(item.message.id)}
+                    focusable={item.message.id === focusedId}
+                    fresh={freshIds.has(item.message.id)}
+                    onFocusRow={setActiveId}
                     replyCount={replyCounts.get(item.message.id)}
                     showSeen={item.message.id === myLatestId}
                   />
@@ -226,6 +274,10 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
             );
           })}
         </div>
+      </div>
+
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
       </div>
 
       {history.error && (
@@ -247,7 +299,7 @@ export function MessageList({ conversationId, me, minReadableKeyVersion, unreadA
           tabIndex={atBottom ? -1 : 0}
           aria-hidden={atBottom}
           onClick={() => {
-            scrollToBottom("smooth");
+            scrollToBottom(preferredScrollBehavior());
             setMissedWhileAway(0);
           }}
         >

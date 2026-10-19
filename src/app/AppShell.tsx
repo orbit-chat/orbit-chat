@@ -12,6 +12,8 @@ import { ChatView } from "../features/chat/ChatView";
 import { useOutboxSync } from "../features/composer/useOutboxSync";
 import { FriendsPage } from "../features/friends/FriendsPage";
 import { useFriends } from "../features/friends/friendsQueries";
+import { useNotifications } from "../features/notifications/useNotifications";
+import { useUserPrefs } from "../stores/prefsStore";
 import { useRealtimeSync } from "../features/chat/useRealtimeSync";
 import { DialogHost } from "../features/chat-settings/DialogHost";
 import { useConversationSync } from "../features/conversations/useConversationSync";
@@ -30,11 +32,23 @@ export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateSt
   useConversationSync();
   useOutboxSync();
   useRealtimeSync();
+  useNotifications();
   const route = useNavigationStore((s) => s.route);
   const badges = useRailBadges();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <a
+        href="#orbit-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-12 focus:z-tooltip focus:rounded-lg focus:bg-orbit-accent focus:px-3 focus:py-2 focus:text-sm focus:font-bold focus:text-slate-950"
+        onClick={(event) => {
+          event.preventDefault();
+          const target = document.querySelector<HTMLElement>("textarea[data-main-composer]") ?? document.getElementById("orbit-main");
+          target?.focus();
+        }}
+      >
+        Skip to main content
+      </a>
       <ConnectionBanner />
       <DialogHost />
       <div className="flex min-h-0 flex-1">
@@ -46,7 +60,7 @@ export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateSt
         ) : (
           <>
             <ConversationSidebar page={route.page} selectedId={"conversationId" in route ? route.conversationId : null} />
-            <main className="flex min-w-0 flex-1 flex-col bg-orbit-canvas">
+            <main id="orbit-main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col bg-orbit-canvas outline-none">
               <MainPane route={route} />
             </main>
           </>
@@ -61,9 +75,12 @@ function useRailBadges() {
   const conversations = useConversationsStore((s) => s.conversations);
   const unread = useMessagesStore((s) => s.unreadCountByConversation);
   const friends = useFriends();
+  const muted = useUserPrefs().mutedConversationIds;
+  // Muted chats still count as unread in the list, but don't light up the rail.
+  const audible = conversations.filter((c) => !muted.includes(c.id));
   return {
-    dm: totalUnread(conversations, unread, "dm") > 0,
-    groups: totalUnread(conversations, unread, "group") > 0,
+    dm: totalUnread(audible, unread, "dm") > 0,
+    groups: totalUnread(audible, unread, "group") > 0,
     friends: (friends.data?.requests.incoming.length ?? 0) > 0
   };
 }
@@ -83,7 +100,7 @@ function MainPane({ route }: { route: ContentRoute }) {
 
   const meta = pageMeta[route.page];
   return (
-    <div className="flex flex-1 items-center justify-center p-8">
+    <div key={route.page} className="flex flex-1 animate-orbit-fade-in items-center justify-center p-8">
       <div className="max-w-sm text-center">
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orbit-accent/10 text-orbit-accent [&_svg]:h-6 [&_svg]:w-6">
           {meta.icon}

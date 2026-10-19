@@ -46,6 +46,10 @@ const config: Config = {
           from: { opacity: "0", transform: "scale(0.96)" },
           to: { opacity: "1", transform: "scale(1)" }
         },
+        "orbit-rise": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "translateY(0)" }
+        },
         "orbit-pop-out": {
           from: { opacity: "1", transform: "scale(1)" },
           to: { opacity: "0", transform: "scale(0.96)" }
@@ -55,7 +59,8 @@ const config: Config = {
         "orbit-fade-in": "orbit-fade-in 120ms ease-out",
         "orbit-fade-out": "orbit-fade-out 90ms ease-in",
         "orbit-pop-in": "orbit-pop-in 120ms cubic-bezier(0.16, 1, 0.3, 1)",
-        "orbit-pop-out": "orbit-pop-out 90ms ease-in"
+        "orbit-pop-out": "orbit-pop-out 90ms ease-in",
+        "orbit-rise": "orbit-rise 180ms cubic-bezier(0.16, 1, 0.3, 1)"
       }
     }
   },

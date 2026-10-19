@@ -10,6 +10,7 @@ import { UpdateBanner } from "./UpdateBanner";
 import { useAppInfo, useUpdaterStatus } from "./useDesktop";
 import { useSessionLifecycle } from "./useSessionLifecycle";
 import { DevGallery } from "./dev/DevGallery";
+import DevOverlay from "../components/DevOverlay";
 
 /** Root of the rebuilt UI: window chrome, then sign-in, one-time recovery codes, or the app. */
 export default function NewApp() {
@@ -26,6 +27,8 @@ export default function NewApp() {
         <ErrorBoundary>
           <Screen appInfo={appInfo} updateStatus={updateStatus} />
         </ErrorBoundary>
+        {/* Dev builds only: the in-app log viewer (Ctrl+Shift+F12), shared with the old UI. */}
+        {import.meta.env.DEV && <DevOverlay />}
       </div>
     </TooltipProvider>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Lightbox } from "./Lightbox";
 import * as api from "../../lib/api";
 import { decryptChunkedBytes, decryptMessage, sha256Base64 } from "../../lib/crypto";
 import { useAuthStore } from "../../stores/authStore";
@@ -60,6 +61,7 @@ export function MediaAttachment({
   attachment: UploadedAttachment;
 }) {
   const { url, error, waitingForKey } = useDecryptedMedia(conversationId, keyVersion, attachment);
+  const [viewing, setViewing] = useState(false);
 
   if (error) {
     return <p className="rounded-lg border border-orbit-danger/30 bg-orbit-danger/10 px-3 py-2 text-xs text-rose-300">{error}</p>;
@@ -67,9 +69,17 @@ export function MediaAttachment({
 
   if (attachment.kind === "image") {
     return url ? (
-      <a href={url} download={attachment.name} className="block w-fit overflow-hidden rounded-xl border border-white/10">
-        <img src={url} alt={attachment.name} className="max-h-72 max-w-full object-contain" />
-      </a>
+      <>
+        <button
+          type="button"
+          onClick={() => setViewing(true)}
+          aria-label={`View ${attachment.name}`}
+          className="block w-fit cursor-zoom-in overflow-hidden rounded-xl border border-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60"
+        >
+          <img src={url} alt={attachment.name} className="max-h-72 max-w-full object-contain transition-[filter] hover:brightness-110" />
+        </button>
+        <Lightbox image={{ src: url, alt: attachment.name, downloadName: attachment.name }} open={viewing} onOpenChange={setViewing} />
+      </>
     ) : (
       <div className="flex h-40 w-56 animate-pulse items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-[11px] text-orbit-muted">
         {waitingForKey ? "Waiting for key…" : "Decrypting image…"}
@@ -97,12 +107,22 @@ export function MediaAttachment({
 
 /** GIFs are links to the provider, not encrypted uploads, so only https URLs are shown. */
 export function GifAttachment({ attachment }: { attachment: GifLinkAttachment }) {
+  const [viewing, setViewing] = useState(false);
   const href = safeHttpsUrl(attachment.url);
   const preview = safeHttpsUrl(attachment.previewUrl) ?? href;
   if (!href || !preview) return null;
+  const title = attachment.title || "GIF";
   return (
-    <a href={href} target="_blank" rel="noreferrer noopener" className="block w-fit overflow-hidden rounded-xl border border-white/10">
-      <img src={preview} alt={attachment.title || "GIF"} loading="lazy" className="max-h-64 max-w-full object-cover" />
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setViewing(true)}
+        aria-label={`View ${title}`}
+        className="block w-fit cursor-zoom-in overflow-hidden rounded-xl border border-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60"
+      >
+        <img src={preview} alt={title} loading="lazy" className="max-h-64 max-w-full object-cover" />
+      </button>
+      <Lightbox image={{ src: href, alt: title, externalHref: href }} open={viewing} onOpenChange={setViewing} />
+    </>
   );
 }

@@ -211,3 +211,17 @@ export const SmilePlusIcon = (p: IconProps) => (
     <path d="M9 9h.01M15 9h.01M16 5h6M19 2v6" />
   </Icon>
 );
+
+export const BellIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
+  </Icon>
+);
+
+export const BellOffIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8.7 3A6 6 0 0 1 18 8c0 2.7.4 4.6 1 6M17 17H3s3-2 3-9a5.9 5.9 0 0 1 .3-1.9" />
+    <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0M2 2l20 20" />
+  </Icon>
+);

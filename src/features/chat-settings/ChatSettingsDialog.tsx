@@ -195,6 +195,12 @@ export function ChatSettingsDialog({ conversation, title }: { conversation: Conv
 
         <Section title="On this device" description="Only affects you.">
           <Toggle
+            label="Mute notifications"
+            description="No desktop notifications or sounds for this chat."
+            checked={prefs.mutedConversationIds.includes(conversation.id)}
+            onChange={() => usePrefsStore.getState().toggleMuted(conversation.id)}
+          />
+          <Toggle
             label="Send read receipts"
             description="Let others see when you've read their messages."
             checked={realtime.readReceipts}

@@ -249,6 +249,7 @@ export function Composer({ conversation, me, title, threadRootId }: ComposerProp
               <textarea
                 ref={textareaRef}
                 rows={1}
+                data-main-composer={threadRootId ? undefined : ""}
                 value={draft.text}
                 onChange={(event) => setText(event.target.value, event.target.selectionStart)}
                 onKeyDown={onKeyDown}

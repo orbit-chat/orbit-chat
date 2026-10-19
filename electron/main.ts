@@ -68,6 +68,17 @@ function createWindow() {
     }
   });
   ipcMain.on("window:close", () => mainWindow.close());
+  // Clicking a message notification brings the window back.
+  ipcMain.on("window:focus", () => {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+  // A new message while the window is in the background flashes the taskbar entry.
+  ipcMain.on("window:attention", () => {
+    if (!mainWindow.isFocused()) mainWindow.flashFrame(true);
+  });
+  mainWindow.on("focus", () => mainWindow.flashFrame(false));
   ipcMain.handle("window:isMaximized", () => mainWindow.isMaximized());
 
   // Notify renderer when maximized state changes

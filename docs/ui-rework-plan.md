@@ -425,13 +425,53 @@ new version).
   requests view by default, presence grouping, the friend profile card, the profile editor
   with preview.
 
-### Remaining: Phase 8 (polish and cutover)
+### Phase 8a: polish done (2026-10-19); cutover deliberately on hold
 
-Parity gaps to close or consciously drop before deleting the old UI: an image lightbox
-(images currently open via download link), notifications, the dev overlay, a full keyboard
-and screen-reader pass, motion polish, empty-state copy review, real-server testing of every
-flow (sign-in, uploads, Giphy, group key rotation, passcode flows), the Electron window, and
-the group-leave key rotation follow-up above.
+The old UI stays the default until the new one has been tested against a real server.
+
+- **Lightbox** (`features/chat/Lightbox.tsx`): images and GIFs open full-window (portalled,
+  focus-trapped, Escape/backdrop/close button), click to toggle actual size, Download for
+  decrypted images, "Open original" for GIFs. Focus goes to the viewer on open so the first
+  Escape isn't swallowed by a tooltip.
+- **Notifications** (new; the old client had none): `notificationRules.ts` (pure, tested) +
+  `useNotifications`. Modes all / mentions only / off, message text **off by default** (OS
+  notification centres keep history) and never shown for passcode chats, optional Web Audio
+  chime, per-chat mute (conversation menu, chat settings, muted list in settings; muted chats
+  get a bell-off icon, a grey badge and don't light the rail), clicking a notification focuses
+  the window and opens the chat, taskbar flash while unfocused, and "(N) Orbit Chat" in the
+  window title. Settings → Notifications with permission state and a test notification.
+  Prefs schema v2 with a migration that fills the new fields for existing accounts.
+- **Electron**: two IPC channels added (`window:focus`, `window:attention` → `flashFrame`),
+  exposed as optional `focusWindow` / `requestAttention` in the preload.
+- **Accessibility**: the timeline keeps `role="log"` but is no longer live (virtualized rows
+  mounting while scrolling were being announced as new); a separate polite announcer says
+  "New message from …" for real arrivals. Messages are one tab stop with a roving tabindex:
+  ↑/↓, PageUp/PageDown, Home/End move between them, the context-menu key or Shift+F10 opens
+  every action, Escape returns to the composer; the hover toolbar's buttons left the tab order
+  (they're mouse shortcuts for the same actions). Typing indicator is no longer a live region.
+  "Skip to main content" link. Focus rings only for keyboard focus.
+- **Motion**: new messages rise in once (history doesn't), chat and page switches fade, unread
+  badges pop; everything (and all programmatic smooth scrolling) is disabled under
+  `prefers-reduced-motion`.
+- Dev log overlay (Ctrl+Shift+F12) mounted in dev builds, shared with the old UI.
+- Tests: notification rules, the notification hook (default privacy, click to open,
+  mentions, mute, window title), the notifications settings, prefs migration and mute,
+  keyboard navigation and announcer, lightbox.
+- Checked by hand in the browser (stubbed network): lightbox opens with focus on the viewer
+  and closes with Escape; only the newest message is tabbable; skip link present;
+  notifications settings show defaults and the blocked-permission notice.
+
+### Remaining: Phase 8b (cutover), after real-server testing
+
+1. Test every flow against a real server, in the Electron window: sign-up/sign-in/recovery,
+   DMs and groups, sends/receives across two accounts, uploads and downloads, Giphy, reactions,
+   pins, threads, receipts and typing, passcode lock/bypass/reveal/disable-agreement, group
+   add/remove/leave key rotation, friends, profile edits and uploads, notifications.
+2. Fix what that turns up.
+3. Make the new UI the default (`main.tsx`), then delete `App.tsx`, `ProfileSettings.tsx`,
+   `UserProfilePopover.tsx`, `ContextMenu.tsx` and the `orbit-*` component classes in
+   `styles.css` the old UI used; drop the flag and `.env.newui*`.
+4. Consider Tailwind v4 and the group-leave key rotation follow-up.
 
 Notes for later phases:
 - Testing tip: the browser pane can report a 0×0 viewport when collapsed; set a size with

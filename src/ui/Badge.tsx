@@ -29,7 +29,7 @@ export function CountBadge({ count, className }: { count: number; className?: st
   return (
     <span
       className={cn(
-        "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-orbit-accent px-1 text-[10px] font-bold text-slate-950",
+        "inline-flex h-[18px] min-w-[18px] animate-orbit-pop-in items-center justify-center rounded-full bg-orbit-accent px-1 text-[10px] font-bold text-slate-950",
         className
       )}
     >

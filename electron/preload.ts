@@ -18,6 +18,8 @@ const electronAPI = {
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),
   close: () => ipcRenderer.send("window:close"),
+  focusWindow: () => ipcRenderer.send("window:focus"),
+  requestAttention: () => ipcRenderer.send("window:attention"),
   isMaximized: () => ipcRenderer.invoke("window:isMaximized") as Promise<boolean>,
   onMaximizedChanged: (cb: (maximized: boolean) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, maximized: boolean) => cb(maximized);
