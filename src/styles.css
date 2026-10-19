@@ -104,7 +104,30 @@
   }
 }
 
+/* ─── Design tokens ───
+   Space-separated RGB channels so Tailwind can apply opacity (`bg-orbit-accent/40`).
+   Referenced by tailwind.config.ts; components never use raw hex values. */
 :root {
+  --orbit-bg: 13 17 23;
+  --orbit-panel: 17 24 39;
+  --orbit-panel-alt: 15 23 42;
+  --orbit-text: 229 231 235;
+  --orbit-muted: 148 163 184;
+  --orbit-accent: 45 212 191;
+  --orbit-accent-bright: 95 246 223;
+  --orbit-danger: 251 113 133;
+  --orbit-warning: 252 211 77;
+
+  --orbit-chrome: 12 14 20;
+  --orbit-base: 15 18 24;
+  --orbit-canvas: 23 27 37;
+  --orbit-sidebar: 26 30 41;
+  --orbit-raised: 27 32 48;
+  --orbit-overlay: 28 32 48;
+  --orbit-dialog: 29 33 43;
+  --orbit-bubble: 32 37 51;
+  --orbit-hover: 37 42 58;
+
   font-family: "Sora", "Space Grotesk", "Segoe UI", sans-serif;
 }
 

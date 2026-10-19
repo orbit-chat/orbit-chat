@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import electron from "vite-plugin-electron/simple";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       // libsodium-wrappers@0.7.16 currently publishes an ESM entry that imports
@@ -19,13 +19,19 @@ export default defineConfig({
   },
   plugins: [
     react(),
-    electron({
-      main: {
-        entry: "electron/main.ts"
-      },
-      preload: {
-        input: "electron/preload.ts"
-      }
-    })
+    // `*-web` modes serve only the renderer in a browser (no Electron window), for UI work and previews.
+    // window.electronAPI is undefined there, so desktop-only controls do nothing.
+    ...(mode.endsWith("-web")
+      ? []
+      : [
+          electron({
+            main: {
+              entry: "electron/main.ts"
+            },
+            preload: {
+              input: "electron/preload.ts"
+            }
+          })
+        ])
   ]
-});
+}));
