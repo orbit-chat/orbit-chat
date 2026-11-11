@@ -18,7 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.electron.json",
     "check": "npm run typecheck && npm test && npm run build",
     "build:mobile": "tsc -b && vite build --mode mobile",
     "build:mobile:local": "tsc -b && vite build --mode mobile-local",

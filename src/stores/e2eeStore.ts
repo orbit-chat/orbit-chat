@@ -24,13 +24,9 @@ import {
 import { deviceIdFromToken } from "../lib/jwt";
 import { markPerDeviceKeysSeen } from "../lib/uiPreference";
 
-function latestKey(keys: { publicKey: string; createdAt: string }[]) {
-  if (!keys.length) return null;
-  // keys are already ordered desc on the server, but keep this robust
-  return keys
-    .slice()
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]!
-    .publicKey;
+/** The server lists keys newest first and keeps no registration times (no-logs policy). */
+function latestKey(keys: { publicKey: string }[]) {
+  return keys[0]?.publicKey ?? null;
 }
 
 /** Where the device private key lives in the platform's secure store. Desktop installs already use this key. */

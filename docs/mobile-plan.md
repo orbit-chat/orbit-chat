@@ -580,8 +580,11 @@ Sockets don't survive in the background on mobile, so push is required for messa
       proxy, CORS allows the Android origin. Phone test builds are served from
       `https://cdn.bcgn.net/orbit/<token>/` (no listing).
 - [ ] Point desktop at `https://orbit.bcgn.net` in its next release, then close port 3000.
-- [ ] Server: a request from a disallowed origin gets a 500 (the CORS callback passes an error)
-      instead of a plain refusal; pass `false` instead so it isn't logged as a server error.
+- [x] No-logs policy, 2026-11-11 (`orbit-server/docs/privacy.md`, server 225059c). No sign-in
+      history, last-seen times or key/device timestamps are stored; failed guesses and linking
+      attempts expire; the server prints nothing (PM2 output to `NUL`); disallowed origins are
+      refused quietly. On PGX, Caddy strips visitor IPs and headers from all its logs and
+      PostgreSQL logs errors tersely; existing Orbit and PostgreSQL logs were deleted.
 - [ ] Release the desktop client with per-device keys to every user, then turn the switch on.
 - [ ] Run the `AGENTS.md` device checklist on two real devices against a staging server with the
       switch on.

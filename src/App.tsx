@@ -386,12 +386,10 @@ function persistChatPreferences(value: Record<string, ChatRealtimePreferences>) 
   localStorage.setItem(CHAT_PREFERENCES_STORAGE_KEY, JSON.stringify(value));
 }
 
-function latestPublicKey(keys: { publicKey: string; createdAt: string }[]) {
+/** The server lists keys newest first and keeps no registration times (no-logs policy). */
+function latestPublicKey(keys: { publicKey: string }[]) {
   if (!keys.length) return null;
-  return keys
-    .slice()
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]!
-    .publicKey;
+  return keys[0]!.publicKey;
 }
 
 function MediaAttachmentView(props: {
