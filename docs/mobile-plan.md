@@ -575,8 +575,13 @@ Sockets don't survive in the background on mobile, so push is required for messa
       nine migrations, switch off (`GET /config/e2ee` → `perDeviceKeys: false`). Sign-ins with and
       without `installId` both reach the credential check, so current desktop clients keep working.
 - [ ] Merge that branch to `main` on GitHub and move the PGX checkout back to `main`.
-- [ ] HTTPS: `orbit.bcgn.net` (decision 2) through Caddy to the server on :3000. Needs the
-      GoDaddy A record `orbit` → 147.135.31.128. Then point desktop at it too and close port 3000.
+- [x] HTTPS, 2026-11-11: `https://orbit.bcgn.net` (decision 2) through Caddy on PGX to the server
+      on :3000. Let's Encrypt certificate (renewed by Caddy), HSTS, websockets checked through the
+      proxy, CORS allows the Android origin. Phone test builds are served from
+      `https://cdn.bcgn.net/orbit/<token>/` (no listing).
+- [ ] Point desktop at `https://orbit.bcgn.net` in its next release, then close port 3000.
+- [ ] Server: a request from a disallowed origin gets a 500 (the CORS callback passes an error)
+      instead of a plain refusal; pass `false` instead so it isn't logged as a server error.
 - [ ] Release the desktop client with per-device keys to every user, then turn the switch on.
 - [ ] Run the `AGENTS.md` device checklist on two real devices against a staging server with the
       switch on.
