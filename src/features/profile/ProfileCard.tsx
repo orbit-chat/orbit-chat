@@ -3,6 +3,7 @@ import { Avatar, Badge, cn, type Presence } from "../../ui";
 import type { UserProfile } from "../../lib/api";
 import { safeHttpsUrl } from "../chat/envelope";
 import { PRESENCE_OPTIONS, localTimeIn } from "./profileSchema";
+import { externalLinkProps } from "../../platform";
 
 function formatDate(value?: string | null, withTime = false) {
   if (!value) return null;
@@ -87,9 +88,7 @@ export function ProfileCard({
             {links.map((link) => (
               <li key={link.href}>
                 <a
-                  href={link.href}
-                  target="_blank"
-                  rel="noreferrer noopener"
+                  {...externalLinkProps(link.href)}
                   className="inline-flex max-w-[14rem] items-center truncate rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-sky-300 hover:border-white/20"
                 >
                   {link.label}

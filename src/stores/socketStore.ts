@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { io, Socket } from "socket.io-client";
 import { useMessagesStore } from "./messagesStore";
 import { useAuthStore } from "./authStore";
+import { SOCKET_URL } from "../lib/serverConfig";
 
 type SocketState = {
   socket: Socket | null;
@@ -11,14 +12,6 @@ type SocketState = {
   connect: (token: string) => void;
   disconnect: () => void;
 };
-
-function normalizeBaseUrl(rawUrl: string) {
-  const trimmed = rawUrl.trim();
-  const fixedPort = trimmed.replace(/\/:(\d+)/, ":$1");
-  return fixedPort.replace(/\/$/, "");
-}
-
-const SOCKET_URL = normalizeBaseUrl(import.meta.env.VITE_SOCKET_URL ?? "http://147.135.31.128:3000");
 
 function isAuthSocketError(message?: string | null) {
   if (!message) return false;
@@ -151,6 +144,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       reactions?: Array<{ emoji: string; count: number; userIds: string[] }>;
       isPinned?: boolean;
       createdAt: number;
+      senderDeviceId?: string | null;
+      signature?: string | null;
     }) => {
       const currentUserId = useAuthStore.getState().user?.id;
       useMessagesStore.getState().upsertMessage(data.conversationId, {
@@ -165,6 +160,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         mediaIds: data.mediaIds ?? [],
         reactions: data.reactions ?? [],
         isPinned: data.isPinned ?? false,
+        senderDeviceId: data.senderDeviceId ?? null,
+        signature: data.signature ?? null,
       }, { currentUserId });
     });
 

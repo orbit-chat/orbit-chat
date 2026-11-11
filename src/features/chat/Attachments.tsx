@@ -5,6 +5,7 @@ import { decryptChunkedBytes, decryptMessage, sha256Base64 } from "../../lib/cry
 import { useAuthStore } from "../../stores/authStore";
 import { useE2EEStore } from "../../stores/e2eeStore";
 import { safeHttpsUrl, type GifLinkAttachment, type UploadedAttachment } from "./envelope";
+import { downloadLinkProps } from "../../platform";
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "";
@@ -89,8 +90,7 @@ export function MediaAttachment({
 
   return (
     <a
-      href={url ?? undefined}
-      download={attachment.name}
+      {...downloadLinkProps(attachment.name, url)}
       aria-disabled={!url}
       className="flex w-fit max-w-full items-center gap-3 rounded-xl border border-white/10 bg-orbit-panelAlt px-3 py-2 hover:border-white/20 aria-disabled:pointer-events-none aria-disabled:opacity-60"
     >

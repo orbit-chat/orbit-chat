@@ -1,10 +1,6 @@
-function normalizeBaseUrl(rawUrl: string) {
-  const trimmed = rawUrl.trim();
-  const fixedPort = trimmed.replace(/\/:(\d+)/, ":$1");
-  return fixedPort.replace(/\/$/, "");
-}
+import { API_BASE } from "./serverConfig";
 
-export const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_URL ?? "http://147.135.31.128:3000");
+export { API_BASE };
 
 type RequestOptions = {
   method?: string;
@@ -15,6 +11,36 @@ type RequestOptions = {
 };
 
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * A non-2xx response. `status` lets callers tell "not found" or "conflict" apart from failures;
+ * `code` is the server's machine-readable reason where it gives one (e.g. `KEY_ERROR` below), and
+ * `body` the rest of the error response.
+ */
+export class ApiError extends Error {
+  readonly code: string | undefined;
+  constructor(message: string, readonly status: number, readonly body: Record<string, unknown> = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.code = typeof body.code === "string" ? body.code : undefined;
+  }
+}
+
+/** Reasons the server gives for refusing a key write or a send (mobile plan M1b). */
+export const KEY_ERROR = {
+  /** Someone rotated first; the body carries `expectedKeyVersion`. Re-seal for that version. */
+  versionConflict: "key_version_conflict",
+  /** A member left; a remaining member has to rotate before anyone can send. */
+  rotationRequired: "rotation_required",
+  /** The message was encrypted with an older key than the newest; the body carries `expectedKeyVersion`. */
+  staleKeyVersion: "stale_key_version",
+  /** This device isn't on its user's signed device list yet. */
+  deviceNotLinked: "device_not_linked",
+  /** The server uses per-device keys and this client sent the old per-user form. */
+  updateRequired: "update_required",
+  /** The key set didn't match the members' current device lists or membership: refetch and seal again. */
+  deviceListChanged: "device_list_changed",
+} as const;
 
 async function request<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -55,7 +81,9 @@ async function request<T = unknown>(path: string, opts: RequestOptions = {}): Pr
       }
     }
     const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message ?? `HTTP ${res.status}`);
+    const body = err && typeof err === "object" ? (err as Record<string, unknown>) : {};
+    const message = Array.isArray(body.message) ? body.message.join(", ") : body.message;
+    throw new ApiError(typeof message === "string" && message ? message : `HTTP ${res.status}`, res.status, body);
   }
 
   return res.json() as Promise<T>;
@@ -75,11 +103,12 @@ export function signup(data: {
   password: string;
   publicKey: string;
   deviceName: string;
+  installId: string;
 }) {
   return request<AuthResponse>("/auth/signup", { method: "POST", body: data });
 }
 
-export function login(data: { username: string; password: string; deviceName: string }) {
+export function login(data: { username: string; password: string; deviceName: string; installId: string }) {
   return request<AuthResponse>("/auth/login", { method: "POST", body: data });
 }
 
@@ -87,8 +116,23 @@ export function loginWithRecoveryCode(data: {
   username: string;
   recoveryCode: string;
   deviceName: string;
+  installId: string;
 }) {
   return request<AuthResponse>("/auth/login/recovery", { method: "POST", body: data });
+}
+
+/** End this device's session on the server: its refresh token, sockets and pushes stop. */
+export function logout(token: string) {
+  return request<{ success: true }>("/auth/logout", { method: "POST", token });
+}
+
+/** Content-free push for this device (mobile plan M4). */
+export function registerPush(data: { platform: "apns" | "fcm"; token: string; mutedConversationIds: string[] }, token: string) {
+  return request<{ registered: boolean }>("/push/registration", { method: "PUT", body: data, token });
+}
+
+export function unregisterPush(token: string) {
+  return request<{ registered: boolean }>("/push/registration", { method: "DELETE", token });
 }
 
 export function refreshToken(rt: string) {
@@ -254,6 +298,144 @@ export function addMyPublicKey(publicKey: string, token: string) {
   });
 }
 
+/* ───── Identity and device lists (mobile plan B6) ───── */
+
+export type SignedDeviceListResponse = { version: number; body: string; signature: string };
+export type IdentityResponse = { identityKey: string; deviceList: SignedDeviceListResponse };
+
+/** Null when the user has no identity yet (404); any other failure throws. */
+async function identityOrNull(path: string, token: string) {
+  try {
+    return await request<IdentityResponse>(path, { token });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export function getMyIdentity(token: string) {
+  return identityOrNull("/identity/me", token);
+}
+
+export function getUserIdentity(userId: string, token: string) {
+  return identityOrNull(`/identity/${encodeURIComponent(userId)}`, token);
+}
+
+export function publishIdentity(
+  data: { identityKey: string; deviceList: { body: string; signature: string } },
+  token: string
+) {
+  return request<IdentityResponse>("/identity/me", { method: "PUT", body: data, token });
+}
+
+export function publishDeviceList(deviceList: { body: string; signature: string }, token: string) {
+  return request<IdentityResponse>("/identity/me/device-list", { method: "POST", body: deviceList, token });
+}
+
+/**
+ * The newest list that named a device, for checking keys it issued before it left its user's
+ * list. Null when no list did. Callers verify it against the identity key they pinned.
+ */
+export function getDeviceListContaining(userId: string, deviceId: string, token: string) {
+  return identityOrNull(`/identity/${encodeURIComponent(userId)}/device-lists/${encodeURIComponent(deviceId)}`, token);
+}
+
+/* ───── Device linking relay (mobile plan B7) ───── */
+
+export type LinkSessionStatus = "open" | "joined" | "completed" | "failed" | "cancelled" | "expired";
+export type LinkSession = {
+  sessionId: string;
+  mode: "qr" | "code";
+  creatorRole: "existing" | "new";
+  creatorDeviceId: string;
+  joinerDeviceId: string | null;
+  status: LinkSessionStatus;
+  failureReason: string | null;
+  expiresAt: string;
+};
+
+export function createLinkSession(data: { mode: "qr" | "code"; role: "existing" | "new" }, token: string) {
+  return request<LinkSession>("/link/sessions", { method: "POST", body: data, token });
+}
+
+/** The account's open session for a typed code; null when there is none. */
+export async function getActiveLinkSession(token: string) {
+  try {
+    return await request<LinkSession>("/link/sessions/active", { token });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export function joinLinkSession(sessionId: string, token: string) {
+  return request<LinkSession>(`/link/sessions/${encodeURIComponent(sessionId)}/join`, { method: "POST", token });
+}
+
+export function postLinkMessage(sessionId: string, payload: string, token: string) {
+  return request<{ seq: number }>(`/link/sessions/${encodeURIComponent(sessionId)}/messages`, { method: "POST", body: { payload }, token });
+}
+
+export function getLinkMessages(sessionId: string, after: number, token: string) {
+  return request<{ session: LinkSession; messages: Array<{ seq: number; payload: string }> }>(
+    `/link/sessions/${encodeURIComponent(sessionId)}/messages?after=${after}`,
+    { token }
+  );
+}
+
+export function failLinkSession(sessionId: string, reason: string, token: string) {
+  return request<LinkSession>(`/link/sessions/${encodeURIComponent(sessionId)}/fail`, { method: "POST", body: { reason }, token });
+}
+
+export function completeLinkSession(sessionId: string, token: string) {
+  return request<LinkSession>(`/link/sessions/${encodeURIComponent(sessionId)}/complete`, { method: "POST", token });
+}
+
+export type RecentLinkSession = LinkSession & { createdAt: string; creatorDeviceName: string | null; joinerDeviceName: string | null };
+
+export function getRecentLinkSessions(token: string) {
+  return request<RecentLinkSession[]>("/link/sessions/recent", { token });
+}
+
+/** Which key protocol the server runs. No auth. */
+export function getE2eeConfig() {
+  return request<{ perDeviceKeys: boolean }>("/config/e2ee");
+}
+
+export type AccountDevice = {
+  id: string;
+  name: string;
+  lastSeenAt: string | null;
+  signedIn: boolean;
+  /** On the account's current signed device list, as the server reads it. Display only. */
+  trusted: boolean;
+  /** The device making this request. */
+  current: boolean;
+};
+
+export type AccountDevicesResponse = {
+  identityPublished: boolean;
+  deviceListVersion: number | null;
+  devices: AccountDevice[];
+};
+
+export function getMyDevices(token: string) {
+  return request<AccountDevicesResponse>("/identity/me/devices", { token });
+}
+
+/** Start over with a new identity after losing every linked device (mobile plan B10). */
+export function resetIdentity(
+  data: { password: string; recoveryCode: string; identityKey: string; deviceList: { body: string; signature: string } },
+  token: string
+) {
+  return request<IdentityResponse>("/identity/me/reset", { method: "POST", body: data, token });
+}
+
+/** Sign out a device that isn't linked. Linked devices are removed by publishing a list without them. */
+export function signOutDevice(deviceId: string, token: string) {
+  return request<{ success: true }>(`/identity/me/devices/${encodeURIComponent(deviceId)}/sign-out`, { method: "POST", token });
+}
+
 export function getFriends(token: string) {
   return request<FriendListItem[]>(`/users/friends`, { token });
 }
@@ -308,10 +490,29 @@ export type ConversationKey = {
   keyVersion: number;
   createdAt: string;
   updatedAt: string;
+  /** The device this copy is sealed to; null on legacy per-user rows. */
+  deviceId?: string | null;
+  /** The device that sealed and signed it (per-device rows only). */
+  issuerDeviceId?: string | null;
+  signature?: string | null;
+  /** The server's lookup hint for whose device list holds the issuer. Never trusted on its own. */
+  issuerUserId?: string | null;
+  legacy?: boolean;
 };
 
 export function getMyConversationKeys(conversationId: string, token: string) {
   return request<ConversationKey[]>(`/keys/${conversationId}`, { token });
+}
+
+/** One sealed, signed copy of a conversation key for one device (per-device keys). */
+export type DeviceKeyInput = { deviceId: string; sealedKey: string; signature: string };
+
+/** Existing keys re-sealed for this user's own linked devices (linking, and the one-time legacy move). */
+export function storeDeviceKeyBatch(
+  keys: Array<DeviceKeyInput & { conversationId: string; keyVersion: number }>,
+  token: string
+) {
+  return request<{ stored: number; skipped: number }>(`/keys/device-batch`, { method: "POST", body: { keys }, token });
 }
 
 export function storeConversationKey(
@@ -356,17 +557,29 @@ export type Conversation = {
   passcode?: string;
   /** Whether the conversation was newly created (false = existing DM returned) */
   created?: boolean;
+  /**
+   * Per-device keys: a member left, and nobody can send until a remaining member rotates the key
+   * (the leaver can't issue it). Absent on servers without per-device keys.
+   */
+  rotationRequired?: boolean;
 };
 
 export function getConversations(token: string) {
   return request<Conversation[]>("/conversations", { token });
 }
 
+/** The per-device form of a key write: the version the signatures cover, and one copy per device. */
+export type PerDeviceKeyWrite = { keyVersion: number; deviceKeys: DeviceKeyInput[] };
+
 export function createConversation(
   data: {
     type: "dm" | "group";
     name?: string;
     memberIds: string[];
+    /** Per-device keys: chosen by the client, because every envelope signs it. */
+    conversationId?: string;
+    keyVersion?: number;
+    deviceKeys?: DeviceKeyInput[];
     encryptedKeys?: Record<string, string>;
     encryptedTitle?: string;
     titleNonce?: string;
@@ -427,6 +640,7 @@ export function deleteConversation(conversationId: string, wipeMessages: boolean
   });
 }
 
+/** `encryptedKeys` is the legacy form only; with per-device keys the server flags the chat for rotation instead. */
 export function leaveGroupChat(
   conversationId: string,
   wipeMessages: boolean,
@@ -435,14 +649,14 @@ export function leaveGroupChat(
 ) {
   return request<{ success: true; destroyed: boolean }>(`/conversations/${conversationId}/leave`, {
     method: "POST",
-    body: { wipeMessages, encryptedKeys },
+    body: encryptedKeys ? { wipeMessages, encryptedKeys } : { wipeMessages },
     token,
   });
 }
 
 export function addMembers(
   conversationId: string,
-  data: { memberIds: string[]; encryptedKeys?: Record<string, string> },
+  data: { memberIds: string[]; encryptedKeys?: Record<string, string> } & Partial<PerDeviceKeyWrite>,
   token: string
 ) {
   return request<{ success: true }>(`/conversations/${conversationId}/members`, {
@@ -455,12 +669,21 @@ export function addMembers(
 export function removeMember(
   conversationId: string,
   userId: string,
-  encryptedKeys: Record<string, string>,
+  keys: { encryptedKeys: Record<string, string> } | PerDeviceKeyWrite,
   token: string
 ) {
   return request<{ success: true }>(`/conversations/${conversationId}/members/${userId}`, {
     method: "DELETE",
-    body: { encryptedKeys },
+    body: keys,
+    token,
+  });
+}
+
+/** Issue the next key version to every member's linked devices (per-device keys only). */
+export function rotateConversationKey(conversationId: string, data: PerDeviceKeyWrite, token: string) {
+  return request<{ conversationId: string; keyVersion: number }>(`/conversations/${conversationId}/rotate-key`, {
+    method: "POST",
+    body: data,
     token,
   });
 }
@@ -568,6 +791,9 @@ export type ServerMessage = {
   isPinned?: boolean;
   createdAt: string;
   sender: { id: string; username: string };
+  /** Mobile plan B9: the sending device and its signature; null on messages sent before signing. */
+  senderDeviceId?: string | null;
+  signature?: string | null;
 };
 
 export function getMessages(conversationId: string, token: string, cursor?: string) {
@@ -576,7 +802,16 @@ export function getMessages(conversationId: string, token: string, cursor?: stri
 }
 
 export function sendMessage(
-  data: { conversationId: string; ciphertext: string; nonce: string; parentMessageId?: string; keyVersion?: number; mediaIds?: string[] },
+  data: {
+    conversationId: string;
+    ciphertext: string;
+    nonce: string;
+    parentMessageId?: string;
+    keyVersion?: number;
+    mediaIds?: string[];
+    messageId?: string;
+    signature?: string;
+  },
   token: string
 ) {
   return request<ServerMessage>("/messages", { method: "POST", body: data, token });

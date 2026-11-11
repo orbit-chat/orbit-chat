@@ -1,0 +1,25 @@
+{
+  "name": "@orbit/capacitor-secure-store",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Orbit's secret storage for the iOS and Android shells: Keychain (this device only, shared access group) and an Android Keystore AES-GCM key. JS side is registerPlugin('SecureStore') in src/platform/capacitor.ts.",
+  "license": "UNLICENSED",
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "ios/Sources",
+    "Package.swift",
+    "OrbitCapacitorSecureStore.podspec"
+  ],
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}

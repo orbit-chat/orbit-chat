@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Button, Dialog, DialogContent } from "../../ui";
 import { CopyIcon } from "../../ui/icons";
 import { usePasscodeRevealStore } from "./passcodeRevealStore";
+import { getPlatform } from "../../platform";
 
 /**
  * A chat's passcode, shown exactly once (new passcode chat, re-enabled protection, or
@@ -42,7 +43,7 @@ export function PasscodeRevealDialog() {
             className="mt-3 w-full"
             onClick={async () => {
               try {
-                await navigator.clipboard.writeText(current.passcode);
+                await getPlatform().clipboard.writeText(current.passcode);
                 setCopied(true);
               } catch {
                 setCopied(false);

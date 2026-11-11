@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { IconButton, Tooltip } from "../../ui";
+import { IconButton, Tooltip, cn } from "../../ui";
 import { CloseIcon } from "../../ui/icons";
 import { useMessagesStore, type ChatMessage } from "../../stores/messagesStore";
 import type { Conversation } from "../conversations/conversationsStore";
@@ -15,7 +15,20 @@ const EMPTY: ChatMessage[] = [];
  * draft). Replies are ordinary messages with `parentMessageId` set, so they also appear
  * in the main timeline with a quote.
  */
-export function ThreadPanel({ conversation, rootId, me, minReadableKeyVersion }: { conversation: Conversation; rootId: string; me: { id: string; username: string }; minReadableKeyVersion: number }) {
+export function ThreadPanel({
+  conversation,
+  rootId,
+  me,
+  minReadableKeyVersion,
+  overlay = false
+}: {
+  conversation: Conversation;
+  rootId: string;
+  me: { id: string; username: string };
+  minReadableKeyVersion: number;
+  /** Phones: cover the chat instead of sitting beside it. */
+  overlay?: boolean;
+}) {
   const messages = useMessagesStore((s) => s.byConversation[conversation.id] ?? EMPTY);
   const root = messages.find((m) => m.id === rootId);
   const replies = useMemo(() => messages.filter((m) => m.parentMessageId === rootId), [messages, rootId]);
@@ -28,7 +41,14 @@ export function ThreadPanel({ conversation, rootId, me, minReadableKeyVersion }:
   }, [replies.length]);
 
   return (
-    <aside aria-label="Thread" className="flex w-[min(380px,40%)] min-w-[300px] shrink-0 flex-col border-l border-white/10 bg-orbit-sidebar">
+    <aside
+      aria-label="Thread"
+      className={cn(
+        "flex flex-col bg-orbit-sidebar",
+        // Phones: the thread covers the chat, like a pushed screen.
+        overlay ? "fixed inset-0 z-dialog pt-[env(safe-area-inset-top)]" : "w-[min(380px,40%)] min-w-[300px] shrink-0 border-l border-white/10"
+      )}
+    >
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 pl-4 pr-2">
         <h2 className="flex-1 text-sm font-bold">Thread</h2>
         <span className="text-xs text-orbit-muted">

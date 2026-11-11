@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getPlatform, type NotificationPermissionState } from "../../platform";
 import { Alert, Button, cn } from "../../ui";
 import { usePrefsStore, useUserPrefs, type NotificationMode } from "../../stores/prefsStore";
 import { useProfilesStore } from "../../stores/profilesStore";
 import { useAuthStore } from "../../stores/authStore";
 import { useConversationsStore } from "../conversations/conversationsStore";
 import { conversationTitle } from "../conversations/selectors";
-import { notificationsSupported, playChime, showNotification } from "../notifications/useNotifications";
+import { playChime, showNotification } from "../notifications/useNotifications";
 
 const MODES: Array<{ value: NotificationMode; label: string; description: string }> = [
   { value: "all", label: "All messages", description: "Notify for every new message in chats that aren't muted." },
@@ -17,7 +18,16 @@ export function NotificationsSection() {
   const prefs = useUserPrefs();
   const n = prefs.notifications;
   const set = usePrefsStore.getState().setNotifications;
-  const [permission, setPermission] = useState(() => (notificationsSupported() ? Notification.permission : "denied"));
+  const [permission, setPermission] = useState<NotificationPermissionState | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void getPlatform()
+      .notifications.permission()
+      .then((state) => !cancelled && setPermission(state));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const myUserId = useAuthStore((s) => s.user?.id ?? "");
   const conversations = useConversationsStore((s) => s.conversations);
   const profiles = useProfilesStore((s) => s.byId);
@@ -28,16 +38,23 @@ export function NotificationsSection() {
       <header>
         <h1 className="text-xl font-bold">Notifications</h1>
         <p className="mt-1 text-sm text-orbit-muted">You're never notified about the chat you're looking at.</p>
+        {getPlatform().pushToken && (
+          // Mobile plan M4: pushes are content-free, and the server can't read messages to find mentions.
+          <p className="mt-2 text-[11px] text-orbit-muted">
+            When Orbit is closed, this phone shows only "New message", never who sent it or what it says. Push is on in "All
+            messages" mode only, because the server can't see mentions.
+          </p>
+        )}
       </header>
 
-      {permission !== "granted" && (
+      {permission !== null && permission !== "granted" && (
         <Alert tone="warning">
           {permission === "denied" ? (
             "Notifications are blocked for Orbit by your system. Allow them in your OS notification settings."
           ) : (
             <span className="flex flex-wrap items-center justify-between gap-2">
               Orbit needs permission to show notifications.
-              <Button size="sm" variant="primary" onClick={async () => setPermission(await Notification.requestPermission())}>
+              <Button size="sm" variant="primary" onClick={async () => setPermission(await getPlatform().notifications.requestPermission())}>
                 Allow notifications
               </Button>
             </span>

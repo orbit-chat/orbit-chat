@@ -236,7 +236,7 @@ function RecoveryForm({ username, onUsernameChange }: FormProps) {
         hint="Sign in without your password. Each code works once."
       >
         {(field) => (
-          <Input {...field} {...form.register("recoveryCode")} autoComplete="off" spellCheck={false} placeholder="xxxx-xxxx" className="font-mono tracking-wider" />
+          <Input {...field} {...form.register("recoveryCode")} autoComplete="off" spellCheck={false} placeholder="xxxx-xxxx-xxxx-xxxx" className="font-mono tracking-wider" />
         )}
       </Field>
       <SubmitButton busy={busy} busyLabel="Signing in…">

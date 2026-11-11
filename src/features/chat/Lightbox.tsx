@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { IconButton, Tooltip } from "../../ui";
 import { CloseIcon } from "../../ui/icons";
+import { downloadLinkProps, externalLinkProps } from "../../platform";
 
 export type LightboxImage = {
   src: string;
@@ -49,8 +50,7 @@ export function Lightbox({ image, open, onOpenChange }: { image: LightboxImage; 
             <span className="mr-auto truncate px-2 text-sm text-slate-300">{image.alt}</span>
             {image.downloadName && (
               <a
-                href={image.src}
-                download={image.downloadName}
+                {...downloadLinkProps(image.downloadName, image.src)}
                 className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-sm font-semibold text-orbit-text hover:bg-white/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60"
               >
                 Download
@@ -58,9 +58,7 @@ export function Lightbox({ image, open, onOpenChange }: { image: LightboxImage; 
             )}
             {image.externalHref && (
               <a
-                href={image.externalHref}
-                target="_blank"
-                rel="noreferrer noopener"
+                {...externalLinkProps(image.externalHref)}
                 className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-sm font-semibold text-orbit-text hover:bg-white/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60"
               >
                 Open original

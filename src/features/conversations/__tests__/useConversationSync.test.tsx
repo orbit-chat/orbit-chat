@@ -97,6 +97,21 @@ describe("useConversationSync", () => {
     expect(ensureConversationSecretKey).toHaveBeenCalledWith(expect.objectContaining({ forceRefresh: true }));
   });
 
+  it("handles per-device key events: rotation flags, rotations, and keys shared by another device", async () => {
+    await mount();
+    socket.fire("member_left", { conversationId: "g", userId: "bob", rotationRequired: true });
+    expect(useConversationsStore.getState().conversations.find((c) => c.id === "g")!.rotationRequired).toBe(true);
+
+    socket.fire("conversation_key_rotated", { conversationId: "g", keyVersion: 2 });
+    expect(useConversationsStore.getState().conversations.find((c) => c.id === "g")!.rotationRequired).toBe(false);
+    expect(ensureConversationSecretKey).toHaveBeenLastCalledWith(expect.objectContaining({ forceRefresh: true, conversation: expect.objectContaining({ id: "g" }) }));
+
+    ensureConversationSecretKey.mockClear();
+    socket.fire("conversation_keys_added", { conversationIds: ["a", "unknown"] });
+    expect(ensureConversationSecretKey).toHaveBeenCalledTimes(1);
+    expect(ensureConversationSecretKey).toHaveBeenCalledWith(expect.objectContaining({ forceRefresh: true, conversation: expect.objectContaining({ id: "a" }) }));
+  });
+
   it("drops a deleted conversation from the list, the route and prefs", async () => {
     await mount();
     act(() => {

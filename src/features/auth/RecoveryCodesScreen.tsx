@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Button } from "../../ui";
 import { CopyIcon, LockIcon } from "../../ui/icons";
 import { useAuthStore } from "../../stores/authStore";
+import { getPlatform } from "../../platform";
 
 /** Shown once, right after signup. The codes are never retrievable again. */
 export function RecoveryCodesScreen({ codes }: { codes: string[] }) {
@@ -11,7 +12,7 @@ export function RecoveryCodesScreen({ codes }: { codes: string[] }) {
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(codes.join("\n"));
+      await getPlatform().clipboard.writeText(codes.join("\n"));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -21,12 +22,7 @@ export function RecoveryCodesScreen({ codes }: { codes: string[] }) {
 
   const download = () => {
     const blob = new Blob([`Orbit Chat recovery codes\n\n${codes.join("\n")}\n`], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "orbit-recovery-codes.txt";
-    link.click();
-    URL.revokeObjectURL(url);
+    void getPlatform().saveFile("orbit-recovery-codes.txt", blob).catch(() => {});
   };
 
   return (

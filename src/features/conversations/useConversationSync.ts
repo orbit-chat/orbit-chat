@@ -11,6 +11,7 @@ import { useSocketStore } from "../../stores/socketStore";
 import { toChatMessage } from "../chat/toChatMessage";
 import { useConversationsStore, type Conversation } from "./conversationsStore";
 import { conversationTitle } from "./selectors";
+import { markRotated, requestMissingKey } from "./conversationKeyOps";
 
 const BACKFILL_CONCURRENCY = 3;
 
@@ -120,10 +121,27 @@ export function useConversationSync() {
       },
       conversation_deleted: (data: { conversationId: string }) => dropConversation(data.conversationId),
       member_removed: (data: { conversationId: string }) => dropConversation(data.conversationId),
-      member_left: (data: { conversationId: string; userId: string }) => {
+      member_left: (data: { conversationId: string; userId: string; rotationRequired?: boolean }) => {
         store().removeMember(data.conversationId, data.userId);
         const conversation = store().conversations.find((c) => c.id === data.conversationId);
-        if (conversation) refreshKey(conversation);
+        if (!conversation) return;
+        // Per-device keys: the leaver couldn't issue a new key, so whoever sends next rotates first.
+        if (data.rotationRequired) store().upsert({ ...conversation, rotationRequired: true });
+        else refreshKey(conversation);
+      },
+      // Another device of this user shared keys with this one (it was just linked, or a legacy
+      // move finished): load them, including for chats that showed "no key" until now.
+      conversation_keys_added: (data: { conversationIds: string[] }) => {
+        for (const id of data.conversationIds ?? []) {
+          const conversation = store().conversations.find((c) => c.id === id);
+          if (conversation) refreshKey(conversation);
+        }
+      },
+      conversation_key_rotated: (data: { conversationId: string; keyVersion: number }) => {
+        markRotated(data.conversationId);
+        const conversation = store().conversations.find((c) => c.id === data.conversationId);
+        const knownVersion = useE2EEStore.getState().getConversationKeyVersion(data.conversationId) ?? 0;
+        if (conversation && data.keyVersion > knownVersion) refreshKey(conversation);
       },
       member_added: (data: { conversation: Conversation; passcode: string | null; addedByUserId: string }) => {
         store().upsert(data.conversation);
@@ -141,8 +159,8 @@ export function useConversationSync() {
           if (t) void store().load(t);
           return;
         }
-        const knownVersion = useE2EEStore.getState().getConversationKeyVersion(data.conversationId) ?? 1;
-        if (typeof data.keyVersion === "number" && data.keyVersion > knownVersion) refreshKey(conversation);
+        // Newer than anything known, or a version skipped over (e.g. after a key-version conflict).
+        if (typeof data.keyVersion === "number") requestMissingKey(data.conversationId, data.keyVersion);
       }
     };
 

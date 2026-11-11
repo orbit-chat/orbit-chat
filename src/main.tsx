@@ -10,16 +10,30 @@ installDevLogger();
 
 const queryClient = new QueryClient();
 
-// The rebuilt UI (src/app) is the default. The classic App stays available as a fallback
-// (Settings → About → "Use the classic interface") until it's removed.
-const Root = chosenInterface() === "classic" ? lazy(() => import("./App")) : lazy(() => import("./app/NewApp"));
+const MOBILE_BUILD = import.meta.env.MODE === "mobile";
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <Suspense fallback={null}>
-        <Root />
-      </Suspense>
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+async function start() {
+  // The iOS/Android shells install their platform (Keychain/Keystore, camera, privacy screen)
+  // before anything reads a secret. Only the mobile build contains this code.
+  if (MOBILE_BUILD) {
+    const { capacitorPlatform, isNativeShell } = await import("./platform/capacitor");
+    const { setPlatform } = await import("./platform");
+    if (isNativeShell()) setPlatform(await capacitorPlatform());
+  }
+
+  // The rebuilt UI (src/app) is the default. The classic App stays available as a fallback on
+  // desktop (Settings → About → "Use the classic interface") until it's removed; phones never get it.
+  const Root = !MOBILE_BUILD && chosenInterface() === "classic" ? lazy(() => import("./App")) : lazy(() => import("./app/NewApp"));
+
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <Suspense fallback={null}>
+          <Root />
+        </Suspense>
+      </QueryClientProvider>
+    </React.StrictMode>
+  );
+}
+
+void start();

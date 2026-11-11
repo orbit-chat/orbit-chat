@@ -17,12 +17,19 @@ type ProfilesState = {
   updateMyProfile: (data: api.UpdateMyProfileInput, token: string, myUserId: string) => Promise<api.UserProfile | null>;
   uploadMyAvatar: (file: File, token: string, myUserId: string) => Promise<api.UserProfile | null>;
   uploadMyBanner: (file: File, token: string, myUserId: string) => Promise<api.UserProfile | null>;
+  /** Forget every cached profile (session end). */
+  reset: () => void;
 };
 
 export const useProfilesStore = create<ProfilesState>((set, get) => ({
   byId: {},
   loadingById: {},
   errorById: {},
+
+  reset: () => {
+    profileLoadInFlight.clear();
+    set({ byId: {}, loadingById: {}, errorById: {} });
+  },
 
   mergeProfiles: (profiles) => {
     if (!profiles.length) return;

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Secrets live in a shared Keychain group so the Notification Service Extension (M4
+	     encrypted previews) can read them later without moving them (mobile plan B4). -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.orbit.chat.shared</string>
+	</array>
+	<!-- Push (M4). Exporting for the App Store re-signs with the distribution profile, which
+	     sets this to "production"; the server's APNs host must match the build (APNS_* settings). -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

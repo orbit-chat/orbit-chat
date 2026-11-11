@@ -28,6 +28,13 @@ declare global {
       isMaximized: () => Promise<boolean>;
       onMaximizedChanged: (cb: (maximized: boolean) => void) => () => void;
       onUpdaterStatus: (cb: (payload: UpdaterStatusPayload) => void) => () => void;
+      /** OS-keychain-backed secret storage (mobile plan B4); optional for older preload builds. */
+      secureStore?: {
+        status: () => Promise<"ok" | "unavailable" | "locked">;
+        get: (key: string) => Promise<string | null>;
+        set: (key: string, value: string) => Promise<void>;
+        remove: (key: string) => Promise<void>;
+      };
     };
   }
 }

@@ -46,6 +46,7 @@ beforeEach(() => {
   usePrefsStore.setState({ userId: "me", byUser: {}, legacyImported: true });
   usePrefsStore.getState().activate("me");
   useE2EEStore.setState({
+    ensureKeyMode: vi.fn(async () => false),
     ensureDeviceKeypair: vi.fn(async () => keys.me!),
     ensureConversationSecretKey: vi.fn(async () => "k"),
     getConversationKeyVersion: () => 2,
@@ -96,9 +97,9 @@ describe("membership changes rotate the key", () => {
     const conversation = group("g", ["ada", "bob"], { createdBy: "me" });
     useConversationsStore.getState().upsert(conversation);
     await removeGroupMember({ conversation, userId: "bob", me, token: "t" });
-    const [, userId, encryptedKeys] = api.removeMember.mock.calls[0]!;
+    const [, userId, body] = api.removeMember.mock.calls[0]!;
     expect(userId).toBe("bob");
-    expect(Object.keys(encryptedKeys).sort()).toEqual(["ada", "me"]);
+    expect(Object.keys(body.encryptedKeys).sort()).toEqual(["ada", "me"]);
     expect(useConversationsStore.getState().conversations[0]!.members.map((m) => m.userId)).toEqual(["me", "ada"]);
   });
 });

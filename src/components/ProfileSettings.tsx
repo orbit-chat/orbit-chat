@@ -691,7 +691,7 @@ function RecoveryCodesSection({ token }: { token: string }) {
                     className="orbit-textarea min-h-[120px] font-mono text-sm tracking-wider"
                     value={codesInput}
                     onChange={(e) => setCodesInput(e.target.value)}
-                    placeholder={"xxxx-xxxx\nxxxx-xxxx\n..."}
+                    placeholder={"xxxx-xxxx-xxxx-xxxx\nxxxx-xxxx-xxxx-xxxx\n..."}
                   />
                 </label>
 

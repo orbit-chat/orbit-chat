@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Avatar, Button, CountBadge, Dialog, DialogClose, DialogContent, Input, cn, type Presence } from "../../ui";
-import { InboxIcon, SearchIcon, UserPlusIcon } from "../../ui/icons";
+import { Alert, Avatar, Button, CountBadge, Dialog, DialogClose, DialogContent, IconButton, Input, cn, type Presence } from "../../ui";
+import { ArrowLeftIcon, InboxIcon, SearchIcon, UserPlusIcon } from "../../ui/icons";
 import * as api from "../../lib/api";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useAuthStore } from "../../stores/authStore";
@@ -13,17 +13,25 @@ import { useFriendAction, useFriends } from "./friendsQueries";
 type View = { kind: "requests" } | { kind: "add" } | { kind: "friend"; userId: string };
 
 /** Friends list on the left; requests, adding people, or a friend's profile on the right. */
-export function FriendsPage() {
+export function FriendsPage({ compact = false }: { /** Phones: the list first, then the chosen panel with a back button. */ compact?: boolean }) {
   const friends = useFriends();
   const incoming = friends.data?.requests.incoming ?? [];
   // Until you pick something, show requests if any are waiting (decided once the data has loaded).
   const [chosen, setView] = useState<View | null>(null);
   const view: View = chosen ?? { kind: incoming.length ? "requests" : "add" };
+  const showList = compact && chosen === null;
 
   return (
     <div className="flex min-h-0 flex-1">
-      <FriendsList view={view} onView={setView} />
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-orbit-canvas">
+      {(!compact || showList) && <FriendsList view={view} onView={setView} compact={compact} />}
+      <main className={cn("flex min-w-0 flex-1 flex-col overflow-y-auto bg-orbit-canvas", showList && "hidden")}>
+        {compact && (
+          <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b border-white/10 bg-orbit-canvas px-2">
+            <IconButton label="Back to friends" size="sm" onClick={() => setView(null)}>
+              <ArrowLeftIcon />
+            </IconButton>
+          </div>
+        )}
         {friends.isError && (
           <Alert tone="danger" className="m-6">
             Couldn't load friends. {friends.error.message}
@@ -41,7 +49,7 @@ function presenceRank(p: Presence | null | undefined) {
   return p === "online" ? 0 : p === "idle" ? 1 : p === "dnd" ? 2 : 3;
 }
 
-function FriendsList({ view, onView }: { view: View; onView: (view: View) => void }) {
+function FriendsList({ view, onView, compact = false }: { view: View; onView: (view: View) => void; compact?: boolean }) {
   const friends = useFriends();
   const [filter, setFilter] = useState("");
   const pending = (friends.data?.requests.incoming.length ?? 0) + (friends.data?.requests.outgoing.length ?? 0);
@@ -63,7 +71,7 @@ function FriendsList({ view, onView }: { view: View; onView: (view: View) => voi
     );
 
   return (
-    <aside aria-label="Friends" className="flex w-[300px] shrink-0 flex-col border-r border-white/10 bg-orbit-sidebar">
+    <aside aria-label="Friends" className={cn("flex shrink-0 flex-col bg-orbit-sidebar", compact ? "min-w-0 flex-1" : "w-[300px] border-r border-white/10")}>
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-4">
         <span className="text-orbit-muted">
           <UserPlusIcon />

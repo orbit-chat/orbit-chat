@@ -11,3 +11,13 @@ main/src/*.yml
 .env
 .DS_Store
 *.log
+
+# Mobile signing material and service config never go in the repository (docs/production-trust.md).
+*.jks
+*.keystore
+*.p12
+*.p8
+*.mobileprovision
+android/app/google-services.json
+ios/App/App/GoogleService-Info.plist
+.env.mobile

@@ -1,26 +1,30 @@
 import { useEffect, useState } from "react";
+import { getPlatform } from "../platform";
 
 export type AppInfo = { version: string; platform: string | null; isMac: boolean; isDesktop: boolean };
 
-/** App version and OS from the Electron main process (placeholders in a plain browser). */
+/** App version and OS from the shell (placeholders in a plain browser). */
 export function useAppInfo(): AppInfo {
-  const [version, setVersion] = useState("dev");
-  const [platform, setPlatform] = useState<string | null>(null);
+  const [info, setInfo] = useState<{ version: string; os: string | null }>({ version: "dev", os: null });
 
   useEffect(() => {
-    const api = window.electronAPI;
-    if (!api) return;
-    api.getVersion().then(setVersion).catch(() => setVersion("unknown"));
-    api.getPlatform().then(setPlatform).catch(() => setPlatform(null));
+    let cancelled = false;
+    getPlatform()
+      .appInfo()
+      .then((next) => !cancelled && setInfo(next))
+      .catch(() => !cancelled && setInfo({ version: "unknown", os: null }));
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  return { version, platform, isMac: platform === "darwin", isDesktop: Boolean(window.electronAPI) };
+  return { version: info.version, platform: info.os, isMac: info.os === "darwin", isDesktop: getPlatform().kind === "desktop" };
 }
 
-/** Latest auto-updater event, or null before the first one. */
+/** Latest auto-updater event, or null before the first one (always null without an updater). */
 export function useUpdaterStatus(): UpdaterStatusPayload | null {
   const [status, setStatus] = useState<UpdaterStatusPayload | null>(null);
-  useEffect(() => window.electronAPI?.onUpdaterStatus(setStatus), []);
+  useEffect(() => getPlatform().updater?.onStatus(setStatus), []);
   return status;
 }
 
@@ -29,7 +33,8 @@ export function useUpdaterStatus(): UpdaterStatusPayload | null {
  * Returns the button label and action for a downloaded update.
  */
 export function installUpdateAction(isMac: boolean) {
+  const updater = getPlatform().updater;
   return isMac
-    ? { label: "Download update", run: () => void window.electronAPI?.openReleasesPage() }
-    : { label: "Restart and install", run: () => void window.electronAPI?.quitAndInstallUpdate() };
+    ? { label: "Download update", run: () => void updater?.openReleasesPage() }
+    : { label: "Restart and install", run: () => void updater?.install() };
 }

@@ -1,4 +1,4 @@
-import sodium from "libsodium-wrappers";
+import sodium from "libsodium-wrappers-sumo";
 
 function toB64(bytes: Uint8Array) {
   return sodium.to_base64(bytes);

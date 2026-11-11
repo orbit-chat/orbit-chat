@@ -6,6 +6,7 @@ import { useDraftsStore } from "../composer/draftsStore";
 import { useChatUiStore } from "./chatUiStore";
 import type { DecryptState } from "./useDecryptedMessage";
 import { togglePin, toggleReaction } from "./socketActions";
+import { getPlatform } from "../../platform";
 
 /** Shown in the hover toolbar and at the top of the context menu. All are on the server's allowlist. */
 export const QUICK_REACTIONS = REACTION_EMOJI_CATALOG.slice(0, 4).map((r) => r.emoji);
@@ -74,7 +75,7 @@ export function buildMessageActions(params: {
       label: "Copy text",
       icon: <CopyIcon />,
       separatorBefore: true,
-      onSelect: () => void navigator.clipboard?.writeText(text)
+      onSelect: () => void getPlatform().clipboard.writeText(text).catch(() => {})
     });
   }
   return actions;

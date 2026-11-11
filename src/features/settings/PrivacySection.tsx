@@ -4,6 +4,9 @@ import { Alert, Badge, Button, Dialog, DialogClose, DialogContent, Textarea, cn 
 import * as api from "../../lib/api";
 import { useAuthStore } from "../../stores/authStore";
 import { useProfilesStore } from "../../stores/profilesStore";
+import { getPlatform } from "../../platform";
+import { DevicesSection } from "./DevicesSection";
+import { DeviceSecuritySection } from "./DeviceSecuritySection";
 
 const recoveryStatusKey = ["recoveryCodeStatus"] as const;
 
@@ -21,6 +24,8 @@ export function PrivacySection() {
       <header>
         <h1 className="text-xl font-bold">Privacy and security</h1>
       </header>
+      <DevicesSection />
+      <DeviceSecuritySection />
       <UnfriendSetting />
       <RecoveryCodes />
     </div>
@@ -166,7 +171,7 @@ function RecoveryCodes() {
             ))}
           </ol>
           <div className="mt-3 flex gap-2">
-            <Button size="sm" onClick={() => void navigator.clipboard?.writeText(newCodes.join("\n"))}>
+            <Button size="sm" onClick={() => void getPlatform().clipboard.writeText(newCodes.join("\n")).catch(() => {})}>
               Copy all
             </Button>
             <Button size="sm" variant="primary" onClick={() => setNewCodes(null)}>
@@ -203,7 +208,7 @@ function RecoveryCodes() {
               aria-label="Current recovery codes"
               value={codes}
               onChange={(e) => setCodes(e.target.value)}
-              placeholder={"xxxx-xxxx\nxxxx-xxxx"}
+              placeholder={"xxxx-xxxx-xxxx-xxxx\nxxxx-xxxx-xxxx-xxxx"}
               spellCheck={false}
               className="font-mono"
             />

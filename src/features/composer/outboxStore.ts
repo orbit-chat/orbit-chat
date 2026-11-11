@@ -1,9 +1,12 @@
 import { create } from "zustand";
-import { encryptMessage } from "../../lib/crypto";
+import { KEY_ERROR } from "../../lib/api";
+import { decryptMessage, encryptMessage } from "../../lib/crypto";
+import { signMessage } from "../../lib/deviceTrust";
 import { useAuthStore } from "../../stores/authStore";
 import { useE2EEStore } from "../../stores/e2eeStore";
 import { emitAction } from "../chat/socketActions";
 import { useConversationsStore } from "../conversations/conversationsStore";
+import { ensureSendableKey } from "../conversations/conversationKeyOps";
 import { useDecryptedStore } from "../chat/decryptedStore";
 import type { GifLinkAttachment, MessageAttachment, MessageEnvelope } from "../chat/envelope";
 import { encryptAndUpload } from "./encryptAttachment";
@@ -13,6 +16,9 @@ export const CONFIRM_TIMEOUT_MS = 20_000;
 
 type WirePayload = {
   conversationId: string;
+  /** Chosen here because the signature covers it; a resend with the same ID can't duplicate (B9). */
+  messageId: string;
+  signature?: string;
   ciphertext: string;
   nonce: string;
   parentMessageId?: string;
@@ -23,6 +29,8 @@ type WirePayload = {
 
 export type OutboxEntry = {
   localId: string;
+  /** The server ID this message will have. Kept across retries and re-encrypts. */
+  messageId: string;
   conversationId: string;
   createdAt: number;
   parentMessageId: string | null;
@@ -34,7 +42,14 @@ export type OutboxEntry = {
   error: string | null;
   /** Set once encrypted; a retry re-sends exactly this. */
   payload: WirePayload | null;
+  /** The key version uploaded attachments' file keys are wrapped with, so a re-encrypt can re-wrap them. */
+  wrappedWithKeyVersion: number | null;
+  /** Automatic re-encrypts after the server said the key changed; capped so a misbehaving server can't loop us. */
+  keyRetries: number;
 };
+
+/** What the server's socket `error` event carries for a refused send. */
+export type SendError = { message?: string; code?: string; conversationId?: string };
 
 export type SendInput = {
   conversationId: string;
@@ -51,6 +66,11 @@ type OutboxState = {
   confirm: (message: { id: string; conversationId: string; ciphertext: string }) => void;
   /** The server reported an error; it doesn't say for which message, so blame the oldest one in flight. */
   failOldestSending: (reason: string) => void;
+  /**
+   * The server refused a send. Key changes (someone rotated, or a member left and the chat must
+   * rotate) re-encrypt and resend once on their own; anything else fails the message.
+   */
+  handleSendError: (error: SendError) => void;
   retry: (localId: string) => Promise<void>;
   discard: (localId: string) => void;
   reset: () => void;
@@ -58,6 +78,35 @@ type OutboxState = {
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 let nextId = 0;
+
+const MAX_KEY_RETRIES = 1;
+
+/** Re-wrap uploaded files' keys from one conversation key to another; the uploaded bytes don't change. */
+async function rewrapAttachments(attachments: MessageAttachment[], fromKey: string, toKey: string): Promise<MessageAttachment[]> {
+  return Promise.all(
+    attachments.map(async (attachment) => {
+      if (attachment.kind === "gif_link") return attachment;
+      const fileKey = await decryptMessage(attachment.fileKeyCiphertext, attachment.fileKeyNonce, fromKey);
+      const wrapped = await encryptMessage(fileKey, toKey);
+      return { ...attachment, fileKeyCiphertext: wrapped.cipherText, fileKeyNonce: wrapped.nonce };
+    })
+  );
+}
+
+/** User-facing text for a refused send that won't be retried automatically. */
+function sendErrorMessage(error: SendError) {
+  switch (error.code) {
+    case KEY_ERROR.deviceNotLinked:
+      return "This device isn't linked to your account yet, so it can't send. Link it from one of your other devices.";
+    case KEY_ERROR.updateRequired:
+      return "Update Orbit to keep sending messages.";
+    case KEY_ERROR.rotationRequired:
+    case KEY_ERROR.staleKeyVersion:
+      return "This chat's key changed while sending. Retry to send it with the new key.";
+    default:
+      return error.message ?? "The server rejected this message.";
+  }
+}
 
 function clearTimer(localId: string) {
   const timer = timers.get(localId);
@@ -98,24 +147,45 @@ export const useOutboxStore = create<OutboxState>((set, get) => {
     patch(localId, { status: "preparing", error: null });
 
     try {
-      const e2ee = useE2EEStore.getState();
-      const key = await e2ee.ensureConversationSecretKey({ conversation, token: auth.token, myUserId: auth.user.id });
-      if (!key) throw new Error("This device doesn't have the key for this conversation yet.");
+      // With per-device keys this rotates first if the newest key isn't safe to send with.
+      const sendable = await ensureSendableKey({ conversation, token: auth.token, myUserId: auth.user.id });
+      if (!sendable) throw new Error("This device doesn't have the key for this conversation yet.");
+      const { secretKey: key, keyVersion } = sendable;
+
+      // Files already uploaded under an older key keep their bytes; only their wrapped file keys change.
+      let attachments = entry.envelope.attachments;
+      if (entry.wrappedWithKeyVersion !== null && entry.wrappedWithKeyVersion !== keyVersion) {
+        const previousKey = useE2EEStore.getState().getConversationSecretKeyForVersion(conversation.id, entry.wrappedWithKeyVersion);
+        if (!previousKey) throw new Error("This message's files can't be re-sent with the chat's new key. Send them again.");
+        attachments = await rewrapAttachments(attachments, previousKey, key);
+      }
 
       const uploaded: MessageAttachment[] = [];
       for (const file of entry.files) {
         uploaded.push(await encryptAndUpload({ file, conversationId: conversation.id, conversationKey: key, token: auth.token }));
       }
-      const envelope: MessageEnvelope = { text: entry.envelope.text, attachments: [...uploaded, ...entry.envelope.attachments] };
+      const envelope: MessageEnvelope = { text: entry.envelope.text, attachments: [...uploaded, ...attachments] };
       const { cipherText, nonce } = await encryptMessage(JSON.stringify(envelope), key);
-      const mediaIds = uploaded.flatMap((a) => (a.kind === "gif_link" ? [] : [a.mediaId]));
-      patch(localId, { envelope, files: [] });
+      const mediaIds = envelope.attachments.flatMap((a) => (a.kind === "gif_link" ? [] : [a.mediaId]));
+      // Per-device keys: every message is signed by this device (B9), so nobody else's device can
+      // write a message that shows up as ours.
+      let signature: string | undefined;
+      if (await useE2EEStore.getState().ensureKeyMode(auth.user.id)) {
+        const me = await useE2EEStore.getState().thisDevice(auth.user.id, auth.token);
+        signature = await signMessage(
+          { conversationId: conversation.id, keyVersion, messageId: entry.messageId, nonce, cipherText },
+          me.signingPrivateKey
+        );
+      }
+      patch(localId, { envelope, files: [], wrappedWithKeyVersion: keyVersion });
       emit(get().entries.find((e) => e.localId === localId)!, {
         conversationId: conversation.id,
+        messageId: entry.messageId,
+        ...(signature ? { signature } : {}),
         ciphertext: cipherText,
         nonce,
         ...(entry.parentMessageId ? { parentMessageId: entry.parentMessageId } : {}),
-        keyVersion: useE2EEStore.getState().getConversationKeyVersion(conversation.id) ?? 1,
+        keyVersion,
         mediaIds,
         type: envelope.attachments.length ? "media" : "text"
       });
@@ -131,6 +201,7 @@ export const useOutboxStore = create<OutboxState>((set, get) => {
       const localId = `local-${Date.now()}-${++nextId}`;
       const entry: OutboxEntry = {
         localId,
+        messageId: crypto.randomUUID(),
         conversationId: input.conversationId,
         createdAt: Date.now(),
         parentMessageId: input.parentMessageId,
@@ -138,7 +209,9 @@ export const useOutboxStore = create<OutboxState>((set, get) => {
         files: input.files,
         status: "preparing",
         error: null,
-        payload: null
+        payload: null,
+        wrappedWithKeyVersion: null,
+        keyRetries: 0
       };
       set({ entries: [...get().entries, entry] });
       await prepareAndSend(localId);
@@ -156,6 +229,37 @@ export const useOutboxStore = create<OutboxState>((set, get) => {
     failOldestSending: (reason) => {
       const oldest = get().entries.find((e) => e.status === "sending");
       if (oldest) fail(oldest.localId, reason);
+    },
+
+    handleSendError: (error) => {
+      const oldest = get().entries.find(
+        (e) => e.status === "sending" && (!error.conversationId || e.conversationId === error.conversationId)
+      );
+      if (!oldest) return;
+      const keyChanged = error.code === KEY_ERROR.rotationRequired || error.code === KEY_ERROR.staleKeyVersion;
+      if (!keyChanged || oldest.keyRetries >= MAX_KEY_RETRIES) {
+        // After a key change the old ciphertext can never be accepted: a manual retry re-encrypts.
+        if (keyChanged) patch(oldest.localId, { payload: null });
+        fail(oldest.localId, sendErrorMessage(error));
+        return;
+      }
+
+      clearTimer(oldest.localId);
+      // The old ciphertext is useless now: forget it so the resend encrypts with the new key.
+      patch(oldest.localId, { status: "preparing", error: null, payload: null, keyRetries: oldest.keyRetries + 1 });
+      const auth = useAuthStore.getState();
+      const conversation = useConversationsStore.getState().conversations.find((c) => c.id === oldest.conversationId);
+      void (async () => {
+        if (conversation && auth.token && auth.user) {
+          if (error.code === KEY_ERROR.rotationRequired) {
+            // A member left; the next send (this one) rotates first.
+            useConversationsStore.getState().upsert({ ...conversation, rotationRequired: true });
+          } else {
+            await useE2EEStore.getState().ensureConversationSecretKey({ conversation, token: auth.token, myUserId: auth.user.id, forceRefresh: true });
+          }
+        }
+        await prepareAndSend(oldest.localId);
+      })();
     },
 
     retry: async (localId) => {

@@ -33,7 +33,7 @@ beforeEach(() => {
   useAuthStore.setState({ token: "t", user: { id: "me", username: "me" } });
   useSocketStore.setState({ socket: { emit } as never });
   useConversationsStore.setState({ conversations: [dm("c", "ada")] });
-  useE2EEStore.setState({ ensureConversationSecretKey: vi.fn(async () => key), getConversationKeyVersion: () => 3 });
+  useE2EEStore.setState({ ensureKeyMode: vi.fn(async () => false), ensureConversationSecretKey: vi.fn(async () => key), getConversationKeyVersion: () => 3 });
 });
 
 afterEach(() => vi.useRealTimers());

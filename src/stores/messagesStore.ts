@@ -14,6 +14,9 @@ export type ChatMessage = {
   isPinned?: boolean;
   createdAt: number;
   ttlSeconds?: number;
+  /** The device that sent it and its signature over the ciphertext (mobile plan B9); absent on older messages. */
+  senderDeviceId?: string | null;
+  signature?: string | null;
 };
 
 type MessagesState = {
@@ -34,6 +37,8 @@ type MessagesState = {
   removeMessage: (conversationId: string, messageId: string) => void;
   /** Clear the unread count without opening the conversation. */
   markRead: (conversationId: string) => void;
+  /** Forget every cached message (session end); the persisted copy is cleared with it. */
+  reset: () => void;
 };
 
 export const useMessagesStore = create<
@@ -100,7 +105,8 @@ export const useMessagesStore = create<
       },
       markRead: (conversationId) => {
         set({ unreadCountByConversation: { ...get().unreadCountByConversation, [conversationId]: 0 } });
-      }
+      },
+      reset: () => set({ byConversation: {}, unreadCountByConversation: {}, activeConversationId: null })
     }),
     {
       name: "orbit-messages-store",

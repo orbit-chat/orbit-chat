@@ -9,7 +9,9 @@ const base =
   "inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-semibold " +
   "transition-[background-color,border-color,color,filter,transform] duration-150 " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orbit-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-orbit-base " +
-  "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50";
+  "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 " +
+  // Touch screens (mobile plan M2): at least 44px to tap, whatever the visual size.
+  "[@media(pointer:coarse)]:min-h-11";
 
 const variants: Record<ButtonVariant, string> = {
   primary: "bg-orbit-accent text-slate-950 shadow-[0_6px_20px_rgb(var(--orbit-accent)/0.28)] hover:brightness-110",
@@ -25,8 +27,8 @@ const sizes: Record<ButtonSize, string> = {
 };
 
 const iconSizes: Record<ButtonSize, string> = {
-  sm: "h-7 w-7",
-  md: "h-9 w-9",
+  sm: "h-7 w-7 [@media(pointer:coarse)]:min-w-11",
+  md: "h-9 w-9 [@media(pointer:coarse)]:min-w-11",
   lg: "h-11 w-11"
 };
 

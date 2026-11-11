@@ -55,18 +55,23 @@ describe("socketActions", () => {
   it("keeps a reaction error from failing a pending message (outbox listener)", () => {
     const handlers = new Map<string, (data: unknown) => void>();
     useSocketStore.setState({ socket: { emit, on: (e: string, h: (d: unknown) => void) => handlers.set(e, h), off: vi.fn() } as never });
-    const failOldestSending = vi.fn();
-    useOutboxStore.setState({ failOldestSending });
+    const handleSendError = vi.fn();
+    useOutboxStore.setState({ handleSendError });
     renderHook(() => useOutboxSync());
 
     emitAction("send_message", {});
     toggleReaction("c", "m", "🦄");
     handlers.get("error")!({ message: "Unsupported reaction emoji" });
-    expect(failOldestSending).not.toHaveBeenCalled();
+    expect(handleSendError).not.toHaveBeenCalled();
 
     emitAction("send_message", {});
     handlers.get("error")!({ message: "Not a member" });
-    expect(failOldestSending).toHaveBeenCalledWith("Not a member");
+    expect(handleSendError).toHaveBeenCalledWith({ message: "Not a member" });
+
+    // A key error names its conversation and only ever comes from a send, whatever was emitted last.
+    toggleReaction("c", "m", "👍");
+    handlers.get("error")!({ message: "stale", code: "stale_key_version", conversationId: "c" });
+    expect(handleSendError).toHaveBeenLastCalledWith({ message: "stale", code: "stale_key_version", conversationId: "c" });
   });
 
   it("only offers reactions the server accepts", () => {

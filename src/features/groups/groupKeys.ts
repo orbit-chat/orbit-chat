@@ -7,12 +7,20 @@ import { usePrefsStore } from "../../stores/prefsStore";
 import { useConversationsStore, type Conversation } from "../conversations/conversationsStore";
 import { latestPublicKey } from "../conversations/startDirectMessage";
 import { usePasscodeRevealStore } from "../chat-settings/passcodeRevealStore";
+import { recipientsOf, sealNewKey, writeKeyVersion } from "../conversations/conversationKeyOps";
 
 type Me = { id: string };
 
+/** Per-device keys (mobile plan M1b) or the legacy per-user form, as the server runs. */
+function perDeviceKeys(me: Me) {
+  return useE2EEStore.getState().ensureKeyMode(me.id);
+}
+
+const asRecipients = (people: Array<{ id: string; username: string }>) => people.map((p) => ({ userId: p.id, username: p.username }));
+
 /**
- * Seals `secretKey` to each member's newest device key. Fails with the member's name if
- * someone has no device key, since they could never read the conversation.
+ * Legacy keys only: seals `secretKey` to each member's newest device key. Fails with the
+ * member's name if someone has no device key, since they could never read the conversation.
  */
 export async function sealForMembers(params: {
   secretKey: string;
@@ -47,16 +55,32 @@ function adoptRotatedKey(conversationId: string, secretKey: string) {
 export async function createGroup(params: { name: string; members: Array<{ id: string; username: string }>; me: Me; token: string }): Promise<Conversation> {
   const { me, token } = params;
   if (!params.members.length) throw new Error("Pick at least one person.");
-  const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
-  const secretKey = await generateSecretKey();
-  const encryptedKeys = {
-    [me.id]: await sealToPublicKey(secretKey, myPublicKey),
-    ...(await sealForMembers({ secretKey, members: params.members, token }))
-  };
-  const conversation = await api.createConversation(
-    { type: "group", name: params.name.trim() || "New group", memberIds: params.members.map((m) => m.id), encryptedKeys },
-    token
-  );
+  const name = params.name.trim() || "New group";
+  const memberIds = params.members.map((m) => m.id);
+
+  let conversation: Conversation;
+  if (await perDeviceKeys(me)) {
+    // The ID is chosen here because every key envelope signs it.
+    const conversationId = crypto.randomUUID();
+    const { secretKey, deviceKeys } = await sealNewKey({
+      conversationId,
+      keyVersion: 1,
+      recipients: asRecipients(params.members),
+      myUserId: me.id,
+      token
+    });
+    conversation = await api.createConversation({ type: "group", conversationId, keyVersion: 1, deviceKeys, name, memberIds }, token);
+    useE2EEStore.getState().setConversationSecretKeyVersion({ conversationId: conversation.id, keyVersion: 1, secretKey, sendable: true });
+  } else {
+    const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
+    const secretKey = await generateSecretKey();
+    const encryptedKeys = {
+      [me.id]: await sealToPublicKey(secretKey, myPublicKey),
+      ...(await sealForMembers({ secretKey, members: params.members, token }))
+    };
+    conversation = await api.createConversation({ type: "group", name, memberIds, encryptedKeys }, token);
+  }
+
   useConversationsStore.getState().upsert(conversation);
   if (conversation.passcode) {
     usePasscodeRevealStore.getState().show({ conversationId: conversation.id, passcode: conversation.passcode, label: conversation.name ?? "New group" });
@@ -74,16 +98,29 @@ export async function createGroup(params: { name: string; members: Array<{ id: s
 export async function addGroupMembers(params: { conversation: Conversation; members: Array<{ id: string; username: string }>; me: Me; token: string }) {
   const { conversation, me, token } = params;
   if (!params.members.length) throw new Error("Pick at least one person.");
-  const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
-  const existing = conversation.members.filter((m) => m.userId !== me.id).map((m) => ({ id: m.userId, username: m.user.username }));
-  const everyone = [...existing, ...params.members.filter((p) => !existing.some((e) => e.id === p.id))];
-  const secretKey = await generateSecretKey();
-  const encryptedKeys = {
-    [me.id]: await sealToPublicKey(secretKey, myPublicKey),
-    ...(await sealForMembers({ secretKey, members: everyone, token }))
-  };
-  await api.addMembers(conversation.id, { memberIds: params.members.map((m) => m.id), encryptedKeys }, token);
-  adoptRotatedKey(conversation.id, secretKey);
+  const memberIds = params.members.map((m) => m.id);
+
+  if (await perDeviceKeys(me)) {
+    const added = asRecipients(params.members);
+    await writeKeyVersion({
+      conversation,
+      myUserId: me.id,
+      token,
+      recipients: (current) => [...recipientsOf(current), ...added],
+      send: (write, current) => api.addMembers(current.id, { memberIds, ...write }, token)
+    });
+  } else {
+    const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
+    const existing = conversation.members.filter((m) => m.userId !== me.id).map((m) => ({ id: m.userId, username: m.user.username }));
+    const everyone = [...existing, ...params.members.filter((p) => !existing.some((e) => e.id === p.id))];
+    const secretKey = await generateSecretKey();
+    const encryptedKeys = {
+      [me.id]: await sealToPublicKey(secretKey, myPublicKey),
+      ...(await sealForMembers({ secretKey, members: everyone, token }))
+    };
+    await api.addMembers(conversation.id, { memberIds, encryptedKeys }, token);
+    adoptRotatedKey(conversation.id, secretKey);
+  }
   // The server also broadcasts member_added; reloading keeps the list right if that's missed.
   await useConversationsStore.getState().load(token);
 }
@@ -91,27 +128,44 @@ export async function addGroupMembers(params: { conversation: Conversation; memb
 /** Owner only: remove someone and rotate the key so they can't read what comes next. */
 export async function removeGroupMember(params: { conversation: Conversation; userId: string; me: Me; token: string }) {
   const { conversation, userId, me, token } = params;
-  const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
-  const remaining = conversation.members.filter((m) => m.userId !== me.id && m.userId !== userId).map((m) => ({ id: m.userId, username: m.user.username }));
-  const secretKey = await generateSecretKey();
-  const encryptedKeys = {
-    [me.id]: await sealToPublicKey(secretKey, myPublicKey),
-    ...(await sealForMembers({ secretKey, members: remaining, token }))
-  };
-  await api.removeMember(conversation.id, userId, encryptedKeys, token);
-  adoptRotatedKey(conversation.id, secretKey);
+
+  if (await perDeviceKeys(me)) {
+    await writeKeyVersion({
+      conversation,
+      myUserId: me.id,
+      token,
+      recipients: (current) => recipientsOf(current).filter((r) => r.userId !== userId),
+      send: (write, current) => api.removeMember(current.id, userId, write, token)
+    });
+  } else {
+    const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
+    const remaining = conversation.members.filter((m) => m.userId !== me.id && m.userId !== userId).map((m) => ({ id: m.userId, username: m.user.username }));
+    const secretKey = await generateSecretKey();
+    const encryptedKeys = {
+      [me.id]: await sealToPublicKey(secretKey, myPublicKey),
+      ...(await sealForMembers({ secretKey, members: remaining, token }))
+    };
+    await api.removeMember(conversation.id, userId, { encryptedKeys }, token);
+    adoptRotatedKey(conversation.id, secretKey);
+  }
   useConversationsStore.getState().removeMember(conversation.id, userId);
 }
 
 /**
- * Leave a group. Same protocol as the old client: the leaver seals a new key for those who
- * remain. Known limitation (see docs/ui-rework-plan.md): the leaver generated that key.
+ * Leave a group. Legacy keys: the leaver seals a new key for those who remain (known limitation,
+ * see docs/ui-rework-plan.md: the leaver generated that key). Per-device keys: the leaver can't
+ * issue one (it's no longer a member), so the server flags the chat and the next remaining
+ * member to send rotates first.
  */
 export async function leaveGroup(params: { conversation: Conversation; wipeMessages: boolean; me: Me; token: string }) {
   const { conversation, me, token } = params;
-  const remaining = conversation.members.filter((m) => m.userId !== me.id).map((m) => ({ id: m.userId, username: m.user.username }));
-  const encryptedKeys = remaining.length ? await sealForMembers({ secretKey: await generateSecretKey(), members: remaining, token }) : undefined;
-  await api.leaveGroupChat(conversation.id, params.wipeMessages, token, encryptedKeys);
+  if (await perDeviceKeys(me)) {
+    await api.leaveGroupChat(conversation.id, params.wipeMessages, token);
+  } else {
+    const remaining = conversation.members.filter((m) => m.userId !== me.id).map((m) => ({ id: m.userId, username: m.user.username }));
+    const encryptedKeys = remaining.length ? await sealForMembers({ secretKey: await generateSecretKey(), members: remaining, token }) : undefined;
+    await api.leaveGroupChat(conversation.id, params.wipeMessages, token, encryptedKeys);
+  }
   forgetLocally(conversation.id);
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Alert, Button, IconButton, Input, Tooltip } from "../../ui";
+import { Alert, Button, IconButton, Input, Tooltip, cn } from "../../ui";
 import { ArchiveIcon, ChatIcon, ComposeIcon, HomeIcon, SearchIcon, UserPlusIcon, UsersIcon } from "../../ui/icons";
 import { useAuthStore } from "../../stores/authStore";
 import { useMessagesStore } from "../../stores/messagesStore";
@@ -22,7 +22,7 @@ const meta: Record<ConversationPage, { title: string; icon: ReactNode; empty: st
 };
 
 /** Sidebar for the conversation pages: header, filter, then pinned and recent sections. */
-export function ConversationSidebar({ page, selectedId }: { page: ConversationPage; selectedId: string | null }) {
+export function ConversationSidebar({ page, selectedId, compact = false }: { page: ConversationPage; selectedId: string | null; /** Phones: the list is the whole screen. */ compact?: boolean }) {
   const myUserId = useAuthStore((s) => s.user?.id ?? "");
   const conversations = useConversationsStore((s) => s.conversations);
   const status = useConversationsStore((s) => s.status);
@@ -60,10 +60,17 @@ export function ConversationSidebar({ page, selectedId }: { page: ConversationPa
   const info = meta[page];
 
   return (
-    <aside aria-label={info.title} className="flex w-[300px] shrink-0 flex-col border-r border-white/10 bg-orbit-sidebar">
+    <aside aria-label={info.title} className={cn("flex shrink-0 flex-col bg-orbit-sidebar", compact ? "min-w-0 flex-1" : "w-[300px] border-r border-white/10")}>
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 pl-4 pr-2">
         <span className="text-orbit-muted">{info.icon}</span>
         <h2 className="flex-1 truncate text-sm font-bold">{info.title}</h2>
+        {compact && page === "home" && (
+          <Tooltip content="Archive">
+            <IconButton label="Archived chats" size="sm" onClick={() => useNavigationStore.getState().goToPage("archive")}>
+              <ArchiveIcon />
+            </IconButton>
+          </Tooltip>
+        )}
         {page === "groups" && (
           <Tooltip content="New group">
             <IconButton label="New group" size="sm" onClick={() => useDialogStore.getState().open({ kind: "createGroup" })}>

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useE2EEStore } from "../../stores/e2eeStore";
 import type { ChatMessage } from "../../stores/messagesStore";
 import { useDecryptedStore, type DecryptedEntry } from "./decryptedStore";
+import { requestMissingKey } from "../conversations/conversationKeyOps";
 
 export type DecryptState = DecryptedEntry | { status: "pending" } | { status: "nokey" };
 
@@ -17,6 +18,11 @@ export function useDecryptedMessage(conversationId: string, message: ChatMessage
     if (!enabled || !secretKey || entry?.status === "ok") return;
     void useDecryptedStore.getState().ensure(message, secretKey);
   }, [enabled, secretKey, entry?.status, message]);
+
+  // No key for this version yet: it may have been issued or shared since the keys were loaded.
+  useEffect(() => {
+    if (enabled && !secretKey && entry?.status !== "ok") requestMissingKey(conversationId, message.keyVersion);
+  }, [enabled, secretKey, entry?.status, conversationId, message.keyVersion]);
 
   if (entry?.status === "ok") return entry;
   if (!secretKey) return { status: "nokey" };

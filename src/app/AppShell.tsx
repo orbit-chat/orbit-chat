@@ -1,7 +1,9 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { getPlatform } from "../platform";
+import { useChatLockStore } from "../stores/chatLockStore";
 import { ArchiveIcon, ChatIcon, HomeIcon, UserPlusIcon, UsersIcon } from "../ui/icons";
 import { useMessagesStore } from "../stores/messagesStore";
-import { useNavigationStore, type Route } from "../stores/navigationStore";
+import { routeConversationId, useNavigationStore, type Route } from "../stores/navigationStore";
 import { NavRail } from "../features/navigation/NavRail";
 import { useNavigationShortcuts } from "../features/navigation/useNavigationShortcuts";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -13,11 +15,15 @@ import { useOutboxSync } from "../features/composer/useOutboxSync";
 import { FriendsPage } from "../features/friends/FriendsPage";
 import { useFriends } from "../features/friends/friendsQueries";
 import { useNotifications } from "../features/notifications/useNotifications";
+import { usePushRegistration } from "../features/notifications/usePushRegistration";
 import { useUserPrefs } from "../stores/prefsStore";
 import { useRealtimeSync } from "../features/chat/useRealtimeSync";
 import { DialogHost } from "../features/chat-settings/DialogHost";
 import { useConversationSync } from "../features/conversations/useConversationSync";
 import { ConnectionBanner } from "./ConnectionBanner";
+import { PendingDeviceBanner } from "./PendingDeviceBanner";
+import { BottomTabBar } from "../features/navigation/BottomTabBar";
+import { useCompactLayout } from "../ui/useMediaQuery";
 import type { AppInfo } from "./useDesktop";
 
 type ContentRoute = Exclude<Route, { page: "settings" }>;
@@ -26,6 +32,10 @@ type ContentRoute = Exclude<Route, { page: "settings" }>;
  * Signed-in layout: rail | sidebar | main. The route decides both the sidebar and
  * the main pane, so there is never a second flag that can disagree with it.
  * Settings takes over both columns.
+ *
+ * Below the `md` breakpoint (phones, mobile plan M2) it shows one pane at a time, still driven
+ * by the route: the list, or the open chat with a back button; the rail becomes a bottom tab bar,
+ * hidden while a chat is open so the composer has the room.
  */
 export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateStatus: UpdaterStatusPayload | null }) {
   useNavigationShortcuts();
@@ -33,8 +43,12 @@ export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateSt
   useOutboxSync();
   useRealtimeSync();
   useNotifications();
+  usePushRegistration();
   const route = useNavigationStore((s) => s.route);
   const badges = useRailBadges();
+  const compact = useCompactLayout();
+  const conversationId = "conversationId" in route ? route.conversationId : null;
+  useLockChatsInBackground();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -50,24 +64,64 @@ export function AppShell({ appInfo, updateStatus }: { appInfo: AppInfo; updateSt
         Skip to main content
       </a>
       <ConnectionBanner />
+      <PendingDeviceBanner />
       <DialogHost />
       <div className="flex min-h-0 flex-1">
-        <NavRail version={appInfo.version} badges={badges} />
+        {!compact && <NavRail version={appInfo.version} badges={badges} />}
         {route.page === "settings" ? (
-          <SettingsPage section={route.section} appInfo={appInfo} updateStatus={updateStatus} />
+          <SettingsPage section={route.section} appInfo={appInfo} updateStatus={updateStatus} compact={compact} />
         ) : route.page === "friends" ? (
-          <FriendsPage />
+          <FriendsPage compact={compact} />
+        ) : compact ? (
+          conversationId ? (
+            <main id="orbit-main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col bg-orbit-canvas outline-none">
+              <ChatView key={conversationId} conversationId={conversationId} onBack={() => backToList(route.page)} />
+            </main>
+          ) : (
+            <ConversationSidebar page={route.page} selectedId={null} compact />
+          )
         ) : (
           <>
-            <ConversationSidebar page={route.page} selectedId={"conversationId" in route ? route.conversationId : null} />
+            <ConversationSidebar page={route.page} selectedId={conversationId} />
             <main id="orbit-main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col bg-orbit-canvas outline-none">
               <MainPane route={route} />
             </main>
           </>
         )}
       </div>
+      {compact && !conversationId && <BottomTabBar badges={badges} />}
     </div>
   );
+}
+
+/** Phones (M5): a chat set to lock when you leave it also locks when the app goes to the background. */
+function useLockChatsInBackground() {
+  useEffect(() => {
+    const subscribe = getPlatform().onAppStateChange;
+    if (!subscribe) return;
+    return subscribe((active) => {
+      if (active) return;
+      const open = routeConversationId(useNavigationStore.getState().route);
+      if (open) useChatLockStore.getState().onLeave(open);
+    });
+  }, []);
+}
+
+/** The list a page shows on a phone (no conversation open). */
+export function listRoute(page: Route["page"]): Route {
+  return page === "dm" || page === "groups" || page === "archive" ? { page, conversationId: null } : page === "friends" || page === "settings" ? routeForList(page) : { page: "home" };
+}
+
+function routeForList(page: "friends" | "settings"): Route {
+  return page === "friends" ? { page } : { page, section: "profile" };
+}
+
+/** Phones: Back from a chat returns to the list you came from, or this page's list. */
+function backToList(page: Route["page"]) {
+  const nav = useNavigationStore.getState();
+  const previous = nav.past[nav.past.length - 1];
+  if (previous && previous.page !== "settings" && !routeConversationId(previous)) nav.back();
+  else nav.navigate(listRoute(page));
 }
 
 /** Unread dots on the DM and Groups rail buttons, and a dot on Friends for incoming requests. */

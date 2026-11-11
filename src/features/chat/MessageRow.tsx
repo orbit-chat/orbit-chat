@@ -14,6 +14,8 @@ import { MessageContextMenuContent, MessageToolbar } from "./MessageToolbar";
 import { mentionsUser } from "./MessageText";
 import { usePresenceStore } from "./presenceStore";
 import { messageTime, messageTimestampFull } from "./timeline";
+import { useMessageSigner } from "./messageSigners";
+import { useE2EEStore } from "../../stores/e2eeStore";
 import { useDecryptedMessage, type DecryptState } from "./useDecryptedMessage";
 
 const NO_ONE: string[] = [];
@@ -66,6 +68,8 @@ export const MessageRow = memo(function MessageRow({
   const profile = useProfilesStore((s) => s.byId[message.senderId]);
   const name = profile?.displayName?.trim() || message.sender;
   const fetched = useDecryptedMessage(conversationId, message, !pending);
+  const signer = useMessageSigner(conversationId, message, !pending);
+  const perDeviceKeys = useE2EEStore((s) => s.perDeviceKeysByUserId[me.id] === true);
   const decrypted: DecryptState = pending ? { status: "ok", envelope: pending.envelope } : fetched;
   const unreadableVersion = typeof message.keyVersion === "number" && message.keyVersion < minReadableKeyVersion;
   const pingsMe = !mine && decrypted.status === "ok" && mentionsUser(decrypted.envelope.text, me.username);
@@ -125,6 +129,19 @@ export const MessageRow = memo(function MessageRow({
 
         {pending && <PendingStatus entry={pending} />}
 
+        {signer === "legacy" && perDeviceKeys && (
+          <p role="note" className="mt-1 px-1 text-[11px] text-orbit-muted">
+            Unsigned: sent before message signing, or its signature was removed.
+          </p>
+        )}
+        {(signer === "invalid" || signer === "former-device") && (
+          <p role="note" className={cn("mt-1 flex items-center gap-1 px-1 text-[11px]", signer === "invalid" ? "text-orbit-danger" : "text-orbit-warning")}>
+            {signer === "invalid"
+              ? `Unverified sender: this message isn't signed by one of ${mine ? "your" : `${name}'s`} devices.`
+              : `Sent from a device ${mine ? "you've" : `${name} has`} since removed.`}
+          </p>
+        )}
+
         {reactions.length > 0 && <Reactions conversationId={conversationId} messageId={message.id} reactions={reactions} myUserId={me.id} mine={mine} />}
 
         {replyCount > 0 && !inThread && (
@@ -164,6 +181,9 @@ export const MessageRow = memo(function MessageRow({
       onFocus={(event) => event.target === event.currentTarget && onFocusRow?.(message.id)}
       className={cn(
         "group/msg px-4 outline-none focus-visible:bg-white/[0.03] focus-visible:shadow-[inset_2px_0_0_rgb(var(--orbit-accent))]",
+        // Phones: a long press opens the message menu (it has "Copy text"), so the system's own
+        // text selection and callout mustn't start first and swallow the gesture.
+        "[@media(pointer:coarse)]:select-none [@media(pointer:coarse)]:[-webkit-touch-callout:none]",
         startsGroup ? "pt-3" : "pt-0.5",
         fresh && "animate-orbit-rise"
       )}

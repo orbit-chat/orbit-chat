@@ -23,6 +23,10 @@ import { ALL_REACTIONS, QUICK_REACTIONS, react, type MessageAction } from "./mes
  * on the row), never React state, so hovering one message re-renders nothing, and
  * anything covering the row — a portalled popover — blocks the hover like any element.
  * It stays visible while one of its own menus is open.
+ *
+ * Touch screens (no hover) never show it: a tap would leave it stuck open over the next message.
+ * There, a long press on the message opens the context menu below, which has the same actions
+ * (Radix opens it after 700 ms of a still touch).
  */
 export function MessageToolbar({
   conversationId,
@@ -43,7 +47,8 @@ export function MessageToolbar({
         "pointer-events-none absolute -top-4 z-[1] flex items-center gap-0.5 rounded-full border border-white/10 bg-orbit-panelAlt px-1 py-0.5 opacity-0 shadow-lg transition-opacity duration-100",
         "group-hover/msg:pointer-events-auto group-hover/msg:opacity-100 group-focus-within/msg:pointer-events-auto group-focus-within/msg:opacity-100",
         "has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100",
-        mine ? "right-12" : "left-12"
+        mine ? "right-12" : "left-12",
+        "[@media(hover:none)]:hidden"
       )}
     >
       {QUICK_REACTIONS.map((emoji) => (

@@ -8,6 +8,7 @@ import { conversationTitle } from "../conversations/selectors";
 import { Composer } from "../composer/Composer";
 import { PasscodeLockScreen } from "../chat-settings/PasscodeLockScreen";
 import { useChatLockEffects } from "../chat-settings/useChatLockEffects";
+import { IdentityNotices } from "./IdentityNotices";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
 import { useChatUiStore } from "./chatUiStore";
@@ -20,7 +21,7 @@ import { useSeenReceipts } from "./useRealtimeSync";
  * The open conversation. Mounted with `key={conversationId}`, so switching chats starts
  * from a clean slate instead of carrying popups, scroll state or drafts across.
  */
-export function ChatView({ conversationId }: { conversationId: string }) {
+export function ChatView({ conversationId, onBack }: { conversationId: string; /** Phones: back to the list. */ onBack?: () => void }) {
   const conversation = useConversationsStore((s) => s.conversations.find((c) => c.id === conversationId));
   const user = useAuthStore((s) => s.user);
   const profiles = useProfilesStore((s) => s.byId);
@@ -45,15 +46,18 @@ export function ChatView({ conversationId }: { conversationId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 animate-orbit-fade-in flex-col">
-      <ChatHeader conversation={conversation} title={title} myUserId={user.id} />
+      <ChatHeader conversation={conversation} title={title} myUserId={user.id} onBack={onBack} />
       {unlocked ? (
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <MessageList conversationId={conversationId} me={user} minReadableKeyVersion={minReadableKeyVersion} unreadAtOpen={unreadAtOpen} />
             <TypingIndicator conversationId={conversationId} />
+            <IdentityNotices conversation={conversation} myUserId={user.id} />
             <Composer conversation={conversation} me={user} title={title} />
           </div>
-          {threadRootId && <ThreadPanel conversation={conversation} rootId={threadRootId} me={user} minReadableKeyVersion={minReadableKeyVersion} />}
+          {threadRootId && (
+            <ThreadPanel conversation={conversation} rootId={threadRootId} me={user} minReadableKeyVersion={minReadableKeyVersion} overlay={Boolean(onBack)} />
+          )}
         </div>
       ) : (
         <PasscodeLockScreen conversation={conversation} title={title} />

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { safeHttpsUrl } from "./envelope";
+import { externalLinkProps } from "../../platform";
 
 const TOKEN = /(https:\/\/[^\s<>"]+|(?<![\w@])@[A-Za-z0-9_]+)/g;
 /** Punctuation that usually ends a sentence rather than a URL. */
@@ -40,7 +41,7 @@ export function MessageText({ text, myUsername }: { text: string; myUsername?: s
   const nodes: ReactNode[] = tokenizeMessageText(text).map((part, i) => {
     if (part.kind === "link") {
       return (
-        <a key={i} href={part.href} target="_blank" rel="noreferrer noopener" className="break-all text-sky-300 underline-offset-2 hover:underline">
+        <a key={i} {...externalLinkProps(part.href)} className="break-all text-sky-300 underline-offset-2 hover:underline">
           {part.value}
         </a>
       );

@@ -1,13 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Alert, Button, IconButton, Kbd, Tooltip, cn } from "../../ui";
-import { CloseIcon } from "../../ui/icons";
+import { ArrowLeftIcon, CloseIcon } from "../../ui/icons";
 import { API_BASE } from "../../lib/api";
 import { useNavigationStore, type SettingsSection } from "../../stores/navigationStore";
 import { installUpdateAction, type AppInfo } from "../../app/useDesktop";
-import { switchInterface } from "../../lib/uiPreference";
+import { classicInterfaceAvailable, switchInterface } from "../../lib/uiPreference";
 import { PrivacySection } from "./PrivacySection";
 import { NotificationsSection } from "./NotificationsSection";
 import { ProfileSection } from "./ProfileSection";
+import { getPlatform } from "../../platform";
 
 const sections: Array<{ id: SettingsSection; label: string }> = [
   { id: "profile", label: "Profile" },
@@ -25,14 +26,18 @@ const sections: Array<{ id: SettingsSection; label: string }> = [
 export function SettingsPage({
   section,
   appInfo,
-  updateStatus
+  updateStatus,
+  compact = false
 }: {
   section: SettingsSection;
   appInfo: AppInfo;
   updateStatus: UpdaterStatusPayload | null;
+  /** Phones: the section list first, then one section with a back button. */
+  compact?: boolean;
 }) {
   const openSettings = useNavigationStore((s) => s.openSettings);
   const closeSettings = useNavigationStore((s) => s.closeSettings);
+  const [showList, setShowList] = useState(true);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -49,13 +54,20 @@ export function SettingsPage({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <nav aria-label="Settings sections" className="flex w-[240px] shrink-0 flex-col gap-0.5 border-r border-white/10 bg-orbit-sidebar p-3">
+      <nav
+        aria-label="Settings sections"
+        // A class, not the hidden attribute: Tailwind's `flex` would override the attribute.
+        className={cn("flex shrink-0 flex-col gap-0.5 bg-orbit-sidebar p-3", compact ? "min-w-0 flex-1" : "w-[240px] border-r border-white/10", compact && !showList && "hidden")}
+      >
         <p className="px-3 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-orbit-muted">Settings</p>
         {sections.map((s) => (
           <button
             key={s.id}
             type="button"
-            onClick={() => openSettings(s.id)}
+            onClick={() => {
+              openSettings(s.id);
+              setShowList(false);
+            }}
             aria-current={section === s.id ? "page" : undefined}
             className={cn(
               "rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors duration-150",
@@ -68,15 +80,23 @@ export function SettingsPage({
         ))}
       </nav>
 
-      <div className="relative min-h-0 flex-1 overflow-y-auto bg-orbit-canvas">
-        <div className="absolute right-4 top-4 flex flex-col items-center gap-1">
+      <div className={cn("relative min-h-0 flex-1 overflow-y-auto bg-orbit-canvas", compact && showList && "hidden")}>
+        {compact && (
+          <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-white/10 bg-orbit-canvas px-2">
+            <IconButton label="All settings" size="sm" onClick={() => setShowList(true)}>
+              <ArrowLeftIcon />
+            </IconButton>
+            <h2 className="text-sm font-bold">{sections.find((s) => s.id === section)?.label}</h2>
+          </div>
+        )}
+        <div className={cn("absolute right-4 top-4 flex flex-col items-center gap-1", compact && "hidden")}>
           <Tooltip content="Close (Esc)" side="left">
             <IconButton label="Close settings" variant="secondary" onClick={closeSettings}>
               <CloseIcon />
             </IconButton>
           </Tooltip>
         </div>
-        <div key={section} className={cn("mx-auto animate-orbit-fade-in px-8 py-10", section === "profile" ? "max-w-4xl" : "max-w-2xl")}>
+        <div key={section} className={cn("mx-auto animate-orbit-fade-in", compact ? "px-4 py-6" : "px-8 py-10", section === "profile" ? "max-w-4xl" : "max-w-2xl")}>
           {section === "profile" && <ProfileSection />}
           {section === "privacy" && <PrivacySection />}
           {section === "notifications" && <NotificationsSection />}
@@ -154,12 +174,12 @@ function UpdatesSection({ appInfo, status }: { appInfo: AppInfo; status: Updater
   const install = installUpdateAction(appInfo.isMac);
 
   const check = async () => {
-    const api = window.electronAPI;
-    if (!api) return;
+    const updater = getPlatform().updater;
+    if (!updater) return;
     setChecking(true);
     setCheckError(null);
     try {
-      const result = await api.checkForUpdates();
+      const result = await updater.check();
       if (!result.ok) setCheckError(result.reason ?? "Update check failed.");
     } catch (err) {
       setCheckError(err instanceof Error ? err.message : "Update check failed.");
@@ -193,7 +213,7 @@ function UpdatesSection({ appInfo, status }: { appInfo: AppInfo; status: Updater
                 </Button>
               )}
               {appInfo.isMac && status?.status !== "downloaded" && (
-                <Button variant="ghost" onClick={() => void window.electronAPI?.openReleasesPage()}>
+                <Button variant="ghost" onClick={() => void getPlatform().updater?.openReleasesPage()}>
                   Open releases page
                 </Button>
               )}
@@ -227,7 +247,7 @@ function AboutSection({ appInfo }: { appInfo: AppInfo }) {
       <p className="mt-4 text-xs text-orbit-muted">
         Messages and attachments are encrypted on this device before they're sent. The server stores and relays ciphertext only.
       </p>
-      <Card className="mt-6 flex items-center justify-between gap-4">
+      {classicInterfaceAvailable() && <Card className="mt-6 flex items-center justify-between gap-4">
         <div>
           <p className="text-sm font-semibold">Classic interface</p>
           <p className="mt-0.5 text-[11px] text-orbit-muted">Something not working in the new design? Switch back to the previous one. You can return from its title bar.</p>
@@ -235,7 +255,7 @@ function AboutSection({ appInfo }: { appInfo: AppInfo }) {
         <Button size="sm" onClick={() => switchInterface("classic")}>
           Use the classic interface
         </Button>
-      </Card>
+      </Card>}
     </>
   );
 }

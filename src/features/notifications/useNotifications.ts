@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { getPlatform } from "../../platform";
 import { useAuthStore } from "../../stores/authStore";
 import { useE2EEStore } from "../../stores/e2eeStore";
 import { useMessagesStore } from "../../stores/messagesStore";
@@ -37,19 +38,11 @@ export function playChime() {
   }
 }
 
-export const notificationsSupported = () => typeof window !== "undefined" && "Notification" in window;
+export const notificationsSupported = () => getPlatform().notifications.supported();
 
 /** Shows a notification that opens the conversation when clicked. */
 export function showNotification(params: { title: string; body: string; conversationId: string; onClick?: () => void }) {
-  if (!notificationsSupported() || Notification.permission !== "granted") return null;
-  const notification = new Notification(params.title, { body: params.body, tag: params.conversationId, silent: true, icon: "logo.png" });
-  notification.onclick = () => {
-    window.electronAPI?.focusWindow?.();
-    window.focus();
-    params.onClick?.();
-    notification.close();
-  };
-  return notification;
+  getPlatform().notifications.show({ title: params.title, body: params.body, tag: params.conversationId, onClick: params.onClick });
 }
 
 async function decryptIfPossible(data: { id: string; conversationId: string; ciphertext: string; nonce?: string; keyVersion?: number }): Promise<MessageEnvelope | null> {
@@ -105,7 +98,7 @@ export function useNotifications() {
         onClick: () => conversation && useNavigationStore.getState().openConversation(conversation)
       });
       if (prefs.sound) playChime();
-      window.electronAPI?.requestAttention?.();
+      getPlatform().requestAttention();
     };
     socket.on("new_message", onNewMessage);
     return () => {

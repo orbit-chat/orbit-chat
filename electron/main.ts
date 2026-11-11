@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import path from "node:path";
 import { autoUpdater } from "electron-updater";
+import { registerSecureStore } from "./secureStore";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const appIcon = path.join(app.getAppPath(), "logo.png");
@@ -203,6 +204,7 @@ if (!gotLock) {
   });
   app.whenReady().then(() => {
     ipcMain.handle("app:getVersion", () => app.getVersion());
+    registerSecureStore();
     const mainWindow = createWindow();
     setupAutoUpdater(mainWindow);
 

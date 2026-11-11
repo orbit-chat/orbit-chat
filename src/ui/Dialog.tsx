@@ -49,7 +49,8 @@ export function DialogContent({
       <DialogPrimitive.Overlay
         className="fixed inset-0 z-dialog bg-slate-950/70 backdrop-blur-sm data-[state=open]:animate-orbit-fade-in data-[state=closed]:animate-orbit-fade-out"
       />
-      <div className="pointer-events-none fixed inset-0 z-dialog flex items-center justify-center p-4">
+      {/* Phones (mobile plan M2): a bottom sheet above the home indicator; larger screens: centred. */}
+      <div className="pointer-events-none fixed inset-0 z-dialog flex items-end justify-center sm:items-center sm:p-4">
         <DialogPrimitive.Content
           onEscapeKeyDown={block}
           onPointerDownOutside={block}
@@ -57,7 +58,7 @@ export function DialogContent({
           // Without a description Radix warns unless this is explicitly undefined.
           {...(description ? {} : { "aria-describedby": undefined })}
           className={cn(
-            "pointer-events-auto flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-orbit-dialog shadow-[0_24px_70px_rgba(0,0,0,0.55)] outline-none",
+            "pointer-events-auto flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-orbit-dialog pb-[env(safe-area-inset-bottom)] shadow-[0_24px_70px_rgba(0,0,0,0.55)] outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl sm:pb-0",
             "data-[state=open]:animate-orbit-pop-in data-[state=closed]:animate-orbit-pop-out",
             widths[size],
             className

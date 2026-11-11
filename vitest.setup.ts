@@ -1,4 +1,4 @@
-import sodium from "libsodium-wrappers";
+import sodium from "libsodium-wrappers-sumo";
 import { afterEach } from "vitest";
 
 // Every export in src/lib/crypto.ts awaits sodium.ready internally, but the WASM

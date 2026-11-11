@@ -4,6 +4,7 @@ import { useChatLockStore } from "../../stores/chatLockStore";
 import { useE2EEStore } from "../../stores/e2eeStore";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { useConversationsStore, type Conversation } from "./conversationsStore";
+import { sealNewKey } from "./conversationKeyOps";
 
 /** Newest registered device key for a user. */
 export function latestPublicKey(keys: Array<{ publicKey: string; createdAt: string }>) {
@@ -28,18 +29,35 @@ export async function startDirectMessage(params: {
     conversations.conversations.find((c) => c.type === "dm" && c.members.some((m) => m.user.id === target.id)) ?? null;
 
   if (!conversation) {
-    const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
-    const theirPublicKey = latestPublicKey(await api.getUserKeys(target.id, token));
-    if (!theirPublicKey) {
-      throw new Error(`@${target.username} hasn't set up encryption on any device yet, so a secure chat can't be started.`);
+    if (await useE2EEStore.getState().ensureKeyMode(me.id)) {
+      // Per-device keys (mobile plan M1b): the ID is chosen here because every envelope signs it.
+      const conversationId = crypto.randomUUID();
+      const { secretKey, deviceKeys } = await sealNewKey({
+        conversationId,
+        keyVersion: 1,
+        recipients: [{ userId: target.id, username: target.username }],
+        myUserId: me.id,
+        token
+      });
+      // The server returns the existing DM (created: false) if one already exists; its keys are then left alone.
+      conversation = await api.createConversation({ type: "dm", conversationId, keyVersion: 1, deviceKeys, memberIds: [target.id] }, token);
+      if (conversation.id === conversationId) {
+        useE2EEStore.getState().setConversationSecretKeyVersion({ conversationId, keyVersion: 1, secretKey, sendable: true });
+      }
+    } else {
+      const { publicKey: myPublicKey } = await useE2EEStore.getState().ensureDeviceKeypair(me.id, token);
+      const theirPublicKey = latestPublicKey(await api.getUserKeys(target.id, token));
+      if (!theirPublicKey) {
+        throw new Error(`@${target.username} hasn't set up encryption on any device yet, so a secure chat can't be started.`);
+      }
+      const secretKey = await generateSecretKey();
+      const encryptedKeys = {
+        [me.id]: await sealToPublicKey(secretKey, myPublicKey),
+        [target.id]: await sealToPublicKey(secretKey, theirPublicKey)
+      };
+      // The server returns the existing DM (created: false) if one already exists.
+      conversation = await api.createConversation({ type: "dm", memberIds: [target.id], encryptedKeys }, token);
     }
-    const secretKey = await generateSecretKey();
-    const encryptedKeys = {
-      [me.id]: await sealToPublicKey(secretKey, myPublicKey),
-      [target.id]: await sealToPublicKey(secretKey, theirPublicKey)
-    };
-    // The server returns the existing DM (created: false) if one already exists.
-    conversation = await api.createConversation({ type: "dm", memberIds: [target.id], encryptedKeys }, token);
     conversations.upsert(conversation);
   }
 

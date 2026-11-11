@@ -8,8 +8,19 @@ const api = {
   updateMyProfile: vi.fn(),
   getRecoveryCodeStatus: vi.fn(),
   refreshRecoveryCodes: vi.fn(),
-  disableRecoveryCodes: vi.fn()
+  disableRecoveryCodes: vi.fn(),
+  getMyDevices: vi.fn(),
+  getRecentLinkSessions: vi.fn(),
+  signOutDevice: vi.fn(),
+  createLinkSession: vi.fn(),
+  getLinkMessages: vi.fn(),
+  failLinkSession: vi.fn()
 };
+const removeLinkedDevice = vi.fn();
+vi.mock("../../devices/revokeDevice", () => ({
+  removeLinkedDevice: (...args: unknown[]) => removeLinkedDevice(...args),
+  signOutUnlinkedDevice: (params: { token: string; deviceId: string }) => api.signOutDevice(params.deviceId, params.token)
+}));
 vi.mock("../../../lib/api", async (importActual) => ({
   ...(await importActual<typeof import("../../../lib/api")>()),
   ...Object.fromEntries(Object.entries(api).map(([name, fn]) => [name, (...args: unknown[]) => fn(...args)]))
@@ -20,6 +31,7 @@ const { TooltipProvider } = await import("../../../ui");
 const { useAuthStore } = await import("../../../stores/authStore");
 const { useProfilesStore } = await import("../../../stores/profilesStore");
 const { useNavigationStore } = await import("../../../stores/navigationStore");
+const { useE2EEStore } = await import("../../../stores/e2eeStore");
 
 const appInfo = { version: "1.0.0", platform: "win32", isMac: false, isDesktop: false };
 const me = { id: "me", username: "me", displayName: "Old Name", presence: "online" as const, deleteMessagesOnUnfriend: true };
@@ -43,6 +55,10 @@ beforeEach(() => {
   useProfilesStore.setState({ byId: { me }, loadingById: {}, errorById: {} });
   api.updateMyProfile.mockImplementation(async (data) => ({ ...me, ...data }));
   api.getRecoveryCodeStatus.mockResolvedValue({ active: true, total: 8, remaining: 6 });
+  api.getMyDevices.mockResolvedValue({ identityPublished: true, deviceListVersion: 1, devices: [] });
+  api.getRecentLinkSessions.mockResolvedValue([]);
+  removeLinkedDevice.mockReset();
+  useE2EEStore.setState({ deviceIdentityStatusByUserId: {}, perDeviceKeysByUserId: {} });
 });
 
 describe("Profile settings", () => {
@@ -125,5 +141,160 @@ describe("Privacy settings", () => {
     await user.type(within(dialog).getByLabelText("Current recovery codes"), "old1-zzzz");
     await user.click(within(dialog).getByRole("button", { name: "Turn off permanently" }));
     expect(api.disableRecoveryCodes).toHaveBeenCalledWith(["old1-zzzz"], "t");
+  });
+});
+
+describe("Devices", () => {
+  const device = (overrides: Partial<{ id: string; name: string; trusted: boolean; current: boolean; signedIn: boolean }>) => ({
+    id: "d1",
+    name: "Orbit Desktop",
+    lastSeenAt: "2026-11-01T10:00:00.000Z",
+    signedIn: true,
+    trusted: true,
+    current: false,
+    ...overrides
+  });
+
+  it("lists linked and unlinked devices and marks this one", async () => {
+    api.getMyDevices.mockResolvedValue({
+      identityPublished: true,
+      deviceListVersion: 2,
+      devices: [device({ id: "a", current: true }), device({ id: "b", name: "Orbit iOS", trusted: false })]
+    });
+    renderSettings("privacy");
+
+    const list = await screen.findByRole("list", { name: "Your devices" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(within(items[0]!).getByText("(this device)")).toBeInTheDocument();
+    expect(within(items[0]!).getByText("Linked")).toBeInTheDocument();
+    expect(within(items[1]!).getByText("Orbit iOS")).toBeInTheDocument();
+    expect(within(items[1]!).getByText("Not linked")).toBeInTheDocument();
+    expect(screen.getByText(/signed in to your account but isn't linked/)).toBeInTheDocument();
+  });
+
+  it("warns when this device is waiting to be linked", async () => {
+    useE2EEStore.setState({ deviceIdentityStatusByUserId: { me: "pending" } });
+    renderSettings("privacy");
+    expect(await screen.findByText(/This device isn't linked to your account yet/)).toBeInTheDocument();
+  });
+
+  it("warns loudly when this device holds a different identity", async () => {
+    useE2EEStore.setState({ deviceIdentityStatusByUserId: { me: "conflict" } });
+    renderSettings("privacy");
+    expect(await screen.findByText(/someone else may have signed in/)).toBeInTheDocument();
+  });
+
+  it("offers a retry when the list fails to load", async () => {
+    const user = userEvent.setup();
+    api.getMyDevices.mockRejectedValueOnce(new Error("offline"));
+    renderSettings("privacy");
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(api.getMyDevices).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("Device actions (per-device keys)", () => {
+  const device = (overrides: Partial<{ id: string; name: string; trusted: boolean; current: boolean; signedIn: boolean }>) => ({
+    id: "d1",
+    name: "Orbit Desktop",
+    lastSeenAt: "2026-11-01T10:00:00.000Z",
+    signedIn: true,
+    trusted: true,
+    current: false,
+    ...overrides
+  });
+
+  beforeEach(() => {
+    useE2EEStore.setState({ deviceIdentityStatusByUserId: { me: "trusted" }, perDeviceKeysByUserId: { me: true } });
+    api.getMyDevices.mockResolvedValue({
+      identityPublished: true,
+      deviceListVersion: 3,
+      devices: [
+        device({ id: "a", current: true }),
+        device({ id: "b", name: "Orbit iOS" }),
+        device({ id: "c", name: "Unknown laptop", trusted: false })
+      ]
+    });
+  });
+
+  it("removes a linked device after the user confirms", async () => {
+    const user = userEvent.setup();
+    removeLinkedDevice.mockResolvedValue({ forgotThisDevice: false });
+    renderSettings("privacy");
+    const list = await screen.findByRole("list", { name: "Your devices" });
+    const phone = within(list).getAllByRole("listitem")[1]!;
+    await user.click(within(phone).getByRole("button", { name: "Remove" }));
+    expect(screen.getByText(/Every chat gets a new key/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove device" }));
+    await waitFor(() => expect(removeLinkedDevice).toHaveBeenCalledWith({ userId: "me", token: "t", deviceId: "b" }));
+  });
+
+  it("shows why a removal failed and keeps the dialog open", async () => {
+    const user = userEvent.setup();
+    removeLinkedDevice.mockRejectedValue(new Error("This is your only linked device."));
+    renderSettings("privacy");
+    const list = await screen.findByRole("list", { name: "Your devices" });
+    await user.click(within(within(list).getAllByRole("listitem")[0]!).getByRole("button", { name: "Forget" }));
+    await user.click(screen.getByRole("button", { name: "Forget this device" }));
+    expect(await screen.findByText("This is your only linked device.")).toBeInTheDocument();
+  });
+
+  it("signs out an unlinked device, and offers no removal for it", async () => {
+    const user = userEvent.setup();
+    api.signOutDevice.mockResolvedValue({ success: true });
+    renderSettings("privacy");
+    const list = await screen.findByRole("list", { name: "Your devices" });
+    const laptop = within(list).getAllByRole("listitem")[2]!;
+    expect(within(laptop).queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+    await user.click(within(laptop).getByRole("button", { name: "Sign out" }));
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(api.signOutDevice).toHaveBeenCalledWith("c", "t"));
+  });
+
+  it("opens linking with a code to type on the new device", async () => {
+    const user = userEvent.setup();
+    api.createLinkSession.mockResolvedValue({ sessionId: "11111111-1111-4111-8111-111111111111", mode: "code", creatorRole: "existing", creatorDeviceId: "a", joinerDeviceId: null, status: "open", failureReason: null, expiresAt: new Date(Date.now() + 120000).toISOString() });
+    api.getLinkMessages.mockImplementation(async () => ({ session: (await api.createLinkSession.mock.results[0]!.value), messages: [] }));
+    api.failLinkSession.mockResolvedValue({});
+    useE2EEStore.setState({ thisDevice: vi.fn(async () => ({ userId: "me", deviceId: "a", encryption: { publicKey: "", privateKey: "" }, signingPrivateKey: "" })) });
+    renderSettings("privacy");
+    await user.click(await screen.findByRole("button", { name: "Link a device" }));
+    await user.click(screen.getByRole("tab", { name: "Show code" }));
+    const code = await screen.findByTestId("link-code");
+    expect(code.textContent).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(api.createLinkSession).toHaveBeenLastCalledWith({ mode: "code", role: "existing" }, "t");
+  });
+
+  it("lists recent linking attempts", async () => {
+    api.getRecentLinkSessions.mockResolvedValue([
+      { sessionId: "s1", mode: "qr", creatorRole: "existing", creatorDeviceId: "a", joinerDeviceId: "c", status: "failed", failureReason: "key_confirmation_failed", expiresAt: "", createdAt: "2026-11-10T10:00:00.000Z", creatorDeviceName: "Orbit Desktop", joinerDeviceName: "Unknown laptop" }
+    ]);
+    renderSettings("privacy");
+    expect(await screen.findByText(/Linking attempts in the last 7 days \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Orbit Desktop → Unknown laptop/)).toBeInTheDocument();
+  });
+
+  it("offers a pending device the way to link itself", async () => {
+    useE2EEStore.setState({ deviceIdentityStatusByUserId: { me: "pending" } });
+    renderSettings("privacy");
+    expect(await screen.findByRole("button", { name: "Link this device" })).toBeInTheDocument();
+  });
+});
+
+describe("Devices before the account has an identity", () => {
+  it("shows devices as setting up without the unlinked-device warning", async () => {
+    api.getMyDevices.mockResolvedValue({
+      identityPublished: false,
+      deviceListVersion: null,
+      devices: [
+        { id: "a", name: "Orbit Desktop", lastSeenAt: null, signedIn: true, trusted: false, current: true },
+        { id: "b", name: "Orbit Desktop", lastSeenAt: null, signedIn: true, trusted: false, current: false }
+      ]
+    });
+    renderSettings("privacy");
+    const list = await screen.findByRole("list", { name: "Your devices" });
+    expect(within(list).getAllByText("Setting up")).toHaveLength(2);
+    expect(screen.queryByText(/isn't linked/)).not.toBeInTheDocument();
   });
 });

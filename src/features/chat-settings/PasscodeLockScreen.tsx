@@ -111,7 +111,7 @@ export function PasscodeLockScreen({ conversation, title }: { conversation: Conv
                   spellCheck={false}
                   value={recoveryCode}
                   onChange={(event) => setRecoveryCode(event.target.value)}
-                  placeholder="xxxx-xxxx"
+                  placeholder="xxxx-xxxx-xxxx-xxxx"
                   className="font-mono tracking-wider"
                 />
               )}

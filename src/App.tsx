@@ -3370,7 +3370,7 @@ function App() {
                           setRecoveryCode(event.target.value);
                           if (authValidationError) setAuthValidationError(null);
                         }}
-                        placeholder="xxxx-xxxx"
+                        placeholder="xxxx-xxxx-xxxx-xxxx"
                         autoComplete="off"
                       />
                     </label>
@@ -4153,7 +4153,7 @@ function App() {
                           setBypassRecoveryCode(e.target.value);
                           setPasscodeError(null);
                         }}
-                        placeholder="xxxx-xxxx"
+                        placeholder="xxxx-xxxx-xxxx-xxxx"
                         autoFocus
                       />
                       <div className="mt-4 flex gap-3">

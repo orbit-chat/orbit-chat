@@ -14,6 +14,8 @@ export function toChatMessage(message: ServerMessage): ChatMessage {
     mediaIds: message.mediaIds ?? [],
     reactions: message.reactions ?? [],
     isPinned: message.isPinned ?? false,
-    createdAt: new Date(message.createdAt).getTime()
+    createdAt: new Date(message.createdAt).getTime(),
+    senderDeviceId: message.senderDeviceId ?? null,
+    signature: message.signature ?? null
   };
 }
