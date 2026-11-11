@@ -23,6 +23,7 @@ type NativeSecureStore = {
   set(options: { key: string; value: string }): Promise<void>;
   remove(options: { key: string }): Promise<void>;
   deviceIntegrity(): Promise<{ compromised: boolean; reasons: string[] }>;
+  pushConfigured(): Promise<{ configured: boolean }>;
 };
 
 const NativeSecureStore = registerPlugin<NativeSecureStore>("SecureStore");
@@ -67,6 +68,10 @@ export async function capacitorPlatform(): Promise<PlatformOverrides> {
     },
     pushToken: async () => {
       try {
+        // An Android build without Firebase config (google-services.json) can't register, and
+        // trying crashes the app natively; don't ask for the notification permission either.
+        const configured = await NativeSecureStore.pushConfigured().catch(() => ({ configured: false }));
+        if (!configured.configured) return null;
         let permission = await PushNotifications.checkPermissions();
         if (permission.receive === "prompt" || permission.receive === "prompt-with-rationale") {
           permission = await PushNotifications.requestPermissions();

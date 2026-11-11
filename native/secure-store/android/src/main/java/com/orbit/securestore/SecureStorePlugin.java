@@ -185,6 +185,21 @@ public class SecureStorePlugin extends Plugin {
         call.resolve(result);
     }
 
+    /**
+     * Whether this build can register for push (mobile plan M4). Android push needs Firebase,
+     * which the google-services Gradle plugin configures from google-services.json at build time
+     * (it generates the google_app_id string). Without it the push plugin's register() throws on
+     * a plugin thread and Capacitor crashes the whole app, so the app asks here first.
+     */
+    @PluginMethod
+    public void pushConfigured(PluginCall call) {
+        Context context = getContext();
+        int appId = context.getResources().getIdentifier("google_app_id", "string", context.getPackageName());
+        JSObject result = new JSObject();
+        result.put("configured", appId != 0);
+        call.resolve(result);
+    }
+
     @PluginMethod
     public void remove(PluginCall call) {
         String name = validKey(call);

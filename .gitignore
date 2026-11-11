@@ -21,3 +21,6 @@ main/src/*.yml
 android/app/google-services.json
 ios/App/App/GoogleService-Info.plist
 .env.mobile
+
+# Gradle output of the local Capacitor plugin
+native/secure-store/android/build/

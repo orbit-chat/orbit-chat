@@ -17,5 +17,8 @@ project(':capacitor-privacy-screen').projectDir = new File('../node_modules/@cap
 include ':capacitor-push-notifications'
 project(':capacitor-push-notifications').projectDir = new File('../node_modules/@capacitor/push-notifications/android')
 
+include ':capgo-capacitor-native-biometric'
+project(':capgo-capacitor-native-biometric').projectDir = new File('../node_modules/@capgo/capacitor-native-biometric/android')
+
 include ':orbit-capacitor-secure-store'
 project(':orbit-capacitor-secure-store').projectDir = new File('../native/secure-store/android')

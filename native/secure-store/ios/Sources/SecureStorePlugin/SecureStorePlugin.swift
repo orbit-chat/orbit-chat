@@ -21,7 +21,8 @@ public class SecureStorePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "get", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "set", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "deviceIntegrity", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "deviceIntegrity", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pushConfigured", returnType: CAPPluginReturnPromise)
     ]
 
     private let service = "com.orbit.chat.secure-store"
@@ -125,6 +126,12 @@ public class SecureStorePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         call.resolve(["compromised": !reasons.isEmpty, "reasons": reasons])
         #endif
+    }
+
+    /// APNs needs no build-time service file (only the push entitlement), so push is always
+    /// available to register on iOS. Android answers from its Firebase configuration.
+    @objc func pushConfigured(_ call: CAPPluginCall) {
+        call.resolve(["configured": true])
     }
 
     @objc func remove(_ call: CAPPluginCall) {

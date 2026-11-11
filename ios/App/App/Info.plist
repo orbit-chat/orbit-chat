@@ -69,6 +69,8 @@
 	<!-- Mobile plan M3/B4/B7. ATS stays on: there is no NSAppTransportSecurity exception. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Orbit uses the camera to scan the code shown on your other device when you link this one.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Orbit uses Face ID to unlock the app when you turn on the app lock.</string>
 	<key>OrbitKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.orbit.chat.shared</string>
 </dict>

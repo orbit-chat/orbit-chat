@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only (this file replaces src/main's in the debug variant). Same TLS-only,
+     system-CAs-only policy, plus plain HTTP to this phone's own loopback address, which
+     `npm run build:mobile:local` uses to reach an orbit-server on the developer's computer
+     through `adb reverse`. Loopback traffic never leaves the phone. Release builds never get this. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

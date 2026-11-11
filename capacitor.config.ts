@@ -12,8 +12,9 @@ const config: CapacitorConfig = {
     // Serve the app from https://localhost (allowed by the server's CORS) and refuse mixed content.
     // Cleartext is also off in the network security config.
     allowMixedContent: false,
-    captureInput: true,
-    webContentsDebuggingEnabled: false
+    captureInput: true
+    // webContentsDebuggingEnabled is left unset: Capacitor then allows WebView debugging only in
+    // debuggable (debug) builds, never in a release build.
   },
   ios: {
     // capacitor://localhost; ATS stays on (no NSAllowsArbitraryLoads).

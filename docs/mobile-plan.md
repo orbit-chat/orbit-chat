@@ -460,10 +460,11 @@ them pass.
       also clears every per-user store on sign-out, so the next account on the device starts
       clean. Server-side events go through one in-process bus (`src/modules/auth/session-events.ts`:
       devices signed out, keys added, message sent).
-- [ ] PGX: the database has no `_prisma_migrations` table (schema came from `db push`, so every
-      start hits P3005 and falls back to `db push`). Baseline it with `prisma migrate resolve
-      --applied` for each migration once `migrate diff` is empty (it was on 2026-10-23), then drop
-      the `db push` fallback from `src/main.ts`.
+- [x] PGX: migration history baselined, 2026-11-11. `migrate diff` against the old schema was
+      empty, so the 11 old migrations were marked applied (`prisma migrate resolve --applied`)
+      and the 9 new ones ran with `migrate deploy` (dump taken first, in
+      `C:\Users\admin\Desktop\orbit\backups`). Startup no longer hits P3005.
+- [ ] Drop the `db push` fallback from `src/main.ts` now that production has migration history.
 - [ ] PGX: MinIO runs with the default `minioadmin` credentials and ports 9000/9001 are open to the
       internet. Rotate the credentials and close the console port before starting MinIO again.
 - [x] Integration tests run locally without Docker: `embedded-postgres` on port 5433 with
@@ -505,6 +506,7 @@ The UI assumes a ≥980 px window (rail | sidebar | chat). Phones need a single-
       (the device checklist in `AGENTS.md`).
 
 ### M3 — Capacitor shells ✅ done (2026-11-11; native builds not compiled on this machine)
+- [x] Android minimum is 8.0 (API 26): the QR scanner library requires it.
 - [x] Capacitor 8.5.3 (`@capacitor/core`, `@capacitor/cli`), `ios/` (Swift Package Manager),
       `android/`, `capacitor.config.ts` (`webDir: dist`, no `server.url`, `androidScheme: https`).
 - [x] `npm run build:mobile` (`vite build --mode mobile`) without the Electron plugin; the app
@@ -569,9 +571,13 @@ Sockets don't survive in the background on mobile, so push is required for messa
       checks (app switcher, app lock, content-free push).
 
 ### Before turning `E2EE_PER_DEVICE` on
-- [ ] Deploy the server first (four new migrations: `dedupe_user_public_keys`, `link_sessions`,
-      `message_signatures`, `push_registrations`), then the desktop client, then the phone apps.
-- [ ] Pick the production hostname and TLS (decision 2 below); phone builds refuse plain HTTP.
+- [x] Server deployed to PGX, 2026-11-11: branch `feat/per-device-keys-and-mobile` (8c2c71f),
+      nine migrations, switch off (`GET /config/e2ee` → `perDeviceKeys: false`). Sign-ins with and
+      without `installId` both reach the credential check, so current desktop clients keep working.
+- [ ] Merge that branch to `main` on GitHub and move the PGX checkout back to `main`.
+- [ ] HTTPS: `orbit.bcgn.net` (decision 2) through Caddy to the server on :3000. Needs the
+      GoDaddy A record `orbit` → 147.135.31.128. Then point desktop at it too and close port 3000.
+- [ ] Release the desktop client with per-device keys to every user, then turn the switch on.
 - [ ] Run the `AGENTS.md` device checklist on two real devices against a staging server with the
       switch on.
 - [ ] Minor: after a device is removed, the removing device rotates the chat key and each
@@ -594,8 +600,9 @@ Decided:
   M2 can run alongside M1. Gemini Argon (`gemini-argon` skill) builds bulk UI work and reviews
   M1 diffs; crypto and protocol code stay with Claude.
 
-Open:
-2. Production hostname for TLS (B3). Blocks on-device testing, not the protocol work.
+- 2026-11-11: production hostname **`orbit.bcgn.net`** (decision 2), TLS by Caddy on PGX.
+
+Open: none.
 
 Constraints:
 - iOS builds need macOS + Xcode (or a macOS CI runner); this Windows machine can build Android only.

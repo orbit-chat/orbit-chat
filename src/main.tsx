@@ -10,7 +10,8 @@ installDevLogger();
 
 const queryClient = new QueryClient();
 
-const MOBILE_BUILD = import.meta.env.MODE === "mobile";
+// `mobile-local` is the same phone build, pointed at a server on this computer (see serverConfig.ts).
+const MOBILE_BUILD = import.meta.env.MODE === "mobile" || import.meta.env.MODE === "mobile-local";
 
 async function start() {
   // The iOS/Android shells install their platform (Keychain/Keystore, camera, privacy screen)

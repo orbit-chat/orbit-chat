@@ -25,3 +25,8 @@
 -keep public class * extends com.getcapacitor.Plugin { *; }
 -keep class com.getcapacitor.** { *; }
 -keepattributes *Annotation*
+
+# The QR scanner library (io.ionic.libs:ionbarcode-android, via @capacitor/barcode-scanner) tags
+# fields with Gson's @SerializedName but never calls Gson, and does not ship it. Annotations whose
+# class is absent are ignored at runtime, so only the R8 warning needs silencing.
+-dontwarn com.google.gson.annotations.SerializedName
