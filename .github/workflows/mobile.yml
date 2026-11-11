@@ -2,7 +2,9 @@ name: Mobile CI
 
 # iOS and Android shells (docs/mobile-plan.md M3/M6): build the mobile renderer, sync it into
 # the native projects and compile both apps, unsigned. Catches native plugin breakage
-# (native/secure-store) that the web test suite can't see.
+# (native/secure-store) that the web test suite can't see. Both builds are kept as artifacts
+# for testing: the Android debug APK installs directly; the unsigned iOS .ipa is for
+# sideloading with a free Apple ID (Sideloadly or AltStore re-sign it; see AGENTS.md).
 
 on:
   pull_request:
@@ -10,6 +12,7 @@ on:
     branches:
       - main
       - master
+      - "v.*"
   workflow_dispatch:
 
 permissions:
@@ -20,10 +23,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Mobile builds refuse non-HTTPS servers; CI only needs well-formed HTTPS values.
-  VITE_API_URL: ${{ vars.MOBILE_API_URL || 'https://api.orbitchat.example' }}
-  VITE_SOCKET_URL: ${{ vars.MOBILE_SOCKET_URL || 'https://api.orbitchat.example' }}
-  VITE_MEDIA_ORIGIN: ${{ vars.MOBILE_MEDIA_ORIGIN || 'https://media.orbitchat.example' }}
+  # Mobile builds refuse non-HTTPS servers. Repository variables can point a build elsewhere.
+  VITE_API_URL: ${{ vars.MOBILE_API_URL || 'https://orbit.bcgn.net' }}
+  VITE_SOCKET_URL: ${{ vars.MOBILE_SOCKET_URL || 'https://orbit.bcgn.net' }}
+  VITE_MEDIA_ORIGIN: ${{ vars.MOBILE_MEDIA_ORIGIN || '' }}
   VITE_GIPHY_API_KEY: ""
 
 jobs:
@@ -60,8 +63,16 @@ jobs:
         # Checkouts from Windows can lose the executable bit.
         run: chmod +x gradlew && ./gradlew --no-daemon assembleDebug
 
+      - name: Keep the APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: orbit-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
   ios:
-    name: iOS (simulator build, unsigned)
+    name: iOS (device build, unsigned)
     runs-on: macos-latest
     steps:
       - name: Check out repository
@@ -84,6 +95,20 @@ jobs:
 
       - name: Build
         run: >
-          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug
-          -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
-          CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release
+          -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package an unsigned .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry Orbit-unsigned.ipa Payload
+
+      - name: Keep the .ipa
+        uses: actions/upload-artifact@v5
+        with:
+          name: orbit-ios-unsigned
+          path: Orbit-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7

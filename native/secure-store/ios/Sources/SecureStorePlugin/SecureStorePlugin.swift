@@ -30,9 +30,14 @@ public class SecureStorePlugin: CAPPlugin, CAPBridgedPlugin {
     private let keyPattern = try! NSRegularExpression(pattern: "^orbit:[A-Za-z0-9:_.-]{1,200}$")
     private let queue = DispatchQueue(label: "com.orbit.chat.secure-store")
 
+    /// The shared group works only in builds signed by the team that owns it, where the value
+    /// starts with the 10-character team ID. Unsigned CI builds re-signed for sideloading (e.g.
+    /// Sideloadly with a free Apple ID) have no team prefix; they use the app's own Keychain group,
+    /// since asking for a group the app isn't entitled to fails every read and write.
     private var accessGroup: String? {
         guard let group = Bundle.main.object(forInfoDictionaryKey: "OrbitKeychainAccessGroup") as? String,
-              !group.isEmpty, !group.contains("$(") else { return nil }
+              !group.isEmpty, !group.contains("$("),
+              group.range(of: "^[A-Z0-9]{10}\\.", options: .regularExpression) != nil else { return nil }
         return group
     }
 
