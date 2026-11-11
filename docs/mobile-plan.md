@@ -522,9 +522,11 @@ The UI assumes a ≥980 px window (rail | sidebar | chat). Phones need a single-
       in the app switcher, ATS on, no `NSAllowsArbitraryLoads`.
 - [x] The refresh token is kept in the secure store (`orbit:session`), so phones stay signed in;
       desktop still signs in every launch.
-- [ ] Compile both apps. This machine has no JDK 21 (Android) and no macOS (iOS), so the native
-      code, including `SecureStorePlugin.swift`, has not been built yet; `.github/workflows/mobile.yml`
-      does it on every PR.
+- [x] Both apps compile, 2026-11-11: Android locally (JDK 21, SDK 36; debug and R8 release) and in
+      Mobile CI; iOS in Mobile CI on a macOS runner (unsigned arm64 device build, first try). The
+      Android debug build runs on a real phone against `https://orbit.bcgn.net`. The iOS build hasn't
+      run on a device yet; testers sideload the CI `.ipa` with a free Apple ID
+      (`docs/ios-sideload.md`): 7-day signing, no push.
 
 ### M4 — Push notifications ✅ server and client done (2026-11-11; needs push credentials)
 Sockets don't survive in the background on mobile, so push is required for message delivery alerts.

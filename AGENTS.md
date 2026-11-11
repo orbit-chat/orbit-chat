@@ -15,7 +15,7 @@ Orbit Chat is an Electron + React desktop client, with iOS and Android shells bu
 - `npm run release:publish`: publish release artifacts using `scripts/publish-release.mjs`.
 - `npm run build:mobile`: build the renderer for the phone apps (strict CSP; needs HTTPS `VITE_API_URL`/`VITE_SOCKET_URL`, see `.env.mobile.example`).
 - `npm run build:mobile:local`: the same phone build pointed at an orbit-server on this computer (`.env.mobile-local`), for testing over USB with `adb reverse tcp:3000 tcp:3000`. Only loopback addresses are accepted, and only Android debug builds allow plain HTTP to them.
-- `npm run cap:sync`, then `npm run cap:android` / `npm run cap:ios`: copy that build into the native projects and open them in Android Studio (JDK 21) or Xcode. `.github/workflows/mobile.yml` compiles both unsigned on every PR; `mobile-release.yml` builds signed store builds from repository secrets only.
+- `npm run cap:sync`, then `npm run cap:android` / `npm run cap:ios`: copy that build into the native projects and open them in Android Studio (JDK 21) or Xcode. `.github/workflows/mobile.yml` compiles both unsigned on every PR and on `v.*` pushes, keeping the debug APK and an unsigned iOS `.ipa` (sideload it with a free Apple ID: `docs/ios-sideload.md`); `mobile-release.yml` builds signed store builds from repository secrets only.
 
 ## Coding Style & Naming Conventions
 
