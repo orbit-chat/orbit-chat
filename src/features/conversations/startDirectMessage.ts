@@ -6,10 +6,9 @@ import { usePrefsStore } from "../../stores/prefsStore";
 import { useConversationsStore, type Conversation } from "./conversationsStore";
 import { sealNewKey } from "./conversationKeyOps";
 
-/** Newest registered device key for a user. */
-export function latestPublicKey(keys: Array<{ publicKey: string; createdAt: string }>) {
-  if (!keys.length) return null;
-  return keys.reduce((newest, key) => (new Date(key.createdAt) > new Date(newest.createdAt) ? key : newest)).publicKey;
+/** Newest registered device key for a user: the server lists them newest first. */
+export function latestPublicKey(keys: Array<{ publicKey: string }>) {
+  return keys[0]?.publicKey ?? null;
 }
 
 /**

@@ -12,11 +12,10 @@ import { signOut } from "../auth/signOut";
 
 export const devicesQueryKey = ["accountDevices"] as const;
 
-function lastSeen(iso: string | null) {
-  if (!iso) return "Never seen";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "Never seen";
-  return `Last active ${date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+/** The server keeps no activity times (no-logs policy), so a device shows only its state. */
+function deviceState(device: { current: boolean; signedIn: boolean }) {
+  if (device.current) return "This device";
+  return device.signedIn ? "Signed in" : "Signed out";
 }
 
 /** What this device's own identity status means for the user (mobile plan B6/B7/B10). */
@@ -177,7 +176,7 @@ export function DevicesSection() {
                   {device.name}
                   {device.current && <span className="ml-1.5 text-[11px] font-normal text-orbit-muted">(this device)</span>}
                 </p>
-                <p className="text-[11px] text-orbit-muted">{device.current ? "Active now" : lastSeen(device.lastSeenAt)}</p>
+                <p className="text-[11px] text-orbit-muted">{deviceState(device)}</p>
               </div>
               <div className="flex items-center gap-1.5">
                 {!devices.data.identityPublished ? (
@@ -187,7 +186,6 @@ export function DevicesSection() {
                 ) : (
                   <Badge tone="warning">Not linked</Badge>
                 )}
-                {!device.signedIn && <Badge>Signed out</Badge>}
                 {perDevice && status === "trusted" && device.trusted && !device.current && (
                   <Button size="sm" variant="ghost" onClick={() => setPending({ kind: "remove", device })}>
                     Remove

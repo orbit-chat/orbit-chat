@@ -50,10 +50,8 @@ describe("startDirectMessage", () => {
   });
 
   it("creates a DM with a fresh key sealed to both users' newest device keys", async () => {
-    getUserKeys.mockResolvedValue([
-      { publicKey: "stale-key", createdAt: "2025-01-01T00:00:00Z" },
-      { publicKey: theirs.publicKey, createdAt: "2026-01-01T00:00:00Z" }
-    ]);
+    // The server lists keys newest first (it keeps no registration times).
+    getUserKeys.mockResolvedValue([{ publicKey: theirs.publicKey }, { publicKey: "stale-key" }]);
     createConversation.mockResolvedValue(dm("new", "ada", { created: true }));
 
     const result = await startDirectMessage({ target: { id: "ada", username: "ada" }, me: ME, token: "t" });
@@ -83,13 +81,7 @@ describe("startDirectMessage", () => {
   });
 });
 
-it("latestPublicKey picks the newest key", () => {
+it("latestPublicKey takes the server's first (newest) key", () => {
   expect(latestPublicKey([])).toBeNull();
-  expect(
-    latestPublicKey([
-      { publicKey: "b", createdAt: "2026-02-01" },
-      { publicKey: "c", createdAt: "2026-03-01" },
-      { publicKey: "a", createdAt: "2026-01-01" }
-    ])
-  ).toBe("c");
+  expect(latestPublicKey([{ publicKey: "c" }, { publicKey: "b" }, { publicKey: "a" }])).toBe("c");
 });

@@ -286,12 +286,13 @@ export function uploadMyBanner(file: File, token: string) {
   return uploadFile(`/users/me/banner`, file, token);
 }
 
+/** Newest first. No registration times: they would show when each device signed in. */
 export function getUserKeys(id: string, token: string) {
-  return request<{ id: string; publicKey: string; createdAt: string }[]>(`/users/${id}/keys`, { token });
+  return request<{ id: string; publicKey: string }[]>(`/users/${id}/keys`, { token });
 }
 
 export function addMyPublicKey(publicKey: string, token: string) {
-  return request<{ id: string; publicKey: string; createdAt: string }[]>(`/users/me/keys`, {
+  return request<{ id: string; publicKey: string }[]>(`/users/me/keys`, {
     method: "POST",
     body: { publicKey },
     token,
@@ -405,7 +406,8 @@ export function getE2eeConfig() {
 export type AccountDevice = {
   id: string;
   name: string;
-  lastSeenAt: string | null;
+  /** Always null: the server keeps no activity times (no-logs policy). */
+  lastSeenAt?: string | null;
   signedIn: boolean;
   /** On the account's current signed device list, as the server reads it. Display only. */
   trusted: boolean;

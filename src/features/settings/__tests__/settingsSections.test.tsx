@@ -148,7 +148,7 @@ describe("Devices", () => {
   const device = (overrides: Partial<{ id: string; name: string; trusted: boolean; current: boolean; signedIn: boolean }>) => ({
     id: "d1",
     name: "Orbit Desktop",
-    lastSeenAt: "2026-11-01T10:00:00.000Z",
+    lastSeenAt: null,
     signedIn: true,
     trusted: true,
     current: false,
@@ -171,6 +171,20 @@ describe("Devices", () => {
     expect(within(items[1]!).getByText("Orbit iOS")).toBeInTheDocument();
     expect(within(items[1]!).getByText("Not linked")).toBeInTheDocument();
     expect(screen.getByText(/signed in to your account but isn't linked/)).toBeInTheDocument();
+  });
+
+  it("shows each device's state but never an activity time (the server keeps none)", async () => {
+    api.getMyDevices.mockResolvedValue({
+      identityPublished: true,
+      deviceListVersion: 2,
+      devices: [device({ id: "a", current: true }), device({ id: "b", name: "Orbit iOS" }), device({ id: "c", name: "Old laptop", signedIn: false })]
+    });
+    renderSettings("privacy");
+    const items = within(await screen.findByRole("list", { name: "Your devices" })).getAllByRole("listitem");
+    expect(within(items[0]!).getByText("This device")).toBeInTheDocument();
+    expect(within(items[1]!).getByText("Signed in")).toBeInTheDocument();
+    expect(within(items[2]!).getByText("Signed out")).toBeInTheDocument();
+    expect(screen.queryByText(/last active|active now|never seen|\d{1,2}:\d{2}/i)).not.toBeInTheDocument();
   });
 
   it("warns when this device is waiting to be linked", async () => {
@@ -198,7 +212,7 @@ describe("Device actions (per-device keys)", () => {
   const device = (overrides: Partial<{ id: string; name: string; trusted: boolean; current: boolean; signedIn: boolean }>) => ({
     id: "d1",
     name: "Orbit Desktop",
-    lastSeenAt: "2026-11-01T10:00:00.000Z",
+    lastSeenAt: null,
     signedIn: true,
     trusted: true,
     current: false,
